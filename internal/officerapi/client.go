@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -166,4 +168,108 @@ func (c *Client) SubmitBids(ctx context.Context, req BidsRequest) (BidsResponse,
 	var out BidsResponse
 	err := c.do(ctx, http.MethodPost, "/api/officer/bids", req, &out)
 	return out, err
+}
+
+// --- POST /api/officer/manual-entry ---
+
+// ManualEntryRequest mirrors seekers-tracker's InsertLedgerEntryInput
+// exactly (src/lib/epgp/ledger-entry.ts) — ItemName is only meaningful
+// (and only sent) for Kind "gp".
+type ManualEntryRequest struct {
+	Kind        string  `json:"kind"`
+	CharacterID int     `json:"characterId"`
+	Activity    string  `json:"activity,omitempty"`
+	Tier        string  `json:"tier,omitempty"`
+	ItemName    string  `json:"itemName,omitempty"`
+	Points      float64 `json:"points"`
+	OccurredAt  string  `json:"occurredAt"`
+	Note        string  `json:"note"`
+}
+
+func (c *Client) SubmitManualEntry(ctx context.Context, req ManualEntryRequest) error {
+	return c.do(ctx, http.MethodPost, "/api/officer/manual-entry", req, nil)
+}
+
+// --- GET /api/officer/point-values ---
+
+type PointValue struct {
+	Activity string  `json:"activity"`
+	Points   float64 `json:"points"`
+}
+
+func (c *Client) FetchPointValues(ctx context.Context) (ep []PointValue, gp []PointValue, err error) {
+	var out struct {
+		EP []PointValue `json:"ep"`
+		GP []PointValue `json:"gp"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/officer/point-values", nil, &out); err != nil {
+		return nil, nil, err
+	}
+	return out.EP, out.GP, nil
+}
+
+// --- GET /api/officer/ledger ---
+
+// LedgerRow covers both EP rows (Activity set, ItemName/Tier empty) and
+// GP rows (ItemName/Tier set, Activity empty) — same union the site's own
+// /epgp/ledger page renders, just as JSON instead of a table.
+type LedgerRow struct {
+	ID            int     `json:"id"`
+	CharacterName string  `json:"characterName"`
+	OccurredAt    string  `json:"occurredAt"`
+	Activity      string  `json:"activity,omitempty"`
+	ItemName      string  `json:"itemName,omitempty"`
+	Tier          string  `json:"tier,omitempty"`
+	Points        float64 `json:"points"`
+	Note          *string `json:"note"`
+	Source        string  `json:"source"`
+	EnteredByName *string `json:"enteredByName"`
+}
+
+func (c *Client) FetchLedger(ctx context.Context, kind string, query string, page int) (rows []LedgerRow, hasNext bool, err error) {
+	params := url.Values{"kind": {kind}, "page": {strconv.Itoa(page)}}
+	if query != "" {
+		params.Set("q", query)
+	}
+	var out struct {
+		Rows    []LedgerRow `json:"rows"`
+		HasNext bool        `json:"hasNext"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/officer/ledger?"+params.Encode(), nil, &out); err != nil {
+		return nil, false, err
+	}
+	return out.Rows, out.HasNext, nil
+}
+
+// --- GET /api/officer/totals ---
+
+type TotalsRow struct {
+	ID                int      `json:"id"`
+	Name              string   `json:"name"`
+	CharType          string   `json:"charType"`
+	Status            string   `json:"status"`
+	MainCharacterName *string  `json:"mainCharacterName"`
+	EP                *float64 `json:"ep"`
+	GP                *float64 `json:"gp"`
+	EPDecay           *float64 `json:"epDecay"`
+	GPDecay           *float64 `json:"gpDecay"`
+	PriorityRating    *float64 `json:"priorityRating"`
+}
+
+func (c *Client) FetchTotals(ctx context.Context, query string) ([]TotalsRow, error) {
+	params := url.Values{}
+	if query != "" {
+		params.Set("q", query)
+	}
+	path := "/api/officer/totals"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+	var out struct {
+		Totals []TotalsRow `json:"totals"`
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Totals, nil
 }

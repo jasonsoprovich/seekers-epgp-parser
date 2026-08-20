@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CaptureBids, FetchKnownItems, SubmitBids } from "../wailsjs/go/main/App";
+import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
 import { useRoster } from "./useRoster";
 
@@ -25,6 +26,8 @@ export function BidsPanel() {
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [tieWarning, setTieWarning] = useState<string | null>(null);
+  const [winnerCount, setWinnerCount] = useState(1);
+  const [gratsCopied, setGratsCopied] = useState(false);
   const roster = useRoster();
 
   // Best-effort — Settings might not be configured yet, and a missing
@@ -60,16 +63,24 @@ export function BidsPanel() {
     setRows((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function setWinner(index: number) {
+  function toggleWinner(index: number) {
     setTieWarning(null);
-    setRows((prev) => prev.map((r, i) => ({ ...r, winner: i === index })));
+    setGratsCopied(false);
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, winner: !r.winner } : r)));
   }
 
+  // Picks the top `winnerCount` bids by tier rank then priority — covers
+  // a duplicate drop (same item, multiple copies) with more than one
+  // winner. If the cutoff between the last included and first excluded
+  // bid is an exact tie on both tier and priority, nothing is
+  // auto-selected — that's a real ambiguity the officer has to resolve by
+  // hand (checking the boxes directly), not something to guess at.
   function determineWinner() {
     setTieWarning(null);
+    setGratsCopied(false);
     const eligible = rows
       .map((r, i) => ({ i, r, priority: roster.resolve(r.characterName).priorityRating, rank: TIER_RANK[r.tier] }))
-      .filter((e) => e.rank !== undefined && e.priority !== null);
+      .filter((e): e is { i: number; r: BidRow; priority: number; rank: number } => e.rank !== undefined && e.priority !== null);
 
     if (eligible.length === 0) {
       setTieWarning("No row has both a resolved tier and a known priority to compare — pick a tier for each row and check the roster loaded.");
@@ -77,20 +88,31 @@ export function BidsPanel() {
       return;
     }
 
-    const maxRank = Math.max(...eligible.map((e) => e.rank));
-    const atMaxRank = eligible.filter((e) => e.rank === maxRank);
-    const maxPriority = Math.max(...atMaxRank.map((e) => e.priority as number));
-    const winners = atMaxRank.filter((e) => e.priority === maxPriority);
+    const sorted = eligible.slice().sort((a, b) => b.rank - a.rank || b.priority - a.priority);
+    const n = Math.min(Math.max(1, winnerCount), sorted.length);
+    const cutoff = sorted[n - 1];
+    const nextAfterCutoff = sorted[n];
 
-    if (winners.length > 1) {
-      const names = winners.map((w) => w.r.characterName).join(", ");
-      setTieWarning(`Exact tie on tier and priority between: ${names}. Pick the winner manually.`);
+    if (nextAfterCutoff && nextAfterCutoff.rank === cutoff.rank && nextAfterCutoff.priority === cutoff.priority) {
+      const tied = sorted
+        .filter((e) => e.rank === cutoff.rank && e.priority === cutoff.priority)
+        .map((e) => e.r.characterName)
+        .join(", ");
+      setTieWarning(`Exact tie on tier and priority at the cutoff for winner #${n}, between: ${tied}. Check the winner box(es) manually.`);
       setRows((prev) => prev.map((r) => ({ ...r, winner: false })));
       return;
     }
 
-    const winnerIndex = winners[0].i;
-    setRows((prev) => prev.map((r, i) => ({ ...r, winner: i === winnerIndex })));
+    const winnerIndices = new Set(sorted.slice(0, n).map((e) => e.i));
+    setRows((prev) => prev.map((r, i) => ({ ...r, winner: winnerIndices.has(i) })));
+  }
+
+  async function onCopyGrats() {
+    const winners = rows.filter((r) => r.winner);
+    if (winners.length === 0) return;
+    const text = winners.map((r) => `Grats ${r.characterName} on ${capturedItem}!`).join("\n");
+    await ClipboardSetText(text);
+    setGratsCopied(true);
   }
 
   async function onSubmit() {
@@ -100,8 +122,8 @@ export function BidsPanel() {
       setError(`Pick a tier for: ${invalid.map((r) => r.characterName).join(", ")} before submitting.`);
       return;
     }
-    if (rows.filter((r) => r.winner).length !== 1) {
-      setError("Mark exactly one row as the winner before submitting — click Determine Winner or pick one manually.");
+    if (rows.filter((r) => r.winner).length === 0) {
+      setError("Mark at least one row as the winner before submitting — click Determine Winner or check one manually.");
       return;
     }
     setSubmitting(true);
@@ -122,6 +144,8 @@ export function BidsPanel() {
     }
   }
 
+  const winners = rows.filter((r) => r.winner);
+
   return (
     <div>
       <div className="panel-header">
@@ -132,6 +156,24 @@ export function BidsPanel() {
       {tieWarning && <div className="warning">{tieWarning}</div>}
       {submitResult && <div className="success">{submitResult}</div>}
       {roster.error && <div className="warning">Couldn't load the roster for Main/Priority lookup: {roster.error}</div>}
+
+      {winners.length > 0 && (
+        <div className="winner-summary">
+          <div>
+            <strong>Winner{winners.length > 1 ? "s" : ""}:</strong>
+            <ul>
+              {winners.map((r) => (
+                <li key={r.characterName}>
+                  Grats {r.characterName} on {capturedItem}!
+                </li>
+              ))}
+            </ul>
+          </div>
+          <button className="secondary" onClick={onCopyGrats}>
+            {gratsCopied ? "Copied" : "Copy Grats Message"}
+          </button>
+        </div>
+      )}
 
       <div className="toolbar">
         <input
@@ -163,8 +205,19 @@ export function BidsPanel() {
             <span style={{ color: "#9ca3af", fontSize: 13 }}>
               {capturedItem} — {rows.length} bid(s)
             </span>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
+              Winners:
+              <input
+                type="text"
+                inputMode="numeric"
+                value={winnerCount}
+                onChange={(e) => setWinnerCount(Math.max(1, Number(e.target.value.replace(/\D/g, "")) || 1))}
+                style={{ width: 40, textAlign: "center" }}
+                title="How many winners to pick — more than 1 for a duplicate drop"
+              />
+            </label>
             <button className="secondary" onClick={determineWinner}>
-              Determine Winner
+              Determine Winner{winnerCount > 1 ? "s" : ""}
             </button>
             <button className="primary" onClick={onSubmit} disabled={submitting}>
               {submitting ? "Submitting…" : "Submit to site"}
@@ -189,7 +242,7 @@ export function BidsPanel() {
                 return (
                   <tr key={i} className={[r.ambiguous ? "ambiguous" : "", r.superseded ? "superseded" : "", r.winner ? "winner" : ""].join(" ").trim()}>
                     <td>
-                      <input type="radio" name="bid-winner" checked={r.winner} onChange={() => setWinner(i)} />
+                      <input type="checkbox" checked={r.winner} onChange={() => toggleWinner(i)} />
                     </td>
                     <td>{r.characterName}</td>
                     <td style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>{resolved.matched ? resolved.mainCharacterName : "no match"}</td>

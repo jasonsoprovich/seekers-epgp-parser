@@ -161,6 +161,28 @@ input[type="password"] {
   margin-bottom: 12px;
 }
 
+.winner-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.winner-summary strong {
+  color: #10b981;
+}
+
+.winner-summary ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
 select {
   appearance: none;
   -webkit-appearance: none;

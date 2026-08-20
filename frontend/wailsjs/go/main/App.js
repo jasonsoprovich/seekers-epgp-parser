@@ -14,8 +14,20 @@ export function FetchKnownItems() {
   return window['go']['main']['App']['FetchKnownItems']();
 }
 
+export function FetchLedger(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FetchLedger'](arg1, arg2, arg3);
+}
+
+export function FetchPointValues() {
+  return window['go']['main']['App']['FetchPointValues']();
+}
+
 export function FetchRoster() {
   return window['go']['main']['App']['FetchRoster']();
+}
+
+export function FetchTotals(arg1) {
+  return window['go']['main']['App']['FetchTotals'](arg1);
 }
 
 export function GetLogPath() {
@@ -44,6 +56,10 @@ export function SubmitAttendance(arg1, arg2, arg3) {
 
 export function SubmitBids(arg1, arg2) {
   return window['go']['main']['App']['SubmitBids'](arg1, arg2);
+}
+
+export function SubmitManualEntry(arg1) {
+  return window['go']['main']['App']['SubmitManualEntry'](arg1);
 }
 
 export function TestConnection() {

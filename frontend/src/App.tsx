@@ -3,9 +3,11 @@ import "./App.css";
 import { GetLogPath } from "../wailsjs/go/main/App";
 import { AttendancePanel } from "./AttendancePanel";
 import { BidsPanel } from "./BidsPanel";
+import { BrowsePanel } from "./BrowsePanel";
+import { ManualEntryPanel } from "./ManualEntryPanel";
 import { SettingsPanel } from "./SettingsPanel";
 
-type Tab = "attendance" | "bids" | "settings";
+type Tab = "attendance" | "bids" | "manual" | "browse" | "settings";
 
 function App() {
   const [tab, setTab] = useState<Tab>("attendance");
@@ -26,6 +28,12 @@ function App() {
         <button className={`nav-button ${tab === "bids" ? "active" : ""}`} onClick={() => setTab("bids")}>
           Bids
         </button>
+        <button className={`nav-button ${tab === "manual" ? "active" : ""}`} onClick={() => setTab("manual")}>
+          Manual Entry
+        </button>
+        <button className={`nav-button ${tab === "browse" ? "active" : ""}`} onClick={() => setTab("browse")}>
+          Browse
+        </button>
         <button className={`nav-button ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>
           Settings
         </button>
@@ -34,6 +42,8 @@ function App() {
       <div className="main">
         {tab === "attendance" && <AttendancePanel />}
         {tab === "bids" && <BidsPanel />}
+        {tab === "manual" && <ManualEntryPanel />}
+        {tab === "browse" && <BrowsePanel />}
         {tab === "settings" && <SettingsPanel onLogPathChange={setLogPath} />}
       </div>
     </div>

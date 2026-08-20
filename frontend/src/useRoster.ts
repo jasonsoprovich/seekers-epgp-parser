@@ -8,12 +8,16 @@ export type ResolvedCharacter = { mainCharacterName: string | null; priorityRati
 // fixing a typo'd name in an editable table updates its Main/Priority
 // columns immediately without another round trip to the site.
 export function useRoster() {
+  const [characters, setCharacters] = useState<officerapi.Character[]>([]);
   const [byLowerName, setByLowerName] = useState<Map<string, officerapi.Character>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     FetchRoster()
-      .then((roster) => setByLowerName(new Map(roster.map((c) => [c.name.toLowerCase(), c]))))
+      .then((roster) => {
+        setCharacters(roster);
+        setByLowerName(new Map(roster.map((c) => [c.name.toLowerCase(), c])));
+      })
       .catch((err) => setError(String(err)));
   }, []);
 
@@ -24,5 +28,5 @@ export function useRoster() {
     return { mainCharacterName, priorityRating: c.priorityRating ?? null, matched: true };
   }
 
-  return { resolve, error, loaded: byLowerName.size > 0 };
+  return { resolve, characters, error, loaded: byLowerName.size > 0 };
 }

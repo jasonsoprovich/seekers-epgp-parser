@@ -130,10 +130,20 @@ export function AttendancePanel() {
             <tbody>
               {rows.map((r, i) => {
                 const resolved = roster.resolve(r.name);
+                const canonical = roster.characters.find((c) => c.name.toLowerCase() === r.name.trim().toLowerCase());
                 return (
                   <tr key={i}>
                     <td>
-                      <input type="text" value={r.name} onChange={(e) => updateName(i, e.target.value)} placeholder="Character name" />
+                      <select value={canonical?.name ?? ""} onChange={(e) => updateName(i, e.target.value)}>
+                        <option value="" disabled>
+                          {r.name.trim() && !canonical ? `${r.name} — pick their real character` : "— pick character —"}
+                        </option>
+                        {roster.characters.map((c) => (
+                          <option key={c.id} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
                       {r.name.trim() ? (resolved.matched ? resolved.mainCharacterName : "no match") : "—"}

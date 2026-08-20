@@ -125,6 +125,60 @@ func (a *App) FetchRoster() ([]officerapi.Character, error) {
 	return client.FetchCharacters(a.ctx)
 }
 
+// --- Manual Entry ---
+
+// PointValues wraps FetchPointValues' two lists into one Wails-friendly
+// return — Wails bindings only carry a single value plus a trailing
+// error, so a bare (ep, gp, error) signature silently drops gp from the
+// generated TS binding.
+type PointValues struct {
+	EP []officerapi.PointValue `json:"ep"`
+	GP []officerapi.PointValue `json:"gp"`
+}
+
+func (a *App) FetchPointValues() (PointValues, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return PointValues{}, err
+	}
+	ep, gp, err := client.FetchPointValues(a.ctx)
+	return PointValues{EP: ep, GP: gp}, err
+}
+
+func (a *App) SubmitManualEntry(req officerapi.ManualEntryRequest) error {
+	client, err := a.officerClient()
+	if err != nil {
+		return err
+	}
+	return client.SubmitManualEntry(a.ctx, req)
+}
+
+// --- Browse ---
+
+// LedgerPage wraps FetchLedger's (rows, hasNext) pair into one
+// Wails-friendly return — same reason as PointValues above.
+type LedgerPage struct {
+	Rows    []officerapi.LedgerRow `json:"rows"`
+	HasNext bool                   `json:"hasNext"`
+}
+
+func (a *App) FetchLedger(kind string, query string, page int) (LedgerPage, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return LedgerPage{}, err
+	}
+	rows, hasNext, err := client.FetchLedger(a.ctx, kind, query, page)
+	return LedgerPage{Rows: rows, HasNext: hasNext}, err
+}
+
+func (a *App) FetchTotals(query string) ([]officerapi.TotalsRow, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.FetchTotals(a.ctx, query)
+}
+
 func (a *App) readLog() (string, error) {
 	if a.logPath == "" {
 		return "", errors.New("no log file selected — use Settings to pick one first")

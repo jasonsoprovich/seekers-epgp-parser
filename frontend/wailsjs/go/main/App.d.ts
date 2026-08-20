@@ -10,7 +10,13 @@ export function CaptureBids(arg1:string):Promise<Array<main.BidRow>>;
 
 export function FetchKnownItems():Promise<Array<string>>;
 
+export function FetchLedger(arg1:string,arg2:string,arg3:number):Promise<main.LedgerPage>;
+
+export function FetchPointValues():Promise<main.PointValues>;
+
 export function FetchRoster():Promise<Array<officerapi.Character>>;
+
+export function FetchTotals(arg1:string):Promise<Array<officerapi.TotalsRow>>;
 
 export function GetLogPath():Promise<string>;
 
@@ -25,5 +31,7 @@ export function SelectLogFile():Promise<string>;
 export function SubmitAttendance(arg1:string,arg2:string,arg3:Array<string>):Promise<officerapi.AttendanceResponse>;
 
 export function SubmitBids(arg1:string,arg2:Array<officerapi.BidEntry>):Promise<officerapi.BidsResponse>;
+
+export function SubmitManualEntry(arg1:officerapi.ManualEntryRequest):Promise<void>;
 
 export function TestConnection():Promise<number>;
