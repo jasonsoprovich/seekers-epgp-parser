@@ -10,8 +10,8 @@ import (
 var bidsSample string
 
 func TestCaptureBids_RealSample(t *testing.T) {
-	start := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.UTC)
-	stop := time.Date(2026, time.August, 18, 0, 0, 0, 0, time.UTC)
+	start := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.Local)
+	stop := time.Date(2026, time.August, 18, 0, 0, 0, 0, time.Local)
 
 	candidates := CaptureBids(bidsSample, start, stop)
 
@@ -66,8 +66,8 @@ func TestCaptureBids_WindowExcludesOutsideTells(t *testing.T) {
 	raw := "[Mon Aug 17 22:19:48 2026] Rizy tells you, 'high'\n" +
 		"[Mon Aug 17 22:30:00 2026] Rizy tells you, 'low'\n"
 
-	start := time.Date(2026, time.August, 17, 22, 19, 0, 0, time.UTC)
-	stop := time.Date(2026, time.August, 17, 22, 20, 0, 0, time.UTC)
+	start := time.Date(2026, time.August, 17, 22, 19, 0, 0, time.Local)
+	stop := time.Date(2026, time.August, 17, 22, 20, 0, 0, time.Local)
 
 	candidates := CaptureBids(raw, start, stop)
 	if len(candidates) != 1 {
@@ -85,12 +85,12 @@ func TestFindAnnouncementStart_RealSample(t *testing.T) {
 	// the window — it should resolve to the OPENING call (22:19:44), or
 	// every bid placed before the reminder (18 of 19 in this sample) would
 	// be silently excluded.
-	cutoff := time.Date(2026, time.August, 17, 22, 23, 0, 0, time.UTC)
+	cutoff := time.Date(2026, time.August, 17, 22, 23, 0, 0, time.Local)
 	found, ok := FindAnnouncementStart(bidsSample, "Soul Essence of Aten Ha Ra", cutoff)
 	if !ok {
 		t.Fatal("expected an announcement to be found")
 	}
-	want := time.Date(2026, time.August, 17, 22, 19, 44, 0, time.UTC)
+	want := time.Date(2026, time.August, 17, 22, 19, 44, 0, time.Local)
 	if !found.Equal(want) {
 		t.Errorf("found = %v, want %v (the opening call, not the last-call reminder)", found, want)
 	}
@@ -102,19 +102,19 @@ func TestFindAnnouncementStart_DistantReannouncementStartsFreshWindow(t *testing
 		"[Mon Aug 17 22:30:00 2026] You say to your guild, 'Ring of the Ancients send tells'\n" +
 		"[Mon Aug 17 22:31:00 2026] Darkclaw tells you, 'high'\n"
 
-	cutoff := time.Date(2026, time.August, 17, 22, 32, 0, 0, time.UTC)
+	cutoff := time.Date(2026, time.August, 17, 22, 32, 0, 0, time.Local)
 	found, ok := FindAnnouncementStart(raw, "Ring of the Ancients", cutoff)
 	if !ok {
 		t.Fatal("expected an announcement to be found")
 	}
-	want := time.Date(2026, time.August, 17, 22, 30, 0, 0, time.UTC)
+	want := time.Date(2026, time.August, 17, 22, 30, 0, 0, time.Local)
 	if !found.Equal(want) {
 		t.Errorf("found = %v, want %v (the second drop's own call, 2.5 hours after the first — must not merge with it)", found, want)
 	}
 }
 
 func TestFindAnnouncementStart_IgnoresOtherOfficersAndOtherItems(t *testing.T) {
-	cutoff := time.Date(2026, time.August, 17, 22, 21, 0, 0, time.UTC)
+	cutoff := time.Date(2026, time.August, 17, 22, 21, 0, 0, time.Local)
 	// Only "Armguard of Shadows" send-tells lines exist at/before this
 	// cutoff (from Mendacious, not "You") — none should match a search
 	// for a different item.
@@ -130,7 +130,7 @@ func TestFindAnnouncementStart_NoMatchReturnsFalse(t *testing.T) {
 }
 
 func TestResolveLatestPerCharacter_LastBidWins(t *testing.T) {
-	t1 := time.Date(2026, time.August, 17, 22, 19, 0, 0, time.UTC)
+	t1 := time.Date(2026, time.August, 17, 22, 19, 0, 0, time.Local)
 	t2 := t1.Add(time.Minute)
 	candidates := []BidCandidate{
 		{CharacterName: "Rizy", OccurredAt: t1, Tier: TierHigh, RawMessage: "high"},

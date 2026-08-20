@@ -1,10 +1,12 @@
-// Package config persists the officer's server URL and API key
-// (Settings screen) to a small JSON file in the OS user-config dir, so the
-// app doesn't ask for them again on every launch. There's exactly one
-// officer per install of this desktop app, so this is deliberately global,
-// unencrypted, plain-file state — not a per-raid-night thing worth a
-// database, and not sensitive enough (a scoped, revocable API key, not a
-// site password) to justify OS keychain integration.
+// Package config persists the officer's API key (Settings screen) to a
+// small JSON file in the OS user-config dir, so the app doesn't ask for
+// it again on every launch. There's exactly one officer per install of
+// this desktop app, so this is deliberately global, unencrypted,
+// plain-file state — not a per-raid-night thing worth a database, and not
+// sensitive enough (a scoped, revocable API key, not a site password) to
+// justify OS keychain integration. The server this app talks to is fixed
+// (see officerapi.ServerURL) — there's only ever one seekers-tracker
+// instance, so it's not a Settings field.
 package config
 
 import (
@@ -14,8 +16,7 @@ import (
 )
 
 type Settings struct {
-	ServerURL string `json:"serverUrl"`
-	APIKey    string `json:"apiKey"`
+	APIKey string `json:"apiKey"`
 }
 
 func configPath() (string, error) {

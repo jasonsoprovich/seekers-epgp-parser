@@ -39,7 +39,15 @@ func splitLogLines(raw string) []LogLine {
 		if m == nil {
 			continue
 		}
-		t, err := time.Parse(logTimeLayout, m[1])
+		// ParseInLocation, not Parse: the log has no timezone of its own —
+		// its wall-clock numbers ARE the officer's local time, since the EQ
+		// client and this app run on the same machine. Parse() defaults to
+		// UTC, which tags e.g. "10:19:48 PM" as 22:19:48 UTC; formatting
+		// that to RFC3339 and displaying it back in the frontend's actual
+		// local zone then shows the wrong wall-clock time (observed: a
+		// 6-hour shift on a UTC-6 machine, log said 22:19:48, app showed
+		// 4:19:48 PM instead of 10:19:48 PM).
+		t, err := time.ParseInLocation(logTimeLayout, m[1], time.Local)
 		if err != nil {
 			continue
 		}

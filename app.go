@@ -35,7 +35,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// --- Settings: log file selection ---
+// --- Settings ---
 
 func (a *App) SelectLogFile() (string, error) {
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
@@ -57,14 +57,19 @@ func (a *App) GetLogPath() string {
 	return a.logPath
 }
 
-// --- Settings: seekers-tracker connection ---
-
 func (a *App) GetSettings() (config.Settings, error) {
 	return config.Load()
 }
 
-func (a *App) SaveSettings(serverURL string, apiKey string) error {
-	return config.Save(config.Settings{ServerURL: serverURL, APIKey: apiKey})
+func (a *App) SaveSettings(apiKey string) error {
+	return config.Save(config.Settings{APIKey: apiKey})
+}
+
+// OpenAppKeyPage opens the site's app-key generation page in the
+// officer's default browser, so getting set up is "click this, paste the
+// key back in" rather than typing a URL by hand.
+func (a *App) OpenAppKeyPage() {
+	runtime.BrowserOpenURL(a.ctx, officerapi.ServerURL+"/epgp/app-key")
 }
 
 func (a *App) officerClient() (*officerapi.Client, error) {
@@ -72,16 +77,16 @@ func (a *App) officerClient() (*officerapi.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.ServerURL == "" || s.APIKey == "" {
-		return nil, errors.New("set your server URL and API key in Settings first")
+	if s.APIKey == "" {
+		return nil, errors.New("paste your API key into Settings first")
 	}
-	return officerapi.New(s.ServerURL, s.APIKey), nil
+	return officerapi.New(s.APIKey), nil
 }
 
-// TestConnection confirms the saved server URL + API key actually work by
-// pulling the roster (the same call the Attendance/Bids submit buttons
-// eventually validate names against) — the Settings screen's "did I set
-// this up right" check.
+// TestConnection confirms the saved API key actually works by pulling the
+// roster (the same call the Attendance/Bids submit buttons eventually
+// validate names against) — the Settings screen's "did I set this up
+// right" check.
 func (a *App) TestConnection() (int, error) {
 	client, err := a.officerClient()
 	if err != nil {
@@ -105,6 +110,19 @@ func (a *App) FetchKnownItems() ([]string, error) {
 		return nil, err
 	}
 	return client.FetchItems(a.ctx)
+}
+
+// FetchRoster backs the Main-character and Priority columns on both the
+// Attendance and Bids tables — the frontend fetches this once and
+// resolves each editable row's name against it live (client-side), so a
+// typo'd name fixed in the table updates its Main/Priority immediately
+// without another round trip.
+func (a *App) FetchRoster() ([]officerapi.Character, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.FetchCharacters(a.ctx)
 }
 
 func (a *App) readLog() (string, error) {
@@ -225,11 +243,11 @@ func (a *App) CaptureBids(itemName string) ([]BidRow, error) {
 	return rows, nil
 }
 
-// SubmitBids charges GP for exactly the rows the officer is left with
-// after editing tiers/removing rows in the Bids tab (same "submit what's
-// on screen" contract as SubmitAttendance) — one row per character/tier
-// pair, so a multi-winner split (two of the same item dropped) is just
-// two remaining rows.
+// SubmitBids records every remaining row from the Bids tab as a bid (won
+// or lost) and charges GP to whichever one is flagged as the winner —
+// exactly one entry must have IsWinner set, which the frontend's
+// "Determine Winner" (tier first, then priority) picks by default but the
+// officer can override before calling this.
 func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (officerapi.BidsResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
@@ -240,4 +258,3 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (office
 		Entries:  entries,
 	})
 }
-

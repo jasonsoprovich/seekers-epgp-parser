@@ -162,11 +162,16 @@ input[type="password"] {
 }
 
 select {
-  background: #10151f;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #10151f;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ca3af' stroke-width='1.5' fill='none' fill-rule='evenodd'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
   border: 1px solid #374151;
   border-radius: 6px;
   color: #e5e7eb;
-  padding: 6px 8px;
+  padding: 6px 24px 6px 8px;
   font-size: 13px;
 }
 
@@ -198,6 +203,10 @@ tr.ambiguous td {
 
 tr.superseded td {
   opacity: 0.5;
+}
+
+tr.winner td {
+  background: rgba(16, 185, 129, 0.1);
 }
 
 .badge {

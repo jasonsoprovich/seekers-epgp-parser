@@ -14,6 +14,10 @@ export function FetchKnownItems() {
   return window['go']['main']['App']['FetchKnownItems']();
 }
 
+export function FetchRoster() {
+  return window['go']['main']['App']['FetchRoster']();
+}
+
 export function GetLogPath() {
   return window['go']['main']['App']['GetLogPath']();
 }
@@ -22,8 +26,12 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
-export function SaveSettings(arg1, arg2) {
-  return window['go']['main']['App']['SaveSettings'](arg1, arg2);
+export function OpenAppKeyPage() {
+  return window['go']['main']['App']['OpenAppKeyPage']();
+}
+
+export function SaveSettings(arg1) {
+  return window['go']['main']['App']['SaveSettings'](arg1);
 }
 
 export function SelectLogFile() {

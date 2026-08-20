@@ -30,7 +30,7 @@ func TestParseAttendance_RealSample(t *testing.T) {
 		t.Fatalf("len(names) = %d, want 42", len(snap.Names))
 	}
 
-	wantTime := time.Date(2026, time.August, 19, 22, 35, 21, 0, time.UTC)
+	wantTime := time.Date(2026, time.August, 19, 22, 35, 21, 0, time.Local)
 	if !snap.OccurredAt.Equal(wantTime) {
 		t.Errorf("occurredAt = %v, want %v", snap.OccurredAt, wantTime)
 	}

@@ -16,15 +16,19 @@ import (
 	"time"
 )
 
+// ServerURL is the one seekers-tracker instance this app talks to — not
+// user-configurable, since there's only ever one.
+const ServerURL = "https://seekers.fetchinglogic.com"
+
 type Client struct {
 	baseURL string
 	apiKey  string
 	http    *http.Client
 }
 
-func New(serverURL, apiKey string) *Client {
+func New(apiKey string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(serverURL, "/"),
+		baseURL: strings.TrimRight(ServerURL, "/"),
 		apiKey:  apiKey,
 		http:    &http.Client{Timeout: 15 * time.Second},
 	}
@@ -57,7 +61,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("couldn't reach %s — check the server URL in Settings: %w", c.baseURL, err)
+		return fmt.Errorf("couldn't reach %s — check your internet connection: %w", c.baseURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -85,11 +89,13 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 // --- GET /api/officer/characters ---
 
 type Character struct {
-	ID              int    `json:"id"`
-	Name            string `json:"name"`
-	CharType        string `json:"charType"`
-	MainCharacterID *int   `json:"mainCharacterId"`
-	Status          string `json:"status"`
+	ID                int      `json:"id"`
+	Name              string   `json:"name"`
+	CharType          string   `json:"charType"`
+	MainCharacterID   *int     `json:"mainCharacterId"`
+	Status            string   `json:"status"`
+	MainCharacterName *string  `json:"mainCharacterName"`
+	PriorityRating    *float64 `json:"priorityRating"`
 }
 
 func (c *Client) FetchCharacters(ctx context.Context) ([]Character, error) {
@@ -140,6 +146,7 @@ type BidEntry struct {
 	CharacterName string `json:"characterName"`
 	Tier          string `json:"tier"`
 	OccurredAt    string `json:"occurredAt"`
+	IsWinner      bool   `json:"isWinner"`
 }
 
 type BidsRequest struct {
@@ -149,6 +156,7 @@ type BidsRequest struct {
 }
 
 type BidsResponse struct {
+	LootEventID  int      `json:"lootEventId"`
 	Inserted     int      `json:"inserted"`
 	Unmatched    []string `json:"unmatched"`
 	InvalidTiers []string `json:"invalidTiers"`

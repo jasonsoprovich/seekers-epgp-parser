@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import "./App.css";
-import { GetLogPath, SelectLogFile } from "../wailsjs/go/main/App";
+import { GetLogPath } from "../wailsjs/go/main/App";
 import { AttendancePanel } from "./AttendancePanel";
 import { BidsPanel } from "./BidsPanel";
 import { SettingsPanel } from "./SettingsPanel";
@@ -11,14 +11,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("attendance");
   const [logPath, setLogPath] = useState("");
 
-  async function onPickLogFile() {
-    const path = await SelectLogFile();
-    if (path) setLogPath(path);
-  }
-
-  // Pick up whatever was already selected before this component mounted,
-  // so the status line at the bottom of the sidebar never lies about
-  // what's active.
+  // Refreshed whenever Settings changes it — see SettingsPanel's onLogPathChange.
   useEffect(() => {
     GetLogPath().then((p) => p && setLogPath(p));
   }, []);
@@ -36,17 +29,12 @@ function App() {
         <button className={`nav-button ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>
           Settings
         </button>
-        <div style={{ marginTop: 16 }}>
-          <button className="secondary" onClick={onPickLogFile} style={{ width: "100%" }}>
-            Select Log File
-          </button>
-        </div>
-        <div className="log-status">{logPath ? logPath : "No log file selected"}</div>
+        <div className="log-status">{logPath ? logPath : "No log file selected — see Settings"}</div>
       </div>
       <div className="main">
         {tab === "attendance" && <AttendancePanel />}
         {tab === "bids" && <BidsPanel />}
-        {tab === "settings" && <SettingsPanel />}
+        {tab === "settings" && <SettingsPanel onLogPathChange={setLogPath} />}
       </div>
     </div>
   );

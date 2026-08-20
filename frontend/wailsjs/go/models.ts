@@ -1,7 +1,6 @@
 export namespace config {
 	
 	export class Settings {
-	    serverUrl: string;
 	    apiKey: string;
 	
 	    static createFrom(source: any = {}) {
@@ -10,7 +9,6 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.serverUrl = source["serverUrl"];
 	        this.apiKey = source["apiKey"];
 	    }
 	}
@@ -82,6 +80,7 @@ export namespace officerapi {
 	    characterName: string;
 	    tier: string;
 	    occurredAt: string;
+	    isWinner: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new BidEntry(source);
@@ -92,9 +91,11 @@ export namespace officerapi {
 	        this.characterName = source["characterName"];
 	        this.tier = source["tier"];
 	        this.occurredAt = source["occurredAt"];
+	        this.isWinner = source["isWinner"];
 	    }
 	}
 	export class BidsResponse {
+	    lootEventId: number;
 	    inserted: number;
 	    unmatched: string[];
 	    invalidTiers: string[];
@@ -105,9 +106,34 @@ export namespace officerapi {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.lootEventId = source["lootEventId"];
 	        this.inserted = source["inserted"];
 	        this.unmatched = source["unmatched"];
 	        this.invalidTiers = source["invalidTiers"];
+	    }
+	}
+	export class Character {
+	    id: number;
+	    name: string;
+	    charType: string;
+	    mainCharacterId?: number;
+	    status: string;
+	    mainCharacterName?: string;
+	    priorityRating?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Character(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.charType = source["charType"];
+	        this.mainCharacterId = source["mainCharacterId"];
+	        this.status = source["status"];
+	        this.mainCharacterName = source["mainCharacterName"];
+	        this.priorityRating = source["priorityRating"];
 	    }
 	}
 

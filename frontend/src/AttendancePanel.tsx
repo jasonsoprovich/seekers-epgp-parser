@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CaptureAttendance, SubmitAttendance } from "../wailsjs/go/main/App";
 import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
+import { useRoster } from "./useRoster";
 
 type EditableRow = { name: string };
 
@@ -18,14 +19,14 @@ export function AttendancePanel() {
   const [activity, setActivity] = useState(ACTIVITIES[0]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const roster = useRoster();
 
   async function onCapture() {
     setPending(true);
     setError(null);
-    setCopied(false);
     setSubmitResult(null);
     try {
       const result = await CaptureAttendance();
@@ -48,6 +49,10 @@ export function AttendancePanel() {
     setRows((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function addRow() {
+    setRows((prev) => [...prev, { name: "" }]);
+  }
+
   async function onCopy() {
     if (!snapshot) return;
     const lines = rows.map((r) => `${r.name}\t${snapshot.occurredAt}`);
@@ -61,7 +66,7 @@ export function AttendancePanel() {
     setSubmitResult(null);
     setError(null);
     try {
-      const names = rows.map((r) => r.name).filter(Boolean);
+      const names = rows.map((r) => r.name.trim()).filter(Boolean);
       const result = await SubmitAttendance(activity, snapshot.occurredAt, names);
       const unmatchedNote = result.unmatched.length > 0 ? ` — no match for: ${result.unmatched.join(", ")}` : "";
       setSubmitResult(`Recorded ${activity} for ${result.inserted} character(s).${unmatchedNote}`);
@@ -83,6 +88,7 @@ export function AttendancePanel() {
 
       {error && <div className="error">{error}</div>}
       {submitResult && <div className="success">{submitResult}</div>}
+      {roster.error && <div className="warning">Couldn't load the roster for Main/Priority lookup: {roster.error}</div>}
       {snapshot?.warnings.map((w, i) => (
         <div className="warning" key={i}>
           {w}
@@ -105,6 +111,9 @@ export function AttendancePanel() {
             <button className="primary" onClick={onSubmit} disabled={submitting || rows.length === 0}>
               {submitting ? "Submitting…" : "Submit to site"}
             </button>
+            <button className="secondary" onClick={addRow}>
+              + Add row
+            </button>
             <button className="secondary" onClick={onCopy}>
               {copied ? "Copied" : "Copy to clipboard"}
             </button>
@@ -112,28 +121,35 @@ export function AttendancePanel() {
           <table>
             <thead>
               <tr>
-                <th>Name</th>
+                <th>Character</th>
+                <th>Main</th>
                 <th>Timestamp</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={i}>
-                  <td>
-                    <input type="text" value={r.name} onChange={(e) => updateName(i, e.target.value)} />
-                  </td>
-                  <td>{new Date(snapshot.occurredAt).toLocaleTimeString()}</td>
-                  <td>
-                    <button className="danger" onClick={() => removeRow(i)}>
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((r, i) => {
+                const resolved = roster.resolve(r.name);
+                return (
+                  <tr key={i}>
+                    <td>
+                      <input type="text" value={r.name} onChange={(e) => updateName(i, e.target.value)} placeholder="Character name" />
+                    </td>
+                    <td style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
+                      {r.name.trim() ? (resolved.matched ? resolved.mainCharacterName : "no match") : "—"}
+                    </td>
+                    <td>{new Date(snapshot.occurredAt).toLocaleTimeString()}</td>
+                    <td>
+                      <button className="danger" onClick={() => removeRow(i)}>
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="empty">
+                  <td colSpan={4} className="empty">
                     No names left — every row was removed.
                   </td>
                 </tr>
@@ -143,9 +159,7 @@ export function AttendancePanel() {
         </>
       )}
 
-      {!snapshot && !error && (
-        <div className="empty">Run "/who guild" in-game, then click Capture Attendance.</div>
-      )}
+      {!snapshot && !error && <div className="empty">Run "/who guild" in-game, then click Capture Attendance.</div>}
     </div>
   );
 }
