@@ -14,19 +14,31 @@ var tellRe = regexp.MustCompile(`^(\S+) tells you, '(.*)'$`)
 // announcing a different item. See FindAnnouncementStart.
 var ownChatRe = regexp.MustCompile(`^You .*, '(.*)'$`)
 
-// FindAnnouncementStart returns the timestamp of the most recent line at
-// or before cutoff where the log owner announced this item for bids — a
-// "You ..., '<message>'" line whose message contains both "send tells"
-// and the item name, case-insensitively (matches both the opening call
-// and a later "- last call" repeat; the LAST one at/before cutoff wins,
-// since that's the actual start of the final bidding window). ok is false
-// if no such line exists, meaning the officer hasn't said "send tells"
-// for this item yet, or the item name doesn't match what they typed.
+// How far apart two "send tells" announcements for the same item can be
+// and still count as one bidding round (the opening call and a later
+// "- last call" reminder — 2.5 minutes apart in the real sample) rather
+// than two separate rounds (the same item name dropping again later in
+// the raid). A reminder must NOT reset the window: bids already collected
+// between the opening call and the reminder are still real bids.
+const announcementSessionGap = 10 * time.Minute
+
+// FindAnnouncementStart returns the timestamp of the EARLIEST line in the
+// most recent unbroken run of "send tells" announcements for this item at
+// or before cutoff — a "You ..., '<message>'" line whose message contains
+// both "send tells" and the item name, case-insensitively. A "- last
+// call" repeat within announcementSessionGap of the previous one extends
+// the window backward to the opening call instead of restarting it; a gap
+// larger than that starts a fresh run (a later, unrelated drop of the
+// same item name). ok is false if no such line exists at all, meaning the
+// officer hasn't said "send tells" for this item yet, or the item name
+// doesn't match what they typed.
 func FindAnnouncementStart(raw string, itemName string, cutoff time.Time) (foundAt time.Time, ok bool) {
 	item := strings.ToLower(strings.TrimSpace(itemName))
 	if item == "" {
 		return time.Time{}, false
 	}
+
+	var times []time.Time
 	for _, l := range splitLogLines(raw) {
 		if l.Time.After(cutoff) {
 			break
@@ -36,12 +48,22 @@ func FindAnnouncementStart(raw string, itemName string, cutoff time.Time) (found
 			continue
 		}
 		msg := strings.ToLower(m[1])
-		if !strings.Contains(msg, "send tells") || !strings.Contains(msg, item) {
-			continue
+		if strings.Contains(msg, "send tells") && strings.Contains(msg, item) {
+			times = append(times, l.Time)
 		}
-		foundAt, ok = l.Time, true
 	}
-	return foundAt, ok
+	if len(times) == 0 {
+		return time.Time{}, false
+	}
+
+	start := times[len(times)-1]
+	for i := len(times) - 2; i >= 0; i-- {
+		if start.Sub(times[i]) > announcementSessionGap {
+			break
+		}
+		start = times[i]
+	}
+	return start, true
 }
 
 // BidCandidate is one incoming tell that looked like a bid during a

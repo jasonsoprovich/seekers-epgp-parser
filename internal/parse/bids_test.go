@@ -80,16 +80,36 @@ func TestCaptureBids_WindowExcludesOutsideTells(t *testing.T) {
 
 func TestFindAnnouncementStart_RealSample(t *testing.T) {
 	// Cutoff after the "- last call" repeat (22:22:18) but before the
-	// grats/close line (22:23:18) — the announcement should resolve to
-	// the LAST "send tells" line at/before cutoff, not the first.
+	// grats/close line (22:23:18). The two announcements are 2m34s apart
+	// (well under announcementSessionGap), so the reminder must NOT reset
+	// the window — it should resolve to the OPENING call (22:19:44), or
+	// every bid placed before the reminder (18 of 19 in this sample) would
+	// be silently excluded.
 	cutoff := time.Date(2026, time.August, 17, 22, 23, 0, 0, time.UTC)
 	found, ok := FindAnnouncementStart(bidsSample, "Soul Essence of Aten Ha Ra", cutoff)
 	if !ok {
 		t.Fatal("expected an announcement to be found")
 	}
-	want := time.Date(2026, time.August, 17, 22, 22, 18, 0, time.UTC)
+	want := time.Date(2026, time.August, 17, 22, 19, 44, 0, time.UTC)
 	if !found.Equal(want) {
-		t.Errorf("found = %v, want %v (the last-call repeat, not the opening call)", found, want)
+		t.Errorf("found = %v, want %v (the opening call, not the last-call reminder)", found, want)
+	}
+}
+
+func TestFindAnnouncementStart_DistantReannouncementStartsFreshWindow(t *testing.T) {
+	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, 'Ring of the Ancients send tells'\n" +
+		"[Mon Aug 17 20:01:00 2026] Rizy tells you, 'high'\n" +
+		"[Mon Aug 17 22:30:00 2026] You say to your guild, 'Ring of the Ancients send tells'\n" +
+		"[Mon Aug 17 22:31:00 2026] Darkclaw tells you, 'high'\n"
+
+	cutoff := time.Date(2026, time.August, 17, 22, 32, 0, 0, time.UTC)
+	found, ok := FindAnnouncementStart(raw, "Ring of the Ancients", cutoff)
+	if !ok {
+		t.Fatal("expected an announcement to be found")
+	}
+	want := time.Date(2026, time.August, 17, 22, 30, 0, 0, time.UTC)
+	if !found.Equal(want) {
+		t.Errorf("found = %v, want %v (the second drop's own call, 2.5 hours after the first — must not merge with it)", found, want)
 	}
 }
 
