@@ -244,6 +244,13 @@ table {
   font-size: 13px;
 }
 
+/* Fixed layout so column widths are set once (via <colgroup>) instead of
+   shifting based on each row's content — a wide "no match" dropdown or a
+   long raw-message string used to reflow every other column. */
+table.col-fixed {
+  table-layout: fixed;
+}
+
 th {
   text-align: left;
   padding: 8px 10px;
@@ -256,8 +263,19 @@ th {
 }
 
 td {
+  text-align: left;
   padding: 6px 10px;
   border-bottom: 1px solid #161c28;
+}
+
+table.col-fixed td {
+  overflow: hidden;
+  word-break: break-word;
+}
+
+table.col-fixed td select {
+  width: 100%;
+  max-width: 100%;
 }
 
 tr.ambiguous td {

@@ -5,7 +5,13 @@ import { main } from "../wailsjs/go/models";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
-type EditableRow = { name: string };
+// `name` is the resolution/submission identity — looked up against the
+// roster and sent to the site. `displayName` is frozen at capture time
+// (or, for a manually added row, whatever the officer resolves it to) and
+// is always shown in the Character column, so linking an unmatched name to
+// a main doesn't overwrite the captured name — see BidsPanel's identical
+// split for the same reason.
+type EditableRow = { name: string; displayName: string };
 
 // Matches the non-retired "ep" activities seeded in seekers-tracker's
 // epgp_point_values (scripts/import-epgp.ts's POINT_VALUES) that a single
@@ -32,7 +38,7 @@ export function AttendancePanel() {
     try {
       const result = await CaptureAttendance();
       setSnapshot(result);
-      setRows(result.names.map((name) => ({ name })));
+      setRows(result.names.map((name) => ({ name, displayName: name })));
     } catch (err) {
       setError(String(err));
       setSnapshot(null);
@@ -42,8 +48,10 @@ export function AttendancePanel() {
     }
   }
 
-  function updateName(index: number, value: string) {
-    setRows((prev) => prev.map((r, i) => (i === index ? { name: value } : r)));
+  // A manually added row has no captured text to preserve, so resolving it
+  // sets displayName too; a captured row keeps its original displayName.
+  function resolveIdentity(index: number, name: string) {
+    setRows((prev) => prev.map((r, i) => (i === index ? { name, displayName: r.displayName.trim() ? r.displayName : name } : r)));
   }
 
   function removeRow(index: number) {
@@ -51,7 +59,7 @@ export function AttendancePanel() {
   }
 
   function addRow() {
-    setRows((prev) => [...prev, { name: "" }]);
+    setRows((prev) => [...prev, { name: "", displayName: "" }]);
   }
 
   async function onCopy() {
@@ -119,7 +127,13 @@ export function AttendancePanel() {
               {copied ? "Copied" : "Copy to clipboard"}
             </button>
           </div>
-          <table>
+          <table className="col-fixed">
+            <colgroup>
+              <col style={{ width: "34%" }} />
+              <col style={{ width: "34%" }} />
+              <col style={{ width: "20%" }} />
+              <col style={{ width: "12%" }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Character</th>
@@ -133,20 +147,22 @@ export function AttendancePanel() {
                 const resolved = roster.resolve(r.name);
                 return (
                   <tr key={i}>
-                    <td>
-                      {resolved.matched ? (
-                        r.name
-                      ) : (
-                        <NoMatchSelect
-                          name={r.name}
-                          roster={roster}
-                          onResolved={(canonicalName) => updateName(i, canonicalName)}
-                          onError={setError}
-                        />
-                      )}
-                    </td>
+                    <td>{r.displayName.trim() ? r.displayName : "—"}</td>
                     <td style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
-                      {r.name.trim() ? (resolved.matched ? resolved.mainCharacterName : "no match") : "—"}
+                      {r.name.trim() ? (
+                        resolved.matched ? (
+                          resolved.mainCharacterName
+                        ) : (
+                          <NoMatchSelect
+                            name={r.displayName}
+                            roster={roster}
+                            onResolved={(canonicalName) => resolveIdentity(i, canonicalName)}
+                            onError={setError}
+                          />
+                        )
+                      ) : (
+                        <NoMatchSelect name="" roster={roster} onResolved={(canonicalName) => resolveIdentity(i, canonicalName)} onError={setError} />
+                      )}
                     </td>
                     <td>{new Date(snapshot.occurredAt).toLocaleTimeString()}</td>
                     <td>
@@ -169,7 +185,11 @@ export function AttendancePanel() {
         </>
       )}
 
-      {!snapshot && !error && <div className="empty">Run "/who guild" in-game, then click Capture Attendance.</div>}
+      {!snapshot && !error && (
+        <div className="empty">
+          Run "/who" or "/who guild" in-game, then click Capture Attendance — either works, use whichever one doesn't miss anon'd guildmates.
+        </div>
+      )}
     </div>
   );
 }

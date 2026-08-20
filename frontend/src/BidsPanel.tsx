@@ -15,7 +15,13 @@ const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot"];
 // Alt Loot").
 const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low Bid": 2, "Alt Loot": 1 };
 
-type BidRow = main.BidRow & { winner: boolean };
+// `characterName` is the resolution/submission identity — it's what gets
+// looked up against the roster and sent to the site. `displayName` is
+// frozen at capture time and always shown in the Character column, so
+// resolving an unmatched row (e.g. linking "Leighi" as a new alt of main
+// "Tiliki") doesn't overwrite the captured name the officer recognizes —
+// the Main column is where the resolved main shows up instead.
+type BidRow = main.BidRow & { winner: boolean; displayName: string };
 
 export function BidsPanel() {
   const [itemName, setItemName] = useState("");
@@ -46,7 +52,7 @@ export function BidsPanel() {
     setPending(true);
     try {
       const result = await CaptureBids(itemName);
-      setRows(result.map((r) => ({ ...r, winner: false })));
+      setRows(result.map((r) => ({ ...r, winner: false, displayName: r.characterName })));
       setCapturedItem(itemName);
     } catch (err) {
       setError(String(err));
@@ -60,7 +66,7 @@ export function BidsPanel() {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, tier, ambiguous: false } : r)));
   }
 
-  function updateCharacterName(index: number, characterName: string) {
+  function resolveIdentity(index: number, characterName: string) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, characterName } : r)));
   }
 
@@ -143,7 +149,10 @@ export function BidsPanel() {
       const notes: string[] = [];
       if (result.unmatched.length > 0) notes.push(`no character match: ${result.unmatched.join(", ")}`);
       if (result.invalidTiers.length > 0) notes.push(`invalid tier: ${result.invalidTiers.join(", ")}`);
-      setSubmitResult(`Recorded ${result.inserted} bid(s) on ${capturedItem}.${notes.length > 0 ? " — " + notes.join("; ") : ""}`);
+      const lostCount = result.inserted - winners.length;
+      setSubmitResult(
+        `Recorded ${result.inserted} bid(s) on ${capturedItem} — ${winners.length} won (GP charged), ${lostCount} lost (no GP charge).${notes.length > 0 ? " — " + notes.join("; ") : ""}`,
+      );
       if (result.inserted > 0) setKnownItems((prev) => (prev.includes(capturedItem) ? prev : [...prev, capturedItem].sort()));
     } catch (err) {
       setError(String(err));
@@ -224,10 +233,18 @@ export function BidsPanel() {
               {submitting ? "Submitting…" : "Submit to site"}
             </button>
           </div>
-          <table>
+          <table className="col-fixed">
+            <colgroup>
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "14%" }} />
+              <col />
+              <col style={{ width: "8%" }} />
+            </colgroup>
             <thead>
               <tr>
-                <th>Winner</th>
                 <th>Character</th>
                 <th>Main</th>
                 <th>Priority</th>
@@ -248,18 +265,15 @@ export function BidsPanel() {
                     style={{ cursor: "pointer" }}
                     title="Click the row to mark/unmark this bid as a winner"
                   >
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={r.winner} onChange={() => toggleWinner(i)} />
-                    </td>
-                    <td>{r.characterName}</td>
+                    <td>{r.displayName}</td>
                     <td onClick={(e) => e.stopPropagation()} style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
                       {resolved.matched ? (
                         resolved.mainCharacterName
                       ) : (
                         <NoMatchSelect
-                          name={r.characterName}
+                          name={r.displayName}
                           roster={roster}
-                          onResolved={(canonicalName) => updateCharacterName(i, canonicalName)}
+                          onResolved={(canonicalName) => resolveIdentity(i, canonicalName)}
                           onError={setError}
                         />
                       )}

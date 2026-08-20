@@ -229,9 +229,11 @@ type AttendanceResult struct {
 }
 
 // CaptureAttendance re-reads the log file and returns the MOST RECENT
-// "/who guild" snapshot — a raid night can have several (start/mid/end
-// checks), and the officer only ever wants the latest one to record right
-// now, same as the sketch's single "Attendance" capture button implies.
+// "/who" or "/who guild" snapshot (both produce the same "Players on
+// EverQuest:" block parse.ParseAttendance reads) — a raid night can have
+// several (start/mid/end checks), and the officer only ever wants the
+// latest one to record right now, same as the sketch's single "Attendance"
+// capture button implies.
 func (a *App) CaptureAttendance() (AttendanceResult, error) {
 	raw, err := a.readLog()
 	if err != nil {
@@ -240,7 +242,7 @@ func (a *App) CaptureAttendance() (AttendanceResult, error) {
 
 	snapshots, warnings := parse.ParseAttendance(raw)
 	if len(snapshots) == 0 {
-		return AttendanceResult{Warnings: warnings}, errors.New("no \"/who guild\" snapshot found in the log — run /who guild in-game first")
+		return AttendanceResult{Warnings: warnings}, errors.New("no \"/who\" or \"/who guild\" snapshot found in the log — run one of those in-game first")
 	}
 
 	latest := snapshots[len(snapshots)-1]
