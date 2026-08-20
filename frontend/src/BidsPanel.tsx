@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { StartBidCapture, StopBidCapture } from "../wailsjs/go/main/App";
+import { StartBidCapture, StopBidCapture, SubmitBids } from "../wailsjs/go/main/App";
 import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
 
@@ -13,6 +13,8 @@ export function BidsPanel() {
   const [pending, setPending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [capturedItem, setCapturedItem] = useState("");
+  const [submitResult, setSubmitResult] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function onStart() {
     setError(null);
@@ -32,6 +34,7 @@ export function BidsPanel() {
   async function onStop() {
     setPending(true);
     setError(null);
+    setSubmitResult(null);
     try {
       const result = await StopBidCapture();
       setRows(result);
@@ -59,6 +62,30 @@ export function BidsPanel() {
     setCopied(true);
   }
 
+  async function onSubmit() {
+    if (rows.length === 0) return;
+    const invalid = rows.filter((r) => !TIERS.includes(r.tier));
+    if (invalid.length > 0) {
+      setError(`Pick a tier for: ${invalid.map((r) => r.characterName).join(", ")} before submitting.`);
+      return;
+    }
+    setSubmitting(true);
+    setSubmitResult(null);
+    setError(null);
+    try {
+      const entries = rows.map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt }));
+      const result = await SubmitBids(capturedItem, entries);
+      const notes: string[] = [];
+      if (result.unmatched.length > 0) notes.push(`no character match: ${result.unmatched.join(", ")}`);
+      if (result.invalidTiers.length > 0) notes.push(`invalid tier: ${result.invalidTiers.join(", ")}`);
+      setSubmitResult(`Charged GP for ${result.inserted} bid(s) on ${capturedItem}.${notes.length > 0 ? " — " + notes.join("; ") : ""}`);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div>
       <div className="panel-header">
@@ -66,6 +93,7 @@ export function BidsPanel() {
       </div>
 
       {error && <div className="error">{error}</div>}
+      {submitResult && <div className="success">{submitResult}</div>}
 
       <div className="toolbar">
         <input
@@ -95,6 +123,9 @@ export function BidsPanel() {
             <span style={{ color: "#9ca3af", fontSize: 13 }}>
               {capturedItem} — {rows.length} bid(s)
             </span>
+            <button className="primary" onClick={onSubmit} disabled={submitting}>
+              {submitting ? "Submitting…" : "Submit to site"}
+            </button>
             <button className="secondary" onClick={onCopy}>
               {copied ? "Copied" : "Copy to clipboard"}
             </button>

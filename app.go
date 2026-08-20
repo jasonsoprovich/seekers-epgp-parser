@@ -10,6 +10,8 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
 )
 
@@ -56,6 +58,43 @@ func (a *App) GetLogPath() string {
 	return a.logPath
 }
 
+// --- Settings: seekers-tracker connection ---
+
+func (a *App) GetSettings() (config.Settings, error) {
+	return config.Load()
+}
+
+func (a *App) SaveSettings(serverURL string, apiKey string) error {
+	return config.Save(config.Settings{ServerURL: serverURL, APIKey: apiKey})
+}
+
+func (a *App) officerClient() (*officerapi.Client, error) {
+	s, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	if s.ServerURL == "" || s.APIKey == "" {
+		return nil, errors.New("set your server URL and API key in Settings first")
+	}
+	return officerapi.New(s.ServerURL, s.APIKey), nil
+}
+
+// TestConnection confirms the saved server URL + API key actually work by
+// pulling the roster (the same call the Attendance/Bids submit buttons
+// eventually validate names against) — the Settings screen's "did I set
+// this up right" check.
+func (a *App) TestConnection() (int, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return 0, err
+	}
+	characters, err := client.FetchCharacters(a.ctx)
+	if err != nil {
+		return 0, err
+	}
+	return len(characters), nil
+}
+
 func (a *App) readLog() (string, error) {
 	if a.logPath == "" {
 		return "", errors.New("no log file selected — use Settings to pick one first")
@@ -100,6 +139,22 @@ func (a *App) CaptureAttendance() (AttendanceResult, error) {
 		Names:      latest.Names,
 		Warnings:   warnings,
 	}, nil
+}
+
+// SubmitAttendance sends exactly the names the officer is left with after
+// editing/removing rows in the Attendance tab — same "submit what's on
+// screen" contract as the Copy-to-clipboard button next to it, just to the
+// site's ledger instead of the clipboard.
+func (a *App) SubmitAttendance(activity string, occurredAt string, names []string) (officerapi.AttendanceResponse, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return officerapi.AttendanceResponse{}, err
+	}
+	return client.SubmitAttendance(a.ctx, officerapi.AttendanceRequest{
+		Activity:       activity,
+		OccurredAt:     occurredAt,
+		CharacterNames: names,
+	})
 }
 
 // --- Bids ---
@@ -173,5 +228,21 @@ func (a *App) StopBidCapture() ([]BidRow, error) {
 	a.bidOpen = false
 	a.bidItemName = ""
 	return rows, nil
+}
+
+// SubmitBids charges GP for exactly the rows the officer is left with
+// after editing tiers/removing rows in the Bids tab (same "submit what's
+// on screen" contract as SubmitAttendance) — one row per character/tier
+// pair, so a multi-winner split (two of the same item dropped) is just
+// two remaining rows.
+func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (officerapi.BidsResponse, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return officerapi.BidsResponse{}, err
+	}
+	return client.SubmitBids(a.ctx, officerapi.BidsRequest{
+		ItemName: itemName,
+		Entries:  entries,
+	})
 }
 

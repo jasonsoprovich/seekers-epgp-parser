@@ -14,8 +14,16 @@ export function GetLogPath() {
   return window['go']['main']['App']['GetLogPath']();
 }
 
+export function GetSettings() {
+  return window['go']['main']['App']['GetSettings']();
+}
+
 export function IsBidCaptureOpen() {
   return window['go']['main']['App']['IsBidCaptureOpen']();
+}
+
+export function SaveSettings(arg1, arg2) {
+  return window['go']['main']['App']['SaveSettings'](arg1, arg2);
 }
 
 export function SelectLogFile() {
@@ -28,4 +36,16 @@ export function StartBidCapture(arg1) {
 
 export function StopBidCapture() {
   return window['go']['main']['App']['StopBidCapture']();
+}
+
+export function SubmitAttendance(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SubmitAttendance'](arg1, arg2, arg3);
+}
+
+export function SubmitBids(arg1, arg2) {
+  return window['go']['main']['App']['SubmitBids'](arg1, arg2);
+}
+
+export function TestConnection() {
+  return window['go']['main']['App']['TestConnection']();
 }

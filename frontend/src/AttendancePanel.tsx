@@ -1,21 +1,32 @@
 import { useState } from "react";
-import { CaptureAttendance } from "../wailsjs/go/main/App";
+import { CaptureAttendance, SubmitAttendance } from "../wailsjs/go/main/App";
 import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
 
 type EditableRow = { name: string };
 
+// Matches the non-retired "ep" activities seeded in seekers-tracker's
+// epgp_point_values (scripts/import-epgp.ts's POINT_VALUES) that a single
+// "/who guild" snapshot could represent — the site resolves the actual
+// point value from this name server-side, so this list only needs to stay
+// in sync in spirit, not exact points.
+const ACTIVITIES = ["Raid - Start", "Raid - Mid", "Raid - End", "Guild Meeting", "Event Attend"];
+
 export function AttendancePanel() {
   const [snapshot, setSnapshot] = useState<main.AttendanceResult | null>(null);
   const [rows, setRows] = useState<EditableRow[]>([]);
+  const [activity, setActivity] = useState(ACTIVITIES[0]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [submitResult, setSubmitResult] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function onCapture() {
     setPending(true);
     setError(null);
     setCopied(false);
+    setSubmitResult(null);
     try {
       const result = await CaptureAttendance();
       setSnapshot(result);
@@ -44,6 +55,23 @@ export function AttendancePanel() {
     setCopied(true);
   }
 
+  async function onSubmit() {
+    if (!snapshot) return;
+    setSubmitting(true);
+    setSubmitResult(null);
+    setError(null);
+    try {
+      const names = rows.map((r) => r.name).filter(Boolean);
+      const result = await SubmitAttendance(activity, snapshot.occurredAt, names);
+      const unmatchedNote = result.unmatched.length > 0 ? ` — no match for: ${result.unmatched.join(", ")}` : "";
+      setSubmitResult(`Recorded ${activity} for ${result.inserted} character(s).${unmatchedNote}`);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div>
       <div className="panel-header">
@@ -54,6 +82,7 @@ export function AttendancePanel() {
       </div>
 
       {error && <div className="error">{error}</div>}
+      {submitResult && <div className="success">{submitResult}</div>}
       {snapshot?.warnings.map((w, i) => (
         <div className="warning" key={i}>
           {w}
@@ -66,6 +95,16 @@ export function AttendancePanel() {
             <span style={{ color: "#9ca3af", fontSize: 13 }}>
               {snapshot.zone} — {new Date(snapshot.occurredAt).toLocaleString()} — {rows.length} name(s)
             </span>
+            <select value={activity} onChange={(e) => setActivity(e.target.value)}>
+              {ACTIVITIES.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+            <button className="primary" onClick={onSubmit} disabled={submitting || rows.length === 0}>
+              {submitting ? "Submitting…" : "Submit to site"}
+            </button>
             <button className="secondary" onClick={onCopy}>
               {copied ? "Copied" : "Copy to clipboard"}
             </button>
