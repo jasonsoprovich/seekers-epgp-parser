@@ -16,7 +16,8 @@ import (
 )
 
 type Settings struct {
-	APIKey string `json:"apiKey"`
+	APIKey  string `json:"apiKey"`
+	LogPath string `json:"logPath"`
 }
 
 func configPath() (string, error) {

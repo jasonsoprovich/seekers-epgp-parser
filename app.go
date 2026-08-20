@@ -16,11 +16,10 @@ import (
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
 )
 
-// App holds the running application's state — just which log file the
-// officer picked. Lives only in memory: this app never persists a log
-// path across restarts, since the officer re-picks it each raid night
-// anyway. Bid capture used to carry its own start-time/open-session state
-// here too, but it's stateless now — see CaptureBids.
+// App holds the running application's state — just an in-memory cache of
+// the selected log file, kept in sync with config.json (see startup and
+// SelectLogFile) so it survives restarts and rebuilds instead of forcing
+// a re-pick every time the app relaunches.
 type App struct {
 	ctx context.Context
 
@@ -33,6 +32,9 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if s, err := config.Load(); err == nil {
+		a.logPath = s.LogPath
+	}
 }
 
 // --- Settings ---
@@ -49,6 +51,13 @@ func (a *App) SelectLogFile() (string, error) {
 	}
 	if path != "" {
 		a.logPath = path
+		// Best-effort — a failed save here shouldn't block using the log
+		// file for the rest of this session, just means it won't survive
+		// a restart.
+		if s, err := config.Load(); err == nil {
+			s.LogPath = path
+			_ = config.Save(s)
+		}
 	}
 	return a.logPath, nil
 }
@@ -62,7 +71,12 @@ func (a *App) GetSettings() (config.Settings, error) {
 }
 
 func (a *App) SaveSettings(apiKey string) error {
-	return config.Save(config.Settings{APIKey: apiKey})
+	s, err := config.Load()
+	if err != nil {
+		s = config.Settings{}
+	}
+	s.APIKey = apiKey
+	return config.Save(s)
 }
 
 // OpenAppKeyPage opens the site's app-key generation page in the
