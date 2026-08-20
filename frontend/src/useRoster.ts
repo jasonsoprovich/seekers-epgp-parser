@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { FetchRoster } from "../wailsjs/go/main/App";
+import { useEffect, useMemo, useState } from "react";
+import { FetchRoster, LinkCharacter } from "../wailsjs/go/main/App";
 import { officerapi } from "../wailsjs/go/models";
 
 export type ResolvedCharacter = { mainCharacterName: string | null; priorityRating: number | null; matched: boolean };
@@ -28,5 +28,18 @@ export function useRoster() {
     return { mainCharacterName, priorityRating: c.priorityRating ?? null, matched: true };
   }
 
-  return { resolve, characters, error, loaded: byLowerName.size > 0 };
+  const mains = useMemo(() => characters.filter((c) => c.charType === "main"), [characters]);
+
+  // Resolves a "no match" name the site has never seen — attaches it as a
+  // new alt of mainCharacterId, or as a brand-new main when null. Merges
+  // the created character straight into local state so the row that
+  // triggered this resolves immediately, without a full FetchRoster.
+  async function createCharacter(name: string, mainCharacterId: number | null): Promise<officerapi.Character> {
+    const created = await LinkCharacter(name, mainCharacterId);
+    setCharacters((prev) => [...prev, created]);
+    setByLowerName((prev) => new Map(prev).set(created.name.toLowerCase(), created));
+    return created;
+  }
+
+  return { resolve, characters, mains, createCharacter, error, loaded: byLowerName.size > 0 };
 }

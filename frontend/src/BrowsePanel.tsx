@@ -4,6 +4,66 @@ import { officerapi } from "../wailsjs/go/models";
 import { useRoster } from "./useRoster";
 
 type SubTab = "ep" | "gp" | "totals" | "characters";
+type SortDir = "asc" | "desc";
+
+// Empty values (null/undefined/"") always sort last regardless of
+// direction, so flipping a column doesn't scatter unresolved rows
+// (e.g. characters with no priority yet) to the top.
+function compare(a: unknown, b: unknown, dir: SortDir): number {
+  const aEmpty = a === null || a === undefined || a === "";
+  const bEmpty = b === null || b === undefined || b === "";
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+  const result =
+    typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+  return dir === "asc" ? result : -result;
+}
+
+// Sorts whatever rows are currently loaded — the full set for
+// Totals/Characters, but only the current page for the (server-paginated)
+// Ledger browser, since /api/officer/ledger has no sort param of its own.
+function useSort<T>(accessors: Record<string, (row: T) => unknown>) {
+  const [state, setState] = useState<{ key: string; dir: SortDir } | null>(null);
+
+  function sort(rows: T[]): T[] {
+    if (!state) return rows;
+    const accessor = accessors[state.key];
+    return [...rows].sort((a, b) => compare(accessor(a), accessor(b), state.dir));
+  }
+
+  function toggle(key: string) {
+    setState((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  }
+
+  function arrow(key: string): string {
+    if (!state || state.key !== key) return "";
+    return state.dir === "asc" ? " ▲" : " ▼";
+  }
+
+  return { sort, toggle, arrow };
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+}: {
+  label: string;
+  sortKey: string;
+  sort: { toggle: (key: string) => void; arrow: (key: string) => string };
+}) {
+  return (
+    <th onClick={() => sort.toggle(sortKey)} style={{ cursor: "pointer", userSelect: "none" }}>
+      {label}
+      {sort.arrow(sortKey)}
+    </th>
+  );
+}
 
 // Read-only scaffolding over the same data the website's own /epgp/ledger
 // and /roster pages show, so an officer can look something up without
@@ -43,6 +103,14 @@ function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sort = useSort<officerapi.LedgerRow>({
+    date: (r) => r.occurredAt,
+    character: (r) => r.characterName,
+    activity: (r) => (kind === "ep" ? r.activity : `${r.itemName || ""} ${r.tier || ""}`),
+    points: (r) => r.points,
+    source: (r) => r.source,
+    recordedBy: (r) => r.enteredByName,
+  });
 
   useEffect(() => {
     setPage(1);
@@ -81,16 +149,16 @@ function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
       <table>
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Character</th>
-            <th>{kind === "ep" ? "Activity" : "Item / Tier"}</th>
-            <th>Points</th>
-            <th>Source</th>
-            <th>Recorded by</th>
+            <SortableTh label="Date" sortKey="date" sort={sort} />
+            <SortableTh label="Character" sortKey="character" sort={sort} />
+            <SortableTh label={kind === "ep" ? "Activity" : "Item / Tier"} sortKey="activity" sort={sort} />
+            <SortableTh label="Points" sortKey="points" sort={sort} />
+            <SortableTh label="Source" sortKey="source" sort={sort} />
+            <SortableTh label="Recorded by" sortKey="recordedBy" sort={sort} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {sort.sort(rows).map((r) => (
             <tr key={r.id}>
               <td>{new Date(r.occurredAt).toLocaleDateString()}</td>
               <td>{r.characterName}</td>
@@ -127,6 +195,14 @@ function TotalsBrowser() {
   const [rows, setRows] = useState<officerapi.TotalsRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sort = useSort<officerapi.TotalsRow>({
+    character: (r) => r.name,
+    main: (r) => r.mainCharacterName,
+    status: (r) => r.status,
+    ep: (r) => r.ep,
+    gp: (r) => r.gp,
+    priority: (r) => r.priorityRating,
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -155,16 +231,16 @@ function TotalsBrowser() {
       <table>
         <thead>
           <tr>
-            <th>Character</th>
-            <th>Main</th>
-            <th>Status</th>
-            <th>EP</th>
-            <th>GP</th>
-            <th>Priority</th>
+            <SortableTh label="Character" sortKey="character" sort={sort} />
+            <SortableTh label="Main" sortKey="main" sort={sort} />
+            <SortableTh label="Status" sortKey="status" sort={sort} />
+            <SortableTh label="EP" sortKey="ep" sort={sort} />
+            <SortableTh label="GP" sortKey="gp" sort={sort} />
+            <SortableTh label="Priority" sortKey="priority" sort={sort} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {sort.sort(rows).map((r) => (
             <tr key={r.id}>
               <td>{r.name}</td>
               <td style={{ color: "#9ca3af" }}>{r.mainCharacterName || "—"}</td>
@@ -191,6 +267,13 @@ function CharactersBrowser() {
   const roster = useRoster();
   const [query, setQuery] = useState("");
   const filtered = roster.characters.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const sort = useSort<officerapi.Character>({
+    character: (c) => c.name,
+    type: (c) => c.charType,
+    main: (c) => c.mainCharacterName,
+    status: (c) => c.status,
+    priority: (c) => c.priorityRating,
+  });
 
   return (
     <div>
@@ -201,15 +284,15 @@ function CharactersBrowser() {
       <table>
         <thead>
           <tr>
-            <th>Character</th>
-            <th>Type</th>
-            <th>Main</th>
-            <th>Status</th>
-            <th>Priority</th>
+            <SortableTh label="Character" sortKey="character" sort={sort} />
+            <SortableTh label="Type" sortKey="type" sort={sort} />
+            <SortableTh label="Main" sortKey="main" sort={sort} />
+            <SortableTh label="Status" sortKey="status" sort={sort} />
+            <SortableTh label="Priority" sortKey="priority" sort={sort} />
           </tr>
         </thead>
         <tbody>
-          {filtered.map((c) => (
+          {sort.sort(filtered).map((c) => (
             <tr key={c.id}>
               <td>{c.name}</td>
               <td style={{ color: "#9ca3af" }}>{c.charType}</td>

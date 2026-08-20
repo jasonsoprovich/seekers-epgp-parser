@@ -151,6 +151,47 @@ input[type="password"] {
   color: #9ca3af;
 }
 
+.form-card {
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 560px;
+  background: #10151f;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.form-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.form-row label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.form-row label select,
+.form-row label input {
+  width: 100%;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #1f2937;
+}
+
 .success {
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.3);

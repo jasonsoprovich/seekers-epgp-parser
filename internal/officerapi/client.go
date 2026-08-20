@@ -110,6 +110,22 @@ func (c *Client) FetchCharacters(ctx context.Context) ([]Character, error) {
 	return out.Characters, nil
 }
 
+// --- POST /api/officer/characters ---
+
+// CreateCharacterRequest resolves a name the site roster has never seen —
+// either as a brand-new main (MainCharacterID nil) or as a new alt linked
+// to an existing main — for the Attendance/Bids tabs' "no match" rows.
+type CreateCharacterRequest struct {
+	Name            string `json:"name"`
+	MainCharacterID *int   `json:"mainCharacterId,omitempty"`
+}
+
+func (c *Client) CreateCharacter(ctx context.Context, req CreateCharacterRequest) (Character, error) {
+	var out Character
+	err := c.do(ctx, http.MethodPost, "/api/officer/characters", req, &out)
+	return out, err
+}
+
 // --- GET /api/officer/items ---
 
 func (c *Client) FetchItems(ctx context.Context) ([]string, error) {

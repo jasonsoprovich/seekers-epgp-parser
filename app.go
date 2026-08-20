@@ -139,6 +139,19 @@ func (a *App) FetchRoster() ([]officerapi.Character, error) {
 	return client.FetchCharacters(a.ctx)
 }
 
+// LinkCharacter resolves an Attendance/Bids "no match" name against the
+// site roster: pass mainCharacterID to attach it as a new alt of that
+// main, or nil to add it as a brand-new main. The returned Character gets
+// merged into the frontend's already-fetched roster so the row resolves
+// immediately, without a full FetchRoster round trip.
+func (a *App) LinkCharacter(name string, mainCharacterID *int) (officerapi.Character, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return officerapi.Character{}, err
+	}
+	return client.CreateCharacter(a.ctx, officerapi.CreateCharacterRequest{Name: name, MainCharacterID: mainCharacterID})
+}
+
 // --- Manual Entry ---
 
 // PointValues wraps FetchPointValues' two lists into one Wails-friendly

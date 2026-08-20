@@ -89,77 +89,87 @@ export function ManualEntryPanel() {
       {success && <div className="success">{success}</div>}
       {roster.error && <div className="warning">Couldn't load the roster: {roster.error}</div>}
 
-      <div className="form-grid" style={{ maxWidth: 480 }}>
-        <label>
-          Kind
-          <select
-            value={kind}
-            onChange={(e) => {
-              setKind(e.target.value as "ep" | "gp");
-              setActivitySelect("");
-              setPoints("");
-            }}
-          >
-            <option value="ep">EP (Effort Points)</option>
-            <option value="gp">GP (Gear Points)</option>
-          </select>
-        </label>
+      <div className="form-card">
+        <div className="form-row">
+          <label>
+            Kind
+            <select
+              value={kind}
+              onChange={(e) => {
+                setKind(e.target.value as "ep" | "gp");
+                setActivitySelect("");
+                setPoints("");
+              }}
+            >
+              <option value="ep">EP (Effort Points)</option>
+              <option value="gp">GP (Gear Points)</option>
+            </select>
+          </label>
 
-        <label>
-          Character
-          <select value={characterId} onChange={(e) => setCharacterId(e.target.value ? Number(e.target.value) : "")}>
-            <option value="">— pick character —</option>
-            {roster.characters.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.charType === "alt" && c.mainCharacterName ? ` (alt of ${c.mainCharacterName})` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label>
+            Character
+            <select value={characterId} onChange={(e) => setCharacterId(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">— pick character —</option>
+              {roster.characters.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.charType === "alt" && c.mainCharacterName ? ` (alt of ${c.mainCharacterName})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         {kind === "gp" && (
-          <label>
-            Item (optional)
-            <input type="text" value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="e.g. Guild Bank buy" />
-          </label>
+          <div className="form-row">
+            <label>
+              Item (optional)
+              <input type="text" value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="e.g. Guild Bank buy" />
+            </label>
+          </div>
         )}
 
-        <label>
-          {kind === "ep" ? "Activity" : "Tier"}
-          <select value={activitySelect} onChange={(e) => onSelectActivity(e.target.value)}>
-            <option value="">— pick one —</option>
-            {pointValues.map((pv) => (
-              <option key={pv.activity} value={pv.activity}>
-                {pv.activity} ({pv.points} pts)
-              </option>
-            ))}
-            <option value={CUSTOM}>Custom…</option>
-          </select>
-        </label>
+        <div className="form-row">
+          <label>
+            {kind === "ep" ? "Activity" : "Tier"}
+            <select value={activitySelect} onChange={(e) => onSelectActivity(e.target.value)}>
+              <option value="">— pick one —</option>
+              {pointValues.map((pv) => (
+                <option key={pv.activity} value={pv.activity}>
+                  {pv.activity} ({pv.points} pts)
+                </option>
+              ))}
+              <option value={CUSTOM}>Custom…</option>
+            </select>
+          </label>
+
+          <label>
+            Points
+            <input type="text" inputMode="decimal" value={points} onChange={(e) => setPoints(e.target.value)} />
+          </label>
+        </div>
 
         {activitySelect === CUSTOM && (
-          <label>
-            Custom {kind === "ep" ? "activity" : "tier"} name
-            <input type="text" value={customActivity} onChange={(e) => setCustomActivity(e.target.value)} />
-          </label>
+          <div className="form-row">
+            <label>
+              Custom {kind === "ep" ? "activity" : "tier"} name
+              <input type="text" value={customActivity} onChange={(e) => setCustomActivity(e.target.value)} />
+            </label>
+          </div>
         )}
 
-        <label>
-          Points
-          <input type="text" inputMode="decimal" value={points} onChange={(e) => setPoints(e.target.value)} />
-        </label>
+        <div className="form-row">
+          <label>
+            Note (optional)
+            <input type="text" value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
+        </div>
 
-        <label>
-          Note (optional)
-          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} />
-        </label>
-      </div>
-
-      <div className="toolbar">
-        <button className="primary" onClick={onSubmit} disabled={pending}>
-          {pending ? "Recording…" : "Record entry"}
-        </button>
+        <div className="form-actions">
+          <button className="primary" onClick={onSubmit} disabled={pending}>
+            {pending ? "Recording…" : "Record entry"}
+          </button>
+        </div>
       </div>
     </div>
   );

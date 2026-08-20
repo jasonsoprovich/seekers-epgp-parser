@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CaptureAttendance, SubmitAttendance } from "../wailsjs/go/main/App";
 import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
+import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
 type EditableRow = { name: string };
@@ -130,20 +131,19 @@ export function AttendancePanel() {
             <tbody>
               {rows.map((r, i) => {
                 const resolved = roster.resolve(r.name);
-                const canonical = roster.characters.find((c) => c.name.toLowerCase() === r.name.trim().toLowerCase());
                 return (
                   <tr key={i}>
                     <td>
-                      <select value={canonical?.name ?? ""} onChange={(e) => updateName(i, e.target.value)}>
-                        <option value="" disabled>
-                          {r.name.trim() && !canonical ? `${r.name} — pick their real character` : "— pick character —"}
-                        </option>
-                        {roster.characters.map((c) => (
-                          <option key={c.id} value={c.name}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
+                      {resolved.matched ? (
+                        r.name
+                      ) : (
+                        <NoMatchSelect
+                          name={r.name}
+                          roster={roster}
+                          onResolved={(canonicalName) => updateName(i, canonicalName)}
+                          onError={setError}
+                        />
+                      )}
                     </td>
                     <td style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
                       {r.name.trim() ? (resolved.matched ? resolved.mainCharacterName : "no match") : "—"}

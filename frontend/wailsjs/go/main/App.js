@@ -38,6 +38,10 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function LinkCharacter(arg1, arg2) {
+  return window['go']['main']['App']['LinkCharacter'](arg1, arg2);
+}
+
 export function OpenAppKeyPage() {
   return window['go']['main']['App']['OpenAppKeyPage']();
 }

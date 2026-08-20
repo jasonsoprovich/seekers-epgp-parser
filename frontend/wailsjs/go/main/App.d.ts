@@ -22,6 +22,8 @@ export function GetLogPath():Promise<string>;
 
 export function GetSettings():Promise<config.Settings>;
 
+export function LinkCharacter(arg1:string,arg2:any):Promise<officerapi.Character>;
+
 export function OpenAppKeyPage():Promise<void>;
 
 export function SaveSettings(arg1:string):Promise<void>;

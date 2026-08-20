@@ -2,6 +2,7 @@ export namespace config {
 	
 	export class Settings {
 	    apiKey: string;
+	    logPath: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -10,6 +11,7 @@ export namespace config {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.apiKey = source["apiKey"];
+	        this.logPath = source["logPath"];
 	    }
 	}
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CaptureBids, FetchKnownItems, SubmitBids } from "../wailsjs/go/main/App";
 import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
+import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
 const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot"];
@@ -59,6 +60,10 @@ export function BidsPanel() {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, tier, ambiguous: false } : r)));
   }
 
+  function updateCharacterName(index: number, characterName: string) {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, characterName } : r)));
+  }
+
   function removeRow(index: number) {
     setRows((prev) => prev.filter((_, i) => i !== index));
   }
@@ -107,11 +112,14 @@ export function BidsPanel() {
     setRows((prev) => prev.map((r, i) => ({ ...r, winner: winnerIndices.has(i) })));
   }
 
+  function gratsMessage(winners: BidRow[]): string {
+    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${capturedItem}!`;
+  }
+
   async function onCopyGrats() {
     const winners = rows.filter((r) => r.winner);
     if (winners.length === 0) return;
-    const text = winners.map((r) => `Grats ${r.characterName} on ${capturedItem}!`).join("\n");
-    await ClipboardSetText(text);
+    await ClipboardSetText(gratsMessage(winners));
     setGratsCopied(true);
   }
 
@@ -160,14 +168,7 @@ export function BidsPanel() {
       {winners.length > 0 && (
         <div className="winner-summary">
           <div>
-            <strong>Winner{winners.length > 1 ? "s" : ""}:</strong>
-            <ul>
-              {winners.map((r) => (
-                <li key={r.characterName}>
-                  Grats {r.characterName} on {capturedItem}!
-                </li>
-              ))}
-            </ul>
+            <strong>Winner{winners.length > 1 ? "s" : ""}:</strong> {gratsMessage(winners)}
           </div>
           <button className="secondary" onClick={onCopyGrats}>
             {gratsCopied ? "Copied" : "Copy Grats Message"}
@@ -240,15 +241,32 @@ export function BidsPanel() {
               {rows.map((r, i) => {
                 const resolved = roster.resolve(r.characterName);
                 return (
-                  <tr key={i} className={[r.ambiguous ? "ambiguous" : "", r.superseded ? "superseded" : "", r.winner ? "winner" : ""].join(" ").trim()}>
-                    <td>
+                  <tr
+                    key={i}
+                    className={[r.ambiguous ? "ambiguous" : "", r.superseded ? "superseded" : "", r.winner ? "winner" : ""].join(" ").trim()}
+                    onClick={() => toggleWinner(i)}
+                    style={{ cursor: "pointer" }}
+                    title="Click the row to mark/unmark this bid as a winner"
+                  >
+                    <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={r.winner} onChange={() => toggleWinner(i)} />
                     </td>
                     <td>{r.characterName}</td>
-                    <td style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>{resolved.matched ? resolved.mainCharacterName : "no match"}</td>
+                    <td onClick={(e) => e.stopPropagation()} style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
+                      {resolved.matched ? (
+                        resolved.mainCharacterName
+                      ) : (
+                        <NoMatchSelect
+                          name={r.characterName}
+                          roster={roster}
+                          onResolved={(canonicalName) => updateCharacterName(i, canonicalName)}
+                          onError={setError}
+                        />
+                      )}
+                    </td>
                     <td style={{ color: "#9ca3af" }}>{resolved.priorityRating !== null ? resolved.priorityRating.toFixed(2) : "—"}</td>
                     <td>{new Date(r.occurredAt).toLocaleTimeString()}</td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <select value={TIERS.includes(r.tier) ? r.tier : ""} onChange={(e) => updateTier(i, e.target.value)}>
                         {!TIERS.includes(r.tier) && (
                           <option value="" disabled>
@@ -265,7 +283,7 @@ export function BidsPanel() {
                       {r.superseded && <span className="badge superseded" style={{ marginLeft: 6 }}>superseded</span>}
                     </td>
                     <td style={{ color: "#6b7280" }}>{r.rawMessage}</td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <button className="danger" onClick={() => removeRow(i)}>
                         Remove
                       </button>
