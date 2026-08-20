@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { StartBidCapture, StopBidCapture, SubmitBids } from "../wailsjs/go/main/App";
+import { useEffect, useState } from "react";
+import { CaptureBids, FetchKnownItems, SubmitBids } from "../wailsjs/go/main/App";
 import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
 
@@ -7,7 +7,7 @@ const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot"];
 
 export function BidsPanel() {
   const [itemName, setItemName] = useState("");
-  const [open, setOpen] = useState(false);
+  const [knownItems, setKnownItems] = useState<string[]>([]);
   const [rows, setRows] = useState<main.BidRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -16,33 +16,26 @@ export function BidsPanel() {
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function onStart() {
+  // Best-effort — Settings might not be configured yet, and a missing
+  // autocomplete list shouldn't block capturing bids at all.
+  useEffect(() => {
+    FetchKnownItems()
+      .then(setKnownItems)
+      .catch(() => setKnownItems([]));
+  }, []);
+
+  async function onCapture() {
     setError(null);
+    setSubmitResult(null);
     setPending(true);
     try {
-      await StartBidCapture(itemName);
-      setOpen(true);
-      setRows([]);
+      const result = await CaptureBids(itemName);
+      setRows(result);
+      setCapturedItem(itemName);
       setCopied(false);
     } catch (err) {
       setError(String(err));
-    } finally {
-      setPending(false);
-    }
-  }
-
-  async function onStop() {
-    setPending(true);
-    setError(null);
-    setSubmitResult(null);
-    try {
-      const result = await StopBidCapture();
-      setRows(result);
-      setCapturedItem(itemName);
-      setOpen(false);
-      setItemName("");
-    } catch (err) {
-      setError(String(err));
+      setRows([]);
     } finally {
       setPending(false);
     }
@@ -79,6 +72,7 @@ export function BidsPanel() {
       if (result.unmatched.length > 0) notes.push(`no character match: ${result.unmatched.join(", ")}`);
       if (result.invalidTiers.length > 0) notes.push(`invalid tier: ${result.invalidTiers.join(", ")}`);
       setSubmitResult(`Charged GP for ${result.inserted} bid(s) on ${capturedItem}.${notes.length > 0 ? " — " + notes.join("; ") : ""}`);
+      if (result.inserted > 0) setKnownItems((prev) => (prev.includes(capturedItem) ? prev : [...prev, capturedItem].sort()));
     } catch (err) {
       setError(String(err));
     } finally {
@@ -98,26 +92,28 @@ export function BidsPanel() {
       <div className="toolbar">
         <input
           type="text"
+          list="known-items"
           placeholder="Item name (e.g. Soul Essence of Aten Ha Ra)"
           value={itemName}
           onChange={(e) => setItemName(e.target.value)}
-          disabled={open}
           style={{ minWidth: 320 }}
         />
-        {!open ? (
-          <button className="primary" onClick={onStart} disabled={pending || !itemName.trim()}>
-            Start
-          </button>
-        ) : (
-          <button className="primary" onClick={onStop} disabled={pending}>
-            {pending ? "Stopping…" : "Stop / Lock In"}
-          </button>
-        )}
+        <datalist id="known-items">
+          {knownItems.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        <button className="primary" onClick={onCapture} disabled={pending || !itemName.trim()}>
+          {pending ? "Capturing…" : "Capture Bids"}
+        </button>
       </div>
 
-      {open && <div className="warning">Collecting tells for "{itemName}" — click Stop / Lock In when done.</div>}
+      <div className="warning">
+        Say "&lt;item&gt; send tells" in guild chat first. Capture pulls every bid tell from that announcement up to now — no need to click
+        anything before bids start coming in.
+      </div>
 
-      {!open && rows.length > 0 && (
+      {rows.length > 0 && (
         <>
           <div className="toolbar">
             <span style={{ color: "#9ca3af", fontSize: 13 }}>
@@ -174,9 +170,7 @@ export function BidsPanel() {
         </>
       )}
 
-      {!open && rows.length === 0 && !error && (
-        <div className="empty">Name the item and click Start when you're ready to collect tells.</div>
-      )}
+      {rows.length === 0 && !error && <div className="empty">Name the item and click Capture Bids when you're ready to review.</div>}
     </div>
   );
 }

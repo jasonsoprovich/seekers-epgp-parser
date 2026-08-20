@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -15,17 +16,15 @@ import (
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
 )
 
-// App holds the running application's state — which log file the officer
-// picked, and (if a bid session is open) when it started. Both live only
-// in memory: this app never persists a log path or session across
-// restarts, since the officer re-picks/re-starts each raid night anyway.
+// App holds the running application's state — just which log file the
+// officer picked. Lives only in memory: this app never persists a log
+// path across restarts, since the officer re-picks it each raid night
+// anyway. Bid capture used to carry its own start-time/open-session state
+// here too, but it's stateless now — see CaptureBids.
 type App struct {
 	ctx context.Context
 
-	logPath      string
-	bidItemName  string
-	bidStartedAt time.Time
-	bidOpen      bool
+	logPath string
 }
 
 func NewApp() *App {
@@ -93,6 +92,19 @@ func (a *App) TestConnection() (int, error) {
 		return 0, err
 	}
 	return len(characters), nil
+}
+
+// FetchKnownItems backs the Bids item-name field's autocomplete — every
+// item_name the site's gp_ledger has ever charged GP for (see
+// /api/officer/items). There's no separate items catalog; typing a new
+// item just means it'll suggest itself for the next officer once this
+// bid is submitted.
+func (a *App) FetchKnownItems() ([]string, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.FetchItems(a.ctx)
 }
 
 func (a *App) readLog() (string, error) {
@@ -169,45 +181,30 @@ type BidRow struct {
 	Superseded    bool   `json:"superseded"` // an earlier bid from the same character, kept visible but not the default winner
 }
 
-// StartBidCapture opens a capture window for one item. The officer types
-// the item name themselves rather than the app trying to detect a "send
-// tells" trigger phrase — see internal/parse/bids.go's doc comment for why
-// that's not just simpler but actually more correct.
-func (a *App) StartBidCapture(itemName string) error {
-	if itemName == "" {
-		return errors.New("name the item you're collecting bids for")
-	}
-	if a.logPath == "" {
-		return errors.New("no log file selected — use Settings to pick one first")
-	}
-	a.bidItemName = itemName
-	a.bidStartedAt = time.Now()
-	a.bidOpen = true
-	return nil
-}
-
-func (a *App) IsBidCaptureOpen() bool {
-	return a.bidOpen
-}
-
-func (a *App) CurrentBidItemName() string {
-	return a.bidItemName
-}
-
-// StopBidCapture closes the window and returns every candidate bid seen
-// since Start, in log order, with later-from-the-same-character rows
+// CaptureBids takes a snapshot: name the item, click once, done. It finds
+// the most recent "<item> send tells" line the officer said themselves (at
+// or before now) and treats that as the window start — see
+// parse.FindAnnouncementStart — so there's no separate Start step to
+// forget before bids start coming in. Every candidate tell in that window
+// comes back, in log order, with later-from-the-same-character rows
 // marked Superseded (default) — never dropped, so the officer can override
 // which one actually wins before submitting.
-func (a *App) StopBidCapture() ([]BidRow, error) {
-	if !a.bidOpen {
-		return nil, errors.New("no bid capture is open")
+func (a *App) CaptureBids(itemName string) ([]BidRow, error) {
+	if itemName == "" {
+		return nil, errors.New("name the item you're collecting bids for")
 	}
 	raw, err := a.readLog()
 	if err != nil {
 		return nil, err
 	}
 
-	candidates := parse.CaptureBids(raw, a.bidStartedAt, time.Now())
+	now := time.Now()
+	startAt, ok := parse.FindAnnouncementStart(raw, itemName, now)
+	if !ok {
+		return nil, fmt.Errorf("no %q \"send tells\" announcement found in your log — say it in guild chat first, or check the item name spelling", itemName)
+	}
+
+	candidates := parse.CaptureBids(raw, startAt, now)
 	latest := parse.ResolveLatestPerCharacter(candidates)
 
 	rows := make([]BidRow, 0, len(candidates))
@@ -225,8 +222,6 @@ func (a *App) StopBidCapture() ([]BidRow, error) {
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].OccurredAt < rows[j].OccurredAt })
 
-	a.bidOpen = false
-	a.bidItemName = ""
 	return rows, nil
 }
 

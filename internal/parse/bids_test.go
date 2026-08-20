@@ -78,6 +78,37 @@ func TestCaptureBids_WindowExcludesOutsideTells(t *testing.T) {
 	}
 }
 
+func TestFindAnnouncementStart_RealSample(t *testing.T) {
+	// Cutoff after the "- last call" repeat (22:22:18) but before the
+	// grats/close line (22:23:18) — the announcement should resolve to
+	// the LAST "send tells" line at/before cutoff, not the first.
+	cutoff := time.Date(2026, time.August, 17, 22, 23, 0, 0, time.UTC)
+	found, ok := FindAnnouncementStart(bidsSample, "Soul Essence of Aten Ha Ra", cutoff)
+	if !ok {
+		t.Fatal("expected an announcement to be found")
+	}
+	want := time.Date(2026, time.August, 17, 22, 22, 18, 0, time.UTC)
+	if !found.Equal(want) {
+		t.Errorf("found = %v, want %v (the last-call repeat, not the opening call)", found, want)
+	}
+}
+
+func TestFindAnnouncementStart_IgnoresOtherOfficersAndOtherItems(t *testing.T) {
+	cutoff := time.Date(2026, time.August, 17, 22, 21, 0, 0, time.UTC)
+	// Only "Armguard of Shadows" send-tells lines exist at/before this
+	// cutoff (from Mendacious, not "You") — none should match a search
+	// for a different item.
+	if _, ok := FindAnnouncementStart(bidsSample, "Torch of Judgment", cutoff); ok {
+		t.Error("expected no match for an item nobody has announced yet")
+	}
+}
+
+func TestFindAnnouncementStart_NoMatchReturnsFalse(t *testing.T) {
+	if _, ok := FindAnnouncementStart(bidsSample, "Something Nobody Announced", time.Now()); ok {
+		t.Error("expected ok=false for an item never announced")
+	}
+}
+
 func TestResolveLatestPerCharacter_LastBidWins(t *testing.T) {
 	t1 := time.Date(2026, time.August, 17, 22, 19, 0, 0, time.UTC)
 	t2 := t1.Add(time.Minute)

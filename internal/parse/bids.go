@@ -8,6 +8,42 @@ import (
 
 var tellRe = regexp.MustCompile(`^(\S+) tells you, '(.*)'$`)
 
+// A log owner's own outgoing chat always starts with "You " (say/tell/
+// tells to guild/raid/party/etc.) followed by a quoted message — never
+// another character's name, so this can't false-match someone else
+// announcing a different item. See FindAnnouncementStart.
+var ownChatRe = regexp.MustCompile(`^You .*, '(.*)'$`)
+
+// FindAnnouncementStart returns the timestamp of the most recent line at
+// or before cutoff where the log owner announced this item for bids — a
+// "You ..., '<message>'" line whose message contains both "send tells"
+// and the item name, case-insensitively (matches both the opening call
+// and a later "- last call" repeat; the LAST one at/before cutoff wins,
+// since that's the actual start of the final bidding window). ok is false
+// if no such line exists, meaning the officer hasn't said "send tells"
+// for this item yet, or the item name doesn't match what they typed.
+func FindAnnouncementStart(raw string, itemName string, cutoff time.Time) (foundAt time.Time, ok bool) {
+	item := strings.ToLower(strings.TrimSpace(itemName))
+	if item == "" {
+		return time.Time{}, false
+	}
+	for _, l := range splitLogLines(raw) {
+		if l.Time.After(cutoff) {
+			break
+		}
+		m := ownChatRe.FindStringSubmatch(l.Text)
+		if m == nil {
+			continue
+		}
+		msg := strings.ToLower(m[1])
+		if !strings.Contains(msg, "send tells") || !strings.Contains(msg, item) {
+			continue
+		}
+		foundAt, ok = l.Time, true
+	}
+	return foundAt, ok
+}
+
 // BidCandidate is one incoming tell that looked like a bid during a
 // capture window. Item name isn't recorded here — the officer names the
 // item once when they click Start, not per-tell — see CaptureBids.

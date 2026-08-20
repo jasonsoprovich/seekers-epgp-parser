@@ -102,6 +102,18 @@ func (c *Client) FetchCharacters(ctx context.Context) ([]Character, error) {
 	return out.Characters, nil
 }
 
+// --- GET /api/officer/items ---
+
+func (c *Client) FetchItems(ctx context.Context) ([]string, error) {
+	var out struct {
+		Items []string `json:"items"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/officer/items", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
 // --- POST /api/officer/attendance ---
 
 type AttendanceRequest struct {

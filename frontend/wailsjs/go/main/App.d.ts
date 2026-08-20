@@ -6,21 +6,17 @@ import {officerapi} from '../models';
 
 export function CaptureAttendance():Promise<main.AttendanceResult>;
 
-export function CurrentBidItemName():Promise<string>;
+export function CaptureBids(arg1:string):Promise<Array<main.BidRow>>;
+
+export function FetchKnownItems():Promise<Array<string>>;
 
 export function GetLogPath():Promise<string>;
 
 export function GetSettings():Promise<config.Settings>;
 
-export function IsBidCaptureOpen():Promise<boolean>;
-
 export function SaveSettings(arg1:string,arg2:string):Promise<void>;
 
 export function SelectLogFile():Promise<string>;
-
-export function StartBidCapture(arg1:string):Promise<void>;
-
-export function StopBidCapture():Promise<Array<main.BidRow>>;
 
 export function SubmitAttendance(arg1:string,arg2:string,arg3:Array<string>):Promise<officerapi.AttendanceResponse>;
 

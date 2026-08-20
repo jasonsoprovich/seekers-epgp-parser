@@ -6,8 +6,12 @@ export function CaptureAttendance() {
   return window['go']['main']['App']['CaptureAttendance']();
 }
 
-export function CurrentBidItemName() {
-  return window['go']['main']['App']['CurrentBidItemName']();
+export function CaptureBids(arg1) {
+  return window['go']['main']['App']['CaptureBids'](arg1);
+}
+
+export function FetchKnownItems() {
+  return window['go']['main']['App']['FetchKnownItems']();
 }
 
 export function GetLogPath() {
@@ -18,24 +22,12 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
-export function IsBidCaptureOpen() {
-  return window['go']['main']['App']['IsBidCaptureOpen']();
-}
-
 export function SaveSettings(arg1, arg2) {
   return window['go']['main']['App']['SaveSettings'](arg1, arg2);
 }
 
 export function SelectLogFile() {
   return window['go']['main']['App']['SelectLogFile']();
-}
-
-export function StartBidCapture(arg1) {
-  return window['go']['main']['App']['StartBidCapture'](arg1);
-}
-
-export function StopBidCapture() {
-  return window['go']['main']['App']['StopBidCapture']();
 }
 
 export function SubmitAttendance(arg1, arg2, arg3) {
