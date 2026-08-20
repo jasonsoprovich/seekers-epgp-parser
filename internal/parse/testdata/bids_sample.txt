@@ -1,0 +1,195 @@
+[Mon Aug 17 22:19:41 2026] Disen hit Disen for 450 points of non-melee damage.
+[Mon Aug 17 22:19:41 2026] Disen experiences a mystical transvergance.
+[Mon Aug 17 22:19:44 2026] You say to your guild, 'Soul Essence of Aten Ha Ra send tells'
+[Mon Aug 17 22:19:44 2026] You no longer have a target.
+[Mon Aug 17 22:19:45 2026] You no longer have a target.
+[Mon Aug 17 22:19:48 2026] Rizy tells you, 'high Soul Essence of Aten Ha Ra'
+[Mon Aug 17 22:19:50 2026] Darkclaw tells you, 'High-Soul Essence of Aten Ha Ra'
+[Mon Aug 17 22:19:50 2026] Ieaini tells you, 'high'
+[Mon Aug 17 22:19:51 2026] Ammaru begins to cast a spell.
+[Mon Aug 17 22:19:52 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:19:53 2026] Ammaru is covered by an aura of white petals.
+[Mon Aug 17 22:19:53 2026] Disen tells you, 'High'
+[Mon Aug 17 22:19:54 2026] Ammaru begins to cast a spell.
+[Mon Aug 17 22:19:55 2026] Mendacious tells Soslead:2, 'Armguard of Shadows'
+[Mon Aug 17 22:19:55 2026] Ammaru is covered by an aura of green petals.
+[Mon Aug 17 22:19:57 2026] Your song ends.
+[Mon Aug 17 22:19:57 2026] Takkisina's skin gleams with an incandescent glow.
+[Mon Aug 17 22:19:58 2026] Theofonias tells you, 'high'
+[Mon Aug 17 22:19:58 2026] Hoder tells you, 'Soul Essence of Aten Ha Ra high'
+[Mon Aug 17 22:19:58 2026] Seilas says, 'Hail'
+[Mon Aug 17 22:19:59 2026] Seilas says, 'Hail'
+[Mon Aug 17 22:20:00 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:20:00 2026] Takkisina tells you, 'Soul Essence of Aten Ha Ra 100'
+[Mon Aug 17 22:20:01 2026] Winladar begins to cast a spell.
+[Mon Aug 17 22:20:06 2026] Kaalos tells you, 'high'
+[Mon Aug 17 22:20:07 2026] Osui tells you, 'low'
+[Mon Aug 17 22:20:08 2026] Takkisina begins to cast a spell.
+[Mon Aug 17 22:20:09 2026] Leighi tells you, 'Soul Essence of Aten Ha Ra high'
+[Mon Aug 17 22:20:10 2026] Astrael tells you, 'Soul Essence of Aten Ha Ra HIGH'
+[Mon Aug 17 22:20:10 2026] Takkisina's hands are covered by a nimbus of deathly darkness.
+[Mon Aug 17 22:20:10 2026] Xasik tells you, 'high for Soul Essence of Aten Ha Ra'
+[Mon Aug 17 22:20:10 2026] Bode tells you, 'high '
+[Mon Aug 17 22:20:11 2026] Grimrose tells you, 'high and a hundo to ignore Grok :D'
+[Mon Aug 17 22:20:13 2026] Seilas hit Seilas for 450 points of non-melee damage.
+[Mon Aug 17 22:20:13 2026] Seilas experiences a mystical transvergance.
+[Mon Aug 17 22:20:13 2026] Grokenspiel lets loose a piercing blast.
+[Mon Aug 17 22:20:14 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:20:15 2026] Your fury of the sea fades.
+[Mon Aug 17 22:20:16 2026] Grokenspiel tries to cast a spell on you, but you are protected.
+[Mon Aug 17 22:20:17 2026] Takkisina's eyes tingle.
+[Mon Aug 17 22:20:17 2026] Koramak tells you, 'Major'
+[Mon Aug 17 22:20:18 2026] Mendacious tells the guild, 'Armguard of Shadows send tells'
+[Mon Aug 17 22:20:19 2026] Grokenspiel tells you, 'high'
+[Mon Aug 17 22:20:20 2026] Ammaru begins to cast a spell.
+[Mon Aug 17 22:20:20 2026] Krayziefoo tells you, 'Soul Essence of Aten Ha Ra HIGH'
+[Mon Aug 17 22:20:22 2026] Tabbie tells the group, 'Can I bid on these to stop Winladar ? '
+[Mon Aug 17 22:20:25 2026] Gonekab is infused with elemental energy.
+[Mon Aug 17 22:20:29 2026] Grokenspiel lets loose a piercing blast.
+[Mon Aug 17 22:20:29 2026] Winladar tells the group, 'Hahahah'
+[Mon Aug 17 22:20:30 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:20:32 2026] Grokenspiel tries to cast a spell on you, but you are protected.
+[Mon Aug 17 22:20:33 2026] Ammaru begins to cast a spell.
+[Mon Aug 17 22:20:37 2026] Your combat prowess lessens.
+[Mon Aug 17 22:20:37 2026] Gonekab is infused with elemental energy.
+[Mon Aug 17 22:20:39 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:20:43 2026] Rora says, 'Hail, Tippy's corpse'
+[Mon Aug 17 22:20:43 2026] Rora says, 'Hail, Tippy's corpse'
+[Mon Aug 17 22:20:43 2026] Rora says, 'Hail, Tippy's corpse'
+[Mon Aug 17 22:20:43 2026] Allrin tells you, 'Soul Essence of Aten Ha Ra high'
+[Mon Aug 17 22:20:53 2026] Fanadenie tells the raid,  'Fanadenie using her Rez-o-matic for [ Tippy ]'
+[Mon Aug 17 22:20:53 2026] Luna tells Soslead:2, 'Tome of Secrets'
+[Mon Aug 17 22:20:54 2026] Fanadenie begins to cast a spell.
+[Mon Aug 17 22:20:55 2026] Winladar tells the group, 'Thorny Chain Sleeves haven't been rockin these too long, but still cant pass up going for the 50 atk'
+[Mon Aug 17 22:20:56 2026] Astrael's spell fizzles!
+[Mon Aug 17 22:21:00 2026] Mellisie says, 'Hail, Tippy's corpse'
+[Mon Aug 17 22:21:01 2026] Leighi tells the raid,  'Rezzing Tippy'
+[Mon Aug 17 22:21:01 2026] Leighi begins to cast a spell.
+[Mon Aug 17 22:21:05 2026] Leighi's casting is interrupted!
+[Mon Aug 17 22:21:08 2026] Katrinka tells you, 'I have a zoom board meeting starting in 10 minutes, so I need to log.  No more bosses for me tonight.'
+[Mon Aug 17 22:21:08 2026] Darkclaw tells the guild, 'send tells Torch of Judgment-last call'
+[Mon Aug 17 22:21:09 2026] Tippy tells the group, 'youll use the arms all the way to the end'
+[Mon Aug 17 22:21:10 2026] Luna tells the guild, 'Tells for Tome of Secrets'
+[Mon Aug 17 22:21:12 2026] A missed note brings Punk's song to a close!
+[Mon Aug 17 22:21:18 2026] Tabbie tells the group, 'Oh wow those are nice sleaves too '
+[Mon Aug 17 22:21:20 2026] Mellisie begins to cast a spell.
+[Mon Aug 17 22:21:22 2026] Mendacious tells the guild, 'Armguard of Shadows send tells last call'
+[Mon Aug 17 22:21:23 2026] Osui begins to cast a spell.
+[Mon Aug 17 22:21:25 2026] Tippy experiences visions of grandeur.
+[Mon Aug 17 22:21:27 2026] Tippy experiences visions of grandeur.
+[Mon Aug 17 22:21:28 2026] Kildrey begins to cast a spell.
+[Mon Aug 17 22:21:29 2026] Winladar tells the group, 'yeah for sure'
+[Mon Aug 17 22:21:31 2026] Kildrey hit Kildrey for 60 points of non-melee damage.
+[Mon Aug 17 22:21:31 2026] Kildrey staggers.
+[Mon Aug 17 22:21:31 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:21:33 2026] Kildrey begins to cast a spell.
+[Mon Aug 17 22:21:36 2026] You cannot pick up a lore item you already possess.
+[Mon Aug 17 22:21:36 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:21:40 2026] Fanadenie begins to cast a spell.
+[Mon Aug 17 22:21:41 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:21:42 2026] Grimrose begins to cast a spell.
+[Mon Aug 17 22:21:43 2026] Tippy's image shimmers.
+[Mon Aug 17 22:21:43 2026] Tippy is blessed by the spirits of ancient Coldain heroes.
+[Mon Aug 17 22:21:43 2026] Tippy is bathed in an ethereal light.
+[Mon Aug 17 22:21:43 2026] Tippy's hand is covered with a dull aura.
+[Mon Aug 17 22:21:44 2026] Tippy experiences visions of grandeur.
+[Mon Aug 17 22:21:47 2026] Tippy tells the group, 'selos please'
+[Mon Aug 17 22:21:48 2026] Katrinka tells you, 'I got my vacation dates wrong on my post. I will be here next week. Gone 9/1 to 9/10. I'll repost the correct info.'
+[Mon Aug 17 22:21:48 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:21:51 2026] Besko experiences visions of grandeur.
+[Mon Aug 17 22:21:52 2026] Takkisina begins to cast a spell.
+[Mon Aug 17 22:21:52 2026] Tippy has been filled with spiritual strength.
+[Mon Aug 17 22:21:52 2026] Darkclaw tells the guild, 'Gratz Tiliki-Torch of Judgment'
+[Mon Aug 17 22:21:54 2026] Takkisina's hands are covered by a nimbus of deathly darkness.
+[Mon Aug 17 22:21:54 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:21:55 2026] Winladar tells the guild, 'Congrats!'
+[Mon Aug 17 22:21:56 2026] Osui tells the guild, 'grats'
+[Mon Aug 17 22:21:57 2026] Disen tells the guild, 'Grats!'
+[Mon Aug 17 22:21:57 2026] Besko experiences visions of grandeur.
+[Mon Aug 17 22:21:59 2026] Allrin tells the guild, 'Grats!!'
+[Mon Aug 17 22:21:59 2026] Theofonias tells the guild, 'grats!'
+[Mon Aug 17 22:22:00 2026] Leighi tells the raid,  'camping'
+[Mon Aug 17 22:22:01 2026] Hakue tells the guild, 'congrats!'
+[Mon Aug 17 22:22:01 2026] Seilas tells the guild, 'grats'
+[Mon Aug 17 22:22:01 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:01 2026] Kildrey tells the guild, 'grats'
+[Mon Aug 17 22:22:02 2026] Katrinka tells the guild, 'Grats!'
+[Mon Aug 17 22:22:02 2026] A missed note brings Punk's song to a close!
+[Mon Aug 17 22:22:03 2026] Hoder tells the guild, 'Grats!!'
+[Mon Aug 17 22:22:03 2026] Rizy tells the guild, 'grats'
+[Mon Aug 17 22:22:03 2026] Hakammer tells the guild, 'grats'
+[Mon Aug 17 22:22:04 2026] Korreh experiences visions of grandeur.
+[Mon Aug 17 22:22:04 2026] Bode tells the guild, 'Grats'
+[Mon Aug 17 22:22:05 2026] Ieaini tells the guild, 'Grats'
+[Mon Aug 17 22:22:05 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:07 2026] Tippy begins to cast a spell.
+[Mon Aug 17 22:22:07 2026] Xasik tells the guild, 'gratz'
+[Mon Aug 17 22:22:08 2026] Fanadenie begins to cast a spell.
+[Mon Aug 17 22:22:08 2026] A missed note brings Grokenspiel's song to a close!
+[Mon Aug 17 22:22:10 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:13 2026] Grimrose experiences visions of grandeur.
+[Mon Aug 17 22:22:15 2026] Tippy is surrounded by a brief lupine aura.
+[Mon Aug 17 22:22:16 2026] Mendacious tells the guild, 'Armguard of Shadows grats Stonae'
+[Mon Aug 17 22:22:18 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:18 2026] You say to your guild, 'Soul Essence of Aten Ha Ra send tells - last call'
+[Mon Aug 17 22:22:18 2026] Fanadenie tells the guild, 'Gratz'
+[Mon Aug 17 22:22:20 2026] Tippy tells the guild, 'grats!'
+[Mon Aug 17 22:22:21 2026] You tell your party, 'grats'
+[Mon Aug 17 22:22:21 2026] Winladar tells the guild, 'Congrats!'
+[Mon Aug 17 22:22:21 2026] Rizy tells the guild, 'grats'
+[Mon Aug 17 22:22:21 2026] Your song ends.
+[Mon Aug 17 22:22:21 2026] Ieaini tells the guild, 'Grats'
+[Mon Aug 17 22:22:22 2026] Disen tells the guild, 'Grats!'
+[Mon Aug 17 22:22:24 2026] Kulolan tells the guild, 'congrats $'
+[Mon Aug 17 22:22:24 2026] Theofonias tells the guild, 'gotta afk again'
+[Mon Aug 17 22:22:25 2026] Tabbie tells the group, 'Grats Stone '
+[Mon Aug 17 22:22:25 2026] Leighi has left the raid.
+[Mon Aug 17 22:22:25 2026] Kaalos tells the guild, 'grats Stonae!'
+[Mon Aug 17 22:22:25 2026] Rora tells the group, 'grats Stonae!'
+[Mon Aug 17 22:22:25 2026] Katrinka tells the guild, 'Grats!'
+[Mon Aug 17 22:22:26 2026] Osui tells the guild, 'grats'
+[Mon Aug 17 22:22:27 2026] Margit tells the guild, 'Grats STonae!'
+[Mon Aug 17 22:22:27 2026] Hakammer tells the guild, 'grats'
+[Mon Aug 17 22:22:28 2026] Winladar tells the group, 'hell yeah!'
+[Mon Aug 17 22:22:28 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:32 2026] Hoder tells the guild, 'Grats!!'
+[Mon Aug 17 22:22:35 2026] Stonae tells you, 'Soul Essence of Aten Ha Ra high bid'
+[Mon Aug 17 22:22:36 2026] Grokenspiel lets loose a piercing blast.
+[Mon Aug 17 22:22:37 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:37 2026] Bode tells the guild, 'Grats!'
+[Mon Aug 17 22:22:39 2026] Luna tells the guild, 'Tells for Tome of Secrets - Last Call'
+[Mon Aug 17 22:22:39 2026] Tippy tells you, 'selos'
+[Mon Aug 17 22:22:40 2026] Allrin experiences visions of grandeur.
+[Mon Aug 17 22:22:43 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:43 2026] Tiliki tells you, 'invite'
+[Mon Aug 17 22:22:43 2026] Cross-zone raid invite sent to Tiliki.
+[Mon Aug 17 22:22:43 2026] They will need to type #raidaccept to join.
+[Mon Aug 17 22:22:45 2026] Tiliki joined the raid.
+[Mon Aug 17 22:22:46 2026] Sipen experiences visions of grandeur.
+[Mon Aug 17 22:22:46 2026] --Stonae has looted a Armguard of Shadows.--
+[Mon Aug 17 22:22:47 2026] Your feet move faster.
+[Mon Aug 17 22:22:49 2026] Tabbie tells the guild, 'Grats winners '
+[Mon Aug 17 22:22:50 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:22:51 2026] Your song ends.
+[Mon Aug 17 22:22:52 2026] Grokenspiel lets loose a piercing blast.
+[Mon Aug 17 22:22:53 2026] Krayziefoo experiences visions of grandeur.
+[Mon Aug 17 22:22:54 2026] Elixindra begins to cast a spell.
+[Mon Aug 17 22:22:55 2026] Tabbie tells the group, 'You close to cap Stone ? '
+[Mon Aug 17 22:22:57 2026] --Tiliki has looted a Torch of Judgment.--
+[Mon Aug 17 22:23:00 2026] Astrael's spell fizzles!
+[Mon Aug 17 22:23:01 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:23:01 2026] Elixindra is surrounded by a multicolored aura.
+[Mon Aug 17 22:23:06 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:23:07 2026] Grokenspiel lets loose a piercing blast.
+[Mon Aug 17 22:23:07 2026] Stonae tells the group, 'nah'
+[Mon Aug 17 22:23:08 2026] Astrael's casting is interrupted!
+[Mon Aug 17 22:23:10 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:23:11 2026] Zypheir begins to cast a spell.
+[Mon Aug 17 22:23:17 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:23:18 2026] You say to your guild, 'Soul Essence of Aten Ha Ra - grats Grokenspiel'
+[Mon Aug 17 22:23:20 2026] Kulolan experiences visions of grandeur.
+[Mon Aug 17 22:23:23 2026] Astrael begins to cast a spell.
+[Mon Aug 17 22:23:23 2026] Grokenspiel lets loose a piercing blast.
+[Mon Aug 17 22:23:23 2026] Disen tells the guild, 'Grats!'
+[Mon Aug 17 22:23:23 2026] Ieaini tells the guild, 'Grats'
+[Mon Aug 17 22:23:24 2026] Korreh tells the guild, 'Grats'

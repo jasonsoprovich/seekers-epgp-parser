@@ -1,0 +1,130 @@
+[Wed Aug 19 22:35:20 2026] Besko punches Lord Inquisitor Seru for 46 points of damage.
+[Wed Aug 19 22:35:20 2026] Darkclaw Scores a critical hit!(27)
+[Wed Aug 19 22:35:20 2026] Darkclaw kicks Lord Inquisitor Seru for 27 points of damage.
+[Wed Aug 19 22:35:20 2026] You throw your head back and let loose a piercing blast.
+[Wed Aug 19 22:35:20 2026] Katrinka slashes Lord Inquisitor Seru for 69 points of damage.
+[Wed Aug 19 22:35:20 2026] Tippy backstabs Lord Inquisitor Seru for 576 points of damage.
+[Wed Aug 19 22:35:20 2026] Stonae backstabs Lord Inquisitor Seru for 220 points of damage.
+[Wed Aug 19 22:35:20 2026] Kikkitflaw punches Lord Inquisitor Seru for 17 points of damage.
+[Wed Aug 19 22:35:20 2026] Kikkitflaw punches Lord Inquisitor Seru for 76 points of damage.
+[Wed Aug 19 22:35:20 2026] Kikkitflaw punches Lord Inquisitor Seru for 47 points of damage.
+[Wed Aug 19 22:35:20 2026] Kikkitflaw punches Lord Inquisitor Seru for 79 points of damage.
+[Wed Aug 19 22:35:21 2026] Erruh slashes Lord Inquisitor Seru for 142 points of damage.
+[Wed Aug 19 22:35:21 2026] Rora pierces Lord Inquisitor Seru for 25 points of damage.
+[Wed Aug 19 22:35:21 2026] Rora pierces Lord Inquisitor Seru for 86 points of damage.
+[Wed Aug 19 22:35:21 2026] Huenan begins to cast a spell.
+[Wed Aug 19 22:35:21 2026] Kulolan hits Lord Inquisitor Seru for 598 points of damage.
+[Wed Aug 19 22:35:21 2026] Players on EverQuest:
+[Wed Aug 19 22:35:21 2026] ---------------------------
+[Wed Aug 19 22:35:21 2026] [60 Warlock] Kuky (Unknown) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Hierophant] Avenn (Unknown) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 High Priest] Fanadenie (High Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Hierophant] Theofonias (Dark Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Sorcerer] Klaital (Dark Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Sorcerer] Elixindra (Human) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Savage Lord] Besko (Barbarian) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Assassin] Tippy (Gnome) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Assassin] Rora (Gnome) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Phantasmist] Astrael (Gnome) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [58 Evoker] Yora (Human) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [ANONYMOUS] Hawthor  <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 High Priest] Leighi (Erudite) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [ANONYMOUS] Luna  <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [ANONYMOUS] Kaalos  <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Oracle] Hoder (Barbarian) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [ANONYMOUS] Narya  <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Oracle] Huenan (Ogre) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 High Priest] Mendacious (Halfling) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Warder] Kulolan (Wood Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Warlord] Katrinka (Barbarian) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Oracle] Nixzard (Iksar) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [ANONYMOUS] Glepina  <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Crusader] Hakammer (Dwarf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Warder] Ivorwen (Human) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Virtuoso] Ieaini (Wood Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Grandmaster] Kikkitflaw (Iksar) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Warlord] Margit (Barbarian) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Warlord] Erruh (Ogre) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Grandmaster] Rizy (Dark Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Assassin] Tabbie (Wood Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Phantasmist] Osui (Dark Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Crusader] Yggdra (High Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Savage Lord] Grimrose (Barbarian) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Warlock] Xasik (Unknown) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Phantasmist] Mysticmayhem (High Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [ANONYMOUS] Takkisina  <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Assassin] Stonae (Barbarian) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Savage Lord] Darkclaw (Vah Shir) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Arch Mage] Ammaru (Unknown) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Virtuoso] Punk (Wood Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [60 Virtuoso] Sandrian (Half Elf) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] There are 42 players in Sanctus Seru.
+[Wed Aug 19 22:35:21 2026] Stonae pierces Lord Inquisitor Seru for 54 points of damage.
+[Wed Aug 19 22:35:21 2026] Grimrose punches Lord Inquisitor Seru for 2 points of damage.
+[Wed Aug 19 22:35:21 2026] Rora backstabs Lord Inquisitor Seru for 406 points of damage.
+[Wed Aug 19 22:35:21 2026] Tabbie backstabs Lord Inquisitor Seru for 120 points of damage.
+[Wed Aug 19 22:35:21 2026] Tabbie backstabs Lord Inquisitor Seru for 309 points of damage.
+[Wed Aug 19 22:35:21 2026] You try to pierce Lord Inquisitor Seru, but Lord Inquisitor Seru is INVULNERABLE!
+[Wed Aug 19 22:35:21 2026] Ivorwen hits Lord Inquisitor Seru for 307 points of damage.
+[Wed Aug 19 22:35:21 2026] Mendacious begins to cast a spell.
+[Wed Aug 19 22:35:21 2026] You try to slash Lord Inquisitor Seru, but Lord Inquisitor Seru is INVULNERABLE!
+[Wed Aug 19 22:35:21 2026] Theofonias hit Lord Inquisitor Seru for 1175 points of non-melee damage.
+[Wed Aug 19 22:35:21 2026] Lord Inquisitor Seru's skin ignites as starfire courses over them.
+[Wed Aug 19 22:35:21 2026] Besko punches Lord Inquisitor Seru for 82 points of damage.
+[Wed Aug 19 22:35:21 2026] Mendacious tells the raid,  '--- 111 --- CH Margit with << 82% >> remaining!'
+[Wed Aug 19 22:35:21 2026] Kikkitflaw punches Lord Inquisitor Seru for 68 points of damage.
+[Wed Aug 19 22:35:21 2026] Kikkitflaw punches Lord Inquisitor Seru for 105 points of damage.
+[Wed Aug 19 22:35:21 2026] Hawthor hit Lord Inquisitor Seru for 1207 points of non-melee damage.
+[Wed Aug 19 22:35:21 2026] Lord Inquisitor Seru's skin peels away as moonfire consumes their body.
+[Wed Aug 19 22:35:21 2026] Margit hit Lord Inquisitor Seru for 96 points of non-melee damage.
+[Wed Aug 19 22:35:21 2026] Lord Inquisitor Seru was burned.
+[Wed Aug 19 22:35:21 2026] Lord Inquisitor Seru slashes Margit for 414 points of damage.
+[Wed Aug 19 22:35:21 2026] Tippy pierces Lord Inquisitor Seru for 35 points of damage.
+[Wed Aug 19 22:35:21 2026] Tippy pierces Lord Inquisitor Seru for 6 points of damage.
+[Wed Aug 19 22:35:21 2026] Tippy pierces Lord Inquisitor Seru for 55 points of damage.
+[Wed Aug 19 22:35:21 2026] Margit hit Lord Inquisitor Seru for 96 points of non-melee damage.
+[Wed Aug 19 22:35:21 2026] Lord Inquisitor Seru was burned.
+[Wed Aug 19 22:35:21 2026] Lord Inquisitor Seru hits Margit for 771 points of damage.
+[Wed Aug 19 22:35:21 2026] Xasik hit Lord Inquisitor Seru for 734 points of non-melee damage.
+[Wed Aug 19 22:35:21 2026] Lord Inquisitor Seru's body withers from the gangrenous touch of Zum`uul. (Tap: Gangrenous Touch of Zum`uul)
+[Wed Aug 19 22:35:22 2026] Rora pierces Lord Inquisitor Seru for 45 points of damage.
+[Wed Aug 19 22:35:22 2026] Rora pierces Lord Inquisitor Seru for 15 points of damage.
+[Wed Aug 19 22:35:22 2026] Fanadenie's casting is interrupted!
+[Wed Aug 19 22:35:22 2026] Hakammer slashes Lord Inquisitor Seru for 93 points of damage.
+[Wed Aug 19 22:35:22 2026] Darkclaw hits Lord Inquisitor Seru for 40 points of damage.
+[Wed Aug 19 22:35:22 2026] Grimrose punches Lord Inquisitor Seru for 45 points of damage.
+[Wed Aug 19 22:35:22 2026] Grimrose punches Lord Inquisitor Seru for 4 points of damage.
+[Wed Aug 19 22:35:22 2026] Kuky begins to cast a spell.
+[Wed Aug 19 22:35:22 2026] You try to pierce Lord Inquisitor Seru, but Lord Inquisitor Seru is INVULNERABLE!
+[Wed Aug 19 22:35:22 2026] Katrinka slashes Lord Inquisitor Seru for 48 points of damage.
+[Wed Aug 19 22:35:22 2026] Katrinka slashes Lord Inquisitor Seru for 39 points of damage.
+[Wed Aug 19 22:35:22 2026] Tippy pierces Lord Inquisitor Seru for 37 points of damage.
+[Wed Aug 19 22:35:22 2026] Tippy pierces Lord Inquisitor Seru for 11 points of damage.
+[Wed Aug 19 22:35:22 2026] Besko punches Lord Inquisitor Seru for 21 points of damage.
+[Wed Aug 19 22:35:22 2026] Besko punches Lord Inquisitor Seru for 2 points of damage.
+[Wed Aug 19 22:35:22 2026] You try to slash Lord Inquisitor Seru, but Lord Inquisitor Seru is INVULNERABLE!
+[Wed Aug 19 22:35:22 2026] Kulolan hits Lord Inquisitor Seru for 62 points of damage.
+[Wed Aug 19 22:35:22 2026] Rora pierces Lord Inquisitor Seru for 108 points of damage.
+[Wed Aug 19 22:35:22 2026] Kikkitflaw punches Lord Inquisitor Seru for 19 points of damage.
+[Wed Aug 19 22:35:22 2026] Erruh slashes Lord Inquisitor Seru for 102 points of damage.
+[Wed Aug 19 22:35:22 2026] Erruh slashes Lord Inquisitor Seru for 93 points of damage.
+[Wed Aug 19 22:35:22 2026] Stonae pierces Lord Inquisitor Seru for 79 points of damage.
+[Wed Aug 19 22:35:22 2026] Stonae Scores a critical hit!(112)
+[Wed Aug 19 22:35:22 2026] Stonae pierces Lord Inquisitor Seru for 112 points of damage.
+[Wed Aug 19 22:35:22 2026] Stonae pierces Lord Inquisitor Seru for 53 points of damage.
+[Wed Aug 19 22:35:22 2026] A Praetorian Medicus begins to cast a spell.
+[Wed Aug 19 22:35:22 2026] Margit feels the mending of Kragg.
+[Wed Aug 19 22:35:23 2026] Ivorwen hits Lord Inquisitor Seru for 580 points of damage.
+[Wed Aug 19 22:35:23 2026] Margit's cursed form appears bathed in light. (Remove Greater Curse)
+[Wed Aug 19 22:35:23 2026] Mysticmayhem's spell fizzles!
+[Wed Aug 19 22:35:23 2026] Darkclaw Scores a critical hit!(53)
+[Wed Aug 19 22:35:23 2026] Darkclaw hits Lord Inquisitor Seru for 53 points of damage.
+[Wed Aug 19 22:35:23 2026] Ammaru begins to cast a spell.
+[Wed Aug 19 22:35:23 2026] Grimrose punches Lord Inquisitor Seru for 3 points of damage.
+[Wed Aug 19 22:35:23 2026] Tippy pierces Lord Inquisitor Seru for 5 points of damage.
+[Wed Aug 19 22:35:23 2026] Tippy pierces Lord Inquisitor Seru for 97 points of damage.
+[Wed Aug 19 22:35:23 2026] You try to pierce Lord Inquisitor Seru, but Lord Inquisitor Seru is INVULNERABLE!
+[Wed Aug 19 22:35:23 2026] Rora pierces Lord Inquisitor Seru for 94 points of damage.
+[Wed Aug 19 22:35:23 2026] Rora pierces Lord Inquisitor Seru for 42 points of damage.
+[Wed Aug 19 22:35:23 2026] Besko punches Lord Inquisitor Seru for 53 points of damage.
+[Wed Aug 19 22:35:23 2026] Besko punches Lord Inquisitor Seru for 93 points of damage.
