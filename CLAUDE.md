@@ -93,6 +93,16 @@ alone, faster than a full `wails build` for iterating on UI-only changes.
   once via `useRoster()` (`frontend/src/useRoster.ts`), not per-row Go
   round trips — editing a name in an editable table updates its
   Main/Priority live for exactly this reason.
+- **`NoMatchSelect`** (`frontend/src/NoMatchSelect.tsx`, used by
+  Attendance and Bids) resolves an unmatched captured name by calling
+  `LinkCharacter` → `POST /api/officer/characters` on seekers-tracker,
+  which creates the character with placeholder
+  `class=UNKNOWN_CLASS_ID, race=UNKNOWN_RACE_ID, level=1` (same
+  convention as that repo's `scripts/import-epgp.ts`) — the log only
+  gives a name, never class/race/level. `useRoster().createCharacter`
+  merges the created character into local state so the triggering row
+  resolves without a full `FetchRoster` round trip. If that site route's
+  contract changes, this is the other end of it.
 
 ## Status
 
