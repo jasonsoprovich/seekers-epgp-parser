@@ -37,6 +37,12 @@ type AttendanceSnapshot struct {
 // just flagged, so the officer can decide whether to trust it rather than
 // having it silently dropped or silently accepted.
 func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []string) {
+	// Both start non-nil (not just declared) so a clean run — the common
+	// case — serializes to JSON "[]", not "null". The frontend calls
+	// .map() on both without a nil guard (main.AttendanceResult's fields
+	// are typed as plain arrays, not optional), so a nil slice here
+	// crashes the Attendance tab on every ordinary, warning-free capture.
+	warnings = []string{}
 	lines := splitLogLines(raw)
 
 	for i := 0; i < len(lines); i++ {
@@ -48,7 +54,7 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 		}
 
 		blockStart := lines[i].Time
-		var names []string
+		names := []string{}
 		closed := false
 		var zone string
 		var expected int
