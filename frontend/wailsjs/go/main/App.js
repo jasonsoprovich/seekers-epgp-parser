@@ -10,6 +10,10 @@ export function CaptureBids(arg1) {
   return window['go']['main']['App']['CaptureBids'](arg1);
 }
 
+export function CheckForUpdate() {
+  return window['go']['main']['App']['CheckForUpdate']();
+}
+
 export function FetchKnownItems() {
   return window['go']['main']['App']['FetchKnownItems']();
 }
@@ -44,6 +48,10 @@ export function LinkCharacter(arg1, arg2) {
 
 export function OpenAppKeyPage() {
   return window['go']['main']['App']['OpenAppKeyPage']();
+}
+
+export function OpenReleasePage(arg1) {
+  return window['go']['main']['App']['OpenReleasePage'](arg1);
 }
 
 export function SaveSettings(arg1) {

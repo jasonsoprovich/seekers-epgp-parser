@@ -3,15 +3,27 @@ name: Build Windows
 # Cross-compiling this app for Windows from macOS isn't practical — Wails'
 # Windows backend links against WebView2 via CGO, which needs a real
 # MinGW toolchain to cross-compile reliably. Building natively on a
-# windows-latest GitHub-hosted runner sidesteps that entirely. Download
-# the seekers-epgp-parser-windows artifact from the run's Summary page,
-# unzip it on the Windows machine, and run the .exe directly — no
-# installer, no separate WebView2 install needed (it ships on Windows 11
-# and most up-to-date Windows 10 machines already).
+# windows-latest GitHub-hosted runner sidesteps that entirely.
+#
+# Two ways this runs:
+#   - push to main / manual dispatch: unversioned "dev" build, uploaded
+#     as an Actions artifact only (Summary page) — for trying a change
+#     out before cutting a release.
+#   - push of a "vX.Y.Z" tag: versioned build (via -ldflags -X
+#     main.Version=vX.Y.Z) published as a GitHub Release with the .exe
+#     attached. This is what app.go's CheckForUpdate() compares running
+#     officers' builds against, and what officers should actually
+#     install — no installer, no separate WebView2 install needed (it
+#     ships on Windows 11 and most up-to-date Windows 10 machines
+#     already), just download the .exe from the release and run it.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -30,11 +42,28 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build
-        run: wails build -platform windows/amd64
+        run: wails build -platform windows/amd64 -ldflags "-X main.Version=${{ steps.version.outputs.value }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: seekers-epgp-parser-windows
           path: build/bin/*.exe
           if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/bin/*.exe
+          generate_release_notes: true

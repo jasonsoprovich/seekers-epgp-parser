@@ -59,6 +59,34 @@ alone, faster than a full `wails build` for iterating on UI-only changes.
   above before guessing at a frontend fix — the last two real bugs were
   both in what the Go side produced, not the React rendering.
 
+## Releases & update checks
+
+There's no installer and no silent auto-updater — Wails doesn't ship one
+(unlike Electron), and building a self-replacing updater wasn't worth the
+complexity for a handful of officers. Instead: officers get **prompted**
+in-app when they're behind, and manually re-download.
+
+- **`main.Version`** (`main.go`) is `"dev"` by default; `.github/workflows/build-windows.yml`
+  sets it via `-ldflags "-X main.Version=vX.Y.Z"` only when the trigger is
+  a `vX.Y.Z` tag push. Push-to-main / manual-dispatch builds stay `"dev"`
+  and are Actions-artifact-only, not published as a Release.
+- **To cut a real release officers should install:** bump to a
+  `vX.Y.Z` tag and push it (`git tag vX.Y.Z && git push origin vX.Y.Z`).
+  The workflow builds, then publishes a GitHub Release with the `.exe`
+  attached via `softprops/action-gh-release`. That's the same
+  `releases/latest` GitHub API endpoint `internal/updatecheck` polls.
+- **`internal/updatecheck.Check`** (called by `App.CheckForUpdate`, wired
+  into `frontend/src/App.tsx`'s startup banner) compares `main.Version`
+  against `GET /repos/.../releases/latest`. A `"dev"` build always
+  short-circuits to "no update available" — there's nothing meaningful to
+  compare a local build against. Comparison is plain string inequality on
+  the tag (not real semver ordering) — safe only because releases are
+  always published in order and "latest" is GitHub's own notion of most
+  recent, not something this app computes itself.
+- Errors from the update check (offline, GitHub unreachable, no releases
+  published yet) are swallowed by the frontend — it just skips the
+  banner rather than surfacing a fetch error to the officer.
+
 ## Gotchas specific to this repo
 
 - **`time.Parse` defaults to UTC.** EQ log timestamps have no zone of

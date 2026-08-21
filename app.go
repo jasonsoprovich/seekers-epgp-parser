@@ -14,6 +14,7 @@ import (
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/updatecheck"
 )
 
 // App holds the running application's state — just an in-memory cache of
@@ -84,6 +85,26 @@ func (a *App) SaveSettings(apiKey string) error {
 // key back in" rather than typing a URL by hand.
 func (a *App) OpenAppKeyPage() {
 	runtime.BrowserOpenURL(a.ctx, officerapi.ServerURL+"/epgp/app-key")
+}
+
+// --- Updates ---
+
+// CheckForUpdate compares this build's embedded Version against the
+// repo's latest GitHub release, for the startup "you're on an old build"
+// banner. Errors here (no network, GitHub unreachable) are non-fatal to
+// the rest of the app — the frontend just skips showing a banner.
+func (a *App) CheckForUpdate() (updatecheck.Info, error) {
+	return updatecheck.Check(a.ctx, Version)
+}
+
+// OpenReleasePage opens a GitHub release page (from CheckForUpdate's
+// Info.URL) in the officer's default browser, same pattern as
+// OpenAppKeyPage.
+func (a *App) OpenReleasePage(url string) {
+	if url == "" {
+		return
+	}
+	runtime.BrowserOpenURL(a.ctx, url)
 }
 
 func (a *App) officerClient() (*officerapi.Client, error) {
