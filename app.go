@@ -17,14 +17,18 @@ import (
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/updatecheck"
 )
 
-// App holds the running application's state — just an in-memory cache of
-// the selected log file, kept in sync with config.json (see startup and
+// App holds the running application's state: an in-memory cache of the
+// selected log file, kept in sync with config.json (see startup and
 // SelectLogFile) so it survives restarts and rebuilds instead of forcing
-// a re-pick every time the app relaunches.
+// a re-pick every time the app relaunches; and a cache of the site's
+// leader-tunable EPGP settings (PLAN.md §4i, task 1.6) — this app never
+// hardcodes the EP cap, minimum attendance, or decay rates, it fetches
+// them.
 type App struct {
 	ctx context.Context
 
-	logPath string
+	logPath  string
+	settings officerapi.Settings
 }
 
 func NewApp() *App {
@@ -35,6 +39,15 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if s, err := config.Load(); err == nil {
 		a.logPath = s.LogPath
+	}
+	// Best-effort, same as CheckForUpdate: no API key yet, or no network,
+	// just means FetchGuildSettings() below (which every settings-dependent
+	// tab should call before trusting a value) does the live fetch instead
+	// of returning a warm cache.
+	if client, err := a.officerClient(); err == nil {
+		if settings, err := client.FetchSettings(a.ctx); err == nil {
+			a.settings = settings
+		}
 	}
 }
 
@@ -78,6 +91,27 @@ func (a *App) SaveSettings(apiKey string) error {
 	}
 	s.APIKey = apiKey
 	return config.Save(s)
+}
+
+// FetchGuildSettings does a live re-fetch of the site's leader-tunable
+// EPGP settings and updates the in-memory cache startup() seeded — "fetch
+// at startup and re-validate at submit" (PLAN.md §4i, task 1.6). Nothing
+// calls this before a submit yet (there's no threshold to check against
+// until task 4.4's minimum-attendance pre-check lands), but the Settings
+// tab calls it to show the officer the guild's current numbers, and it's
+// the hook 4.4 attaches to rather than trusting a settings snapshot that
+// might be from hours ago.
+func (a *App) FetchGuildSettings() (officerapi.Settings, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return officerapi.Settings{}, err
+	}
+	settings, err := client.FetchSettings(a.ctx)
+	if err != nil {
+		return officerapi.Settings{}, err
+	}
+	a.settings = settings
+	return settings, nil
 }
 
 // OpenAppKeyPage opens the site's app-key generation page in the

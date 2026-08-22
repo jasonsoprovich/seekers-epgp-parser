@@ -272,6 +272,30 @@ export namespace officerapi {
 	        this.points = source["points"];
 	    }
 	}
+	export class Settings {
+	    EPDecay: number;
+	    GPDecay: number;
+	    BaseEP: number;
+	    BaseGP: number;
+	    EPCapPerCycle: number;
+	    MinAttendance: number;
+	    DecayModel: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.EPDecay = source["EPDecay"];
+	        this.GPDecay = source["GPDecay"];
+	        this.BaseEP = source["BaseEP"];
+	        this.BaseGP = source["BaseGP"];
+	        this.EPCapPerCycle = source["EPCapPerCycle"];
+	        this.MinAttendance = source["MinAttendance"];
+	        this.DecayModel = source["DecayModel"];
+	    }
+	}
 	export class TotalsRow {
 	    id: number;
 	    name: string;

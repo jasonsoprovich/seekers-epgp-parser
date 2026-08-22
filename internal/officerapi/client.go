@@ -257,6 +257,52 @@ func (c *Client) FetchLedger(ctx context.Context, kind string, query string, pag
 	return out.Rows, out.HasNext, nil
 }
 
+// --- GET /api/officer/settings ---
+
+// Settings mirrors seekers-tracker's leader-tunable EPGP constants
+// (PLAN.md §4i) — EPCapPerCycle, MinAttendance, and the decay rates are
+// never hardcoded here; this app is a thin capture client and the website
+// owns the rules. The site returns every value as a string (epgp_settings
+// stores everything as text so new settings never need a schema change);
+// DecayModel stays a string (legacy|global), everything else parses to a
+// float64 for arithmetic/comparison on this side.
+type Settings struct {
+	EPDecay       float64
+	GPDecay       float64
+	BaseEP        float64
+	BaseGP        float64
+	EPCapPerCycle float64
+	MinAttendance float64
+	DecayModel    string
+}
+
+func (c *Client) FetchSettings(ctx context.Context) (Settings, error) {
+	var out struct {
+		Settings map[string]string `json:"settings"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/officer/settings", nil, &out); err != nil {
+		return Settings{}, err
+	}
+
+	parseFloat := func(key string) float64 {
+		v, err := strconv.ParseFloat(out.Settings[key], 64)
+		if err != nil {
+			return 0
+		}
+		return v
+	}
+
+	return Settings{
+		EPDecay:       parseFloat("ep_decay"),
+		GPDecay:       parseFloat("gp_decay"),
+		BaseEP:        parseFloat("base_ep"),
+		BaseGP:        parseFloat("base_gp"),
+		EPCapPerCycle: parseFloat("ep_cap_per_cycle"),
+		MinAttendance: parseFloat("min_attendance"),
+		DecayModel:    out.Settings["decay_model"],
+	}, nil
+}
+
 // --- GET /api/officer/totals ---
 
 type TotalsRow struct {

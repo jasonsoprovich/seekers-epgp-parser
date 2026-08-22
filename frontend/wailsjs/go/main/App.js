@@ -14,6 +14,10 @@ export function CheckForUpdate() {
   return window['go']['main']['App']['CheckForUpdate']();
 }
 
+export function FetchGuildSettings() {
+  return window['go']['main']['App']['FetchGuildSettings']();
+}
+
 export function FetchKnownItems() {
   return window['go']['main']['App']['FetchKnownItems']();
 }

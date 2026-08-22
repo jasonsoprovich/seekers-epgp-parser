@@ -11,6 +11,8 @@ export function CaptureBids(arg1:string):Promise<Array<main.BidRow>>;
 
 export function CheckForUpdate():Promise<updatecheck.Info>;
 
+export function FetchGuildSettings():Promise<officerapi.Settings>;
+
 export function FetchKnownItems():Promise<Array<string>>;
 
 export function FetchLedger(arg1:string,arg2:string,arg3:number):Promise<main.LedgerPage>;
