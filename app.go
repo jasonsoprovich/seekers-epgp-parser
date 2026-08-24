@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -133,12 +134,39 @@ func (a *App) CheckForUpdate() (updatecheck.Info, error) {
 
 // OpenReleasePage opens a GitHub release page (from CheckForUpdate's
 // Info.URL) in the officer's default browser, same pattern as
-// OpenAppKeyPage.
+// OpenAppKeyPage. Kept as a fallback next to InstallUpdate — if the
+// automatic swap fails (e.g. no write permission to the install
+// directory), the officer can still download and run the new exe by
+// hand.
 func (a *App) OpenReleasePage(url string) {
 	if url == "" {
 		return
 	}
 	runtime.BrowserOpenURL(a.ctx, url)
+}
+
+// InstallUpdate downloads and verifies the latest release
+// (updatecheck.Apply — SHA-256 checked before anything is swapped in),
+// then relaunches: spawns a new process from the now-updated exe and
+// quits this one. Config lives outside the binary (os.UserConfigDir(),
+// PLAN.md §7 Phase 7.3) so the swap can't touch the officer's saved API
+// key or log path.
+func (a *App) InstallUpdate() error {
+	if _, err := updatecheck.Apply(a.ctx); err != nil {
+		return err
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		// Update applied but we can't relaunch automatically — not fatal,
+		// the officer just reopens the app manually to pick up the swap.
+		return nil
+	}
+	if err := exec.Command(exePath).Start(); err != nil {
+		return nil
+	}
+	runtime.Quit(a.ctx)
+	return nil
 }
 
 func (a *App) officerClient() (*officerapi.Client, error) {

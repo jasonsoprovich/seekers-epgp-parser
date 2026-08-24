@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import "./App.css";
-import { CheckForUpdate, GetLogPath, OpenReleasePage } from "../wailsjs/go/main/App";
+import { CheckForUpdate, GetLogPath, InstallUpdate, OpenReleasePage } from "../wailsjs/go/main/App";
 import { updatecheck } from "../wailsjs/go/models";
 import { AttendancePanel } from "./AttendancePanel";
 import { BidsPanel } from "./BidsPanel";
@@ -14,6 +14,8 @@ function App() {
   const [tab, setTab] = useState<Tab>("attendance");
   const [logPath, setLogPath] = useState("");
   const [updateInfo, setUpdateInfo] = useState<updatecheck.Info | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState("");
 
   // Refreshed whenever Settings changes it — see SettingsPanel's onLogPathChange.
   useEffect(() => {
@@ -28,11 +30,31 @@ function App() {
       .catch(() => {});
   }, []);
 
+  // On success the Go side quits the app itself (after spawning the
+  // updated process), so "installing" just stays true until the window
+  // closes — there's nothing further to reset it to. A failure (e.g. no
+  // write permission to the install directory) surfaces here and leaves
+  // the manual download link as a fallback.
+  function handleInstall() {
+    setInstalling(true);
+    setInstallError("");
+    InstallUpdate().catch((err: unknown) => {
+      setInstalling(false);
+      setInstallError(err instanceof Error ? err.message : String(err));
+    });
+  }
+
   return (
     <div className="app">
       {updateInfo && (
         <div className="update-banner">
-          A new version ({updateInfo.latest}) is available — you're on {updateInfo.current}.
+          <span>
+            A new version ({updateInfo.latest}) is available — you're on {updateInfo.current}.
+            {installError && ` Auto-update failed: ${installError}`}
+          </span>
+          <button className="secondary" onClick={handleInstall} disabled={installing}>
+            {installing ? "Installing…" : "Update & restart"}
+          </button>
           <button className="secondary" onClick={() => OpenReleasePage(updateInfo.url)}>
             Download it ↗
           </button>

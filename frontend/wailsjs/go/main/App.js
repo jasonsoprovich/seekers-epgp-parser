@@ -46,6 +46,10 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function InstallUpdate() {
+  return window['go']['main']['App']['InstallUpdate']();
+}
+
 export function LinkCharacter(arg1, arg2) {
   return window['go']['main']['App']['LinkCharacter'](arg1, arg2);
 }

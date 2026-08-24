@@ -24,10 +24,10 @@ Tasks that land in this repo, and where they're specified:
 |---|---|---|
 | 1.6 | Fetch settings (EP cap, min attendance, decay rates) from the API instead of hardcoding | §4i |
 | 4.4 | Pre-check minimum attendance before submit; show "9 of 12 required" | §4h |
-| 8 | Upgrade the existing update *check* into a real download-and-swap | §7 |
-| 9.3 | In-game inventory export parser | §3, §9 |
-| 13.3 | Push each detected bid tell live, pre-finalize | §15 |
-| 14 | Wails v2 → v3 migration (after 2026-10-17 only) | §7 |
+| 7 | Upgrade the existing update *check* into a real download-and-swap | §7 |
+| 8.3 | In-game inventory export parser | §3, §9 |
+| 12.3 | Push each detected bid tell live, pre-finalize | §15 |
+| 13 | Wails v2 → v3 migration | §7 |
 
 **The app is a thin capture client. The server owns the rules.** Its reason
 to exist is reading large log files off local disk without uploading them.
@@ -52,13 +52,20 @@ does. This app only talks to `/api/officer/*` over HTTP.
   macOS, `os.UserConfigDir()` generally); the server URL is a hardcoded
   constant (`officerapi.ServerURL`), not user-configurable — there's only
   ever one seekers-tracker instance
-- `internal/updatecheck` — compares the running build against this repo's
-  GitHub `releases/latest`, shows a startup banner if behind
+- `internal/updatecheck` — `Check` compares the running build against this
+  repo's GitHub `releases/latest` for the startup banner; `Apply`
+  downloads that release's exe, verifies it against a `.sha256` release
+  asset `build-windows.yml` publishes alongside it, and swaps it into
+  place via `github.com/minio/selfupdate` (Phase 7). `App.InstallUpdate`
+  wraps `Apply`, then relaunches: spawns a new process from the
+  now-updated exe and calls `runtime.Quit`.
 
 **Config lives outside the binary**, in `os.UserConfigDir()`. This is
 deliberate and already correct: it means a binary swap during a self-update
-cannot lose the officer's settings (PLAN.md §7, Phase 8.3). Don't move config
-next to the executable.
+cannot lose the officer's settings (PLAN.md §7, Phase 7.3 — confirmed by
+inspection: `selfupdate.Apply` with an empty `TargetPath` resolves to
+`osext.Executable()`, never anything under `os.UserConfigDir()`). Don't move
+config next to the executable.
 
 ## Commands
 
