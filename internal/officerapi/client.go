@@ -150,6 +150,12 @@ type AttendanceRequest struct {
 type AttendanceResponse struct {
 	Inserted  int      `json:"inserted"`
 	Unmatched []string `json:"unmatched"`
+	// Names skipped because they resolved to a player already awarded this
+	// activity/timestamp elsewhere in the submission, or already on
+	// ep_ledger from an earlier submission of the same capture (PLAN.md
+	// §4h-1) — surfaced rather than silently dropped, same reasoning as
+	// Unmatched.
+	Duplicates []string `json:"duplicates"`
 }
 
 func (c *Client) SubmitAttendance(ctx context.Context, req AttendanceRequest) (AttendanceResponse, error) {

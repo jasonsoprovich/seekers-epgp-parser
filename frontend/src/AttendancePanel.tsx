@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { CaptureAttendance, SubmitAttendance } from "../wailsjs/go/main/App";
+import { useEffect, useState } from "react";
+import { CaptureAttendance, FetchGuildSettings, SubmitAttendance } from "../wailsjs/go/main/App";
 import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import { main } from "../wailsjs/go/models";
 import { NoMatchSelect } from "./NoMatchSelect";
@@ -20,6 +20,13 @@ type EditableRow = { name: string; displayName: string };
 // in sync in spirit, not exact points.
 const ACTIVITIES = ["Raid - Start", "Raid - Mid", "Raid - End", "Guild Meeting", "Event Attend"];
 
+// Mirrors seekers-tracker's ATTENDANCE_GATED_ACTIVITIES
+// (src/lib/epgp/attendance.ts) — PLAN.md §4h applies the minimum only to
+// these; Guild Meeting has none. Server-side is authoritative regardless
+// (task 4.1) — this only lets the officer catch a short capture before
+// wasting a submit (task 4.4).
+const GATED_ACTIVITIES = new Set(["Raid - Start", "Raid - Mid", "Raid - End", "Event Attend"]);
+
 export function AttendancePanel() {
   const [snapshot, setSnapshot] = useState<main.AttendanceResult | null>(null);
   const [rows, setRows] = useState<EditableRow[]>([]);
@@ -29,7 +36,17 @@ export function AttendancePanel() {
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [minAttendance, setMinAttendance] = useState<number | null>(null);
   const roster = useRoster();
+
+  // Best-effort, same as everywhere else settings get read (PLAN.md §4i) —
+  // a stale/missing value just means the pre-check below is skipped; the
+  // server still enforces the real minimum.
+  useEffect(() => {
+    FetchGuildSettings()
+      .then((s) => setMinAttendance(s.MinAttendance))
+      .catch(() => setMinAttendance(null));
+  }, []);
 
   async function onCapture() {
     setPending(true);
@@ -76,9 +93,28 @@ export function AttendancePanel() {
     setError(null);
     try {
       const names = rows.map((r) => r.name.trim()).filter(Boolean);
+
+      // "fetch at startup and re-validate at submit" (PLAN.md §4i) — don't
+      // trust the settings snapshot from when this tab mounted, in case a
+      // leader changed the threshold since. The server enforces the real
+      // minimum regardless (task 4.1); this just avoids a round trip for
+      // the common case of an obviously-short capture.
+      let required = minAttendance;
+      try {
+        required = (await FetchGuildSettings()).MinAttendance;
+        setMinAttendance(required);
+      } catch {
+        // Best-effort refresh — fall back to whatever was already loaded.
+      }
+      if (GATED_ACTIVITIES.has(activity) && required !== null && names.length < required) {
+        setError(`Only ${names.length} of ${required} required guild members attended.`);
+        return;
+      }
+
       const result = await SubmitAttendance(activity, snapshot.occurredAt, names);
       const unmatchedNote = result.unmatched.length > 0 ? ` — no match for: ${result.unmatched.join(", ")}` : "";
-      setSubmitResult(`Recorded ${activity} for ${result.inserted} character(s).${unmatchedNote}`);
+      const duplicatesNote = result.duplicates.length > 0 ? ` — already recorded, skipped: ${result.duplicates.join(", ")}` : "";
+      setSubmitResult(`Recorded ${activity} for ${result.inserted} character(s).${unmatchedNote}${duplicatesNote}`);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -109,6 +145,12 @@ export function AttendancePanel() {
           <div className="toolbar">
             <span style={{ color: "#9ca3af", fontSize: 13 }}>
               {snapshot.zone} — {new Date(snapshot.occurredAt).toLocaleString()} — {rows.length} name(s)
+              {GATED_ACTIVITIES.has(activity) && minAttendance !== null && (
+                <span style={{ color: rows.length < minAttendance ? "#f87171" : "#9ca3af" }}>
+                  {" "}
+                  ({rows.length} of {minAttendance} required)
+                </span>
+              )}
             </span>
             <select value={activity} onChange={(e) => setActivity(e.target.value)}>
               {ACTIVITIES.map((a) => (

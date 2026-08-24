@@ -131,6 +131,7 @@ export namespace officerapi {
 	export class AttendanceResponse {
 	    inserted: number;
 	    unmatched: string[];
+	    duplicates: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new AttendanceResponse(source);
@@ -140,6 +141,7 @@ export namespace officerapi {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.inserted = source["inserted"];
 	        this.unmatched = source["unmatched"];
+	        this.duplicates = source["duplicates"];
 	    }
 	}
 	export class BidEntry {
