@@ -1,0 +1,13 @@
+Location	Name	ID	Count/Charges	Slots
+Head	Empty	0	0	0
+General1	Backpack	17005	1	8
+General1-Slot1	Different Item	250	3	0
+General-Coin	Currency	0	42	0
+Bank1	Empty	0	0	0
+SharedBank1	Shared Bag	400	1	8
+SharedBank1-Slot1	Shared Item A	401	2	0
+SharedBank10	Last Real Slot Item	410	1	0
+SharedBank11	Ghost Item	420	1	0
+SharedBank11-Slot3	Ghost Slot Item	421	1	0
+SharedBank30	Empty	0	0	0
+Bank-Coin	Currency	0	999999	0
