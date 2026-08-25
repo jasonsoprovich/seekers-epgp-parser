@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { FetchGuildSettings, GetLogPath, GetSettings, OpenAppKeyPage, SaveSettings, SelectLogFile, TestConnection } from "../wailsjs/go/main/App";
-import type { officerapi } from "../wailsjs/go/models";
+import { FetchGuildSettings, GetLogPath, GetSettings, OpenAppKeyPage, SaveSettings, SelectLogFile, TestConnection } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { Settings as GuildSettings } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 
 export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: string) => void }) {
   const [apiKey, setApiKey] = useState("");
@@ -9,7 +9,7 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [guildSettings, setGuildSettings] = useState<officerapi.Settings | null>(null);
+  const [guildSettings, setGuildSettings] = useState<GuildSettings | null>(null);
   const [guildSettingsError, setGuildSettingsError] = useState<string | null>(null);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { CaptureBids, FetchKnownItems, SubmitBids } from "../wailsjs/go/main/App";
-import { ClipboardSetText } from "../wailsjs/runtime/runtime";
-import { main } from "../wailsjs/go/models";
+import { Clipboard } from "@wailsio/runtime";
+import { CaptureBids, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
@@ -21,7 +21,7 @@ const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low
 // resolving an unmatched row (e.g. linking "Leighi" as a new alt of main
 // "Tiliki") doesn't overwrite the captured name the officer recognizes —
 // the Main column is where the resolved main shows up instead.
-type BidRow = main.BidRow & { winner: boolean; displayName: string };
+type BidRow = CapturedBidRow & { winner: boolean; displayName: string };
 
 export function BidsPanel() {
   const [itemName, setItemName] = useState("");
@@ -41,7 +41,7 @@ export function BidsPanel() {
   // autocomplete list shouldn't block capturing bids at all.
   useEffect(() => {
     FetchKnownItems()
-      .then(setKnownItems)
+      .then((items) => setKnownItems(items ?? []))
       .catch(() => setKnownItems([]));
   }, []);
 
@@ -52,7 +52,7 @@ export function BidsPanel() {
     setPending(true);
     try {
       const result = await CaptureBids(itemName);
-      setRows(result.map((r) => ({ ...r, winner: false, displayName: r.characterName })));
+      setRows((result ?? []).map((r) => ({ ...r, winner: false, displayName: r.characterName })));
       setCapturedItem(itemName);
     } catch (err) {
       setError(String(err));
@@ -125,7 +125,7 @@ export function BidsPanel() {
   async function onCopyGrats() {
     const winners = rows.filter((r) => r.winner);
     if (winners.length === 0) return;
-    await ClipboardSetText(gratsMessage(winners));
+    await Clipboard.SetText(gratsMessage(winners));
     setGratsCopied(true);
   }
 
@@ -147,8 +147,10 @@ export function BidsPanel() {
       const entries = rows.map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt, isWinner: r.winner }));
       const result = await SubmitBids(capturedItem, entries);
       const notes: string[] = [];
-      if (result.unmatched.length > 0) notes.push(`no character match: ${result.unmatched.join(", ")}`);
-      if (result.invalidTiers.length > 0) notes.push(`invalid tier: ${result.invalidTiers.join(", ")}`);
+      const unmatched = result.unmatched ?? [];
+      const invalidTiers = result.invalidTiers ?? [];
+      if (unmatched.length > 0) notes.push(`no character match: ${unmatched.join(", ")}`);
+      if (invalidTiers.length > 0) notes.push(`invalid tier: ${invalidTiers.join(", ")}`);
       const lostCount = result.inserted - winners.length;
       setSubmitResult(
         `Recorded ${result.inserted} bid(s) on ${capturedItem} — ${winners.length} won (GP charged), ${lostCount} lost (no GP charge).${notes.length > 0 ? " — " + notes.join("; ") : ""}`,

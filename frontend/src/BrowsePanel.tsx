@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { FetchLedger, FetchTotals } from "../wailsjs/go/main/App";
-import { officerapi } from "../wailsjs/go/models";
+import { FetchLedger, FetchTotals } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { Character, LedgerRow, TotalsRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 import { useRoster } from "./useRoster";
 
 type SubTab = "ep" | "gp" | "totals" | "characters";
@@ -99,11 +99,11 @@ export function BrowsePanel() {
 function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [rows, setRows] = useState<officerapi.LedgerRow[]>([]);
+  const [rows, setRows] = useState<LedgerRow[]>([]);
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sort = useSort<officerapi.LedgerRow>({
+  const sort = useSort<LedgerRow>({
     date: (r) => r.occurredAt,
     character: (r) => r.characterName,
     activity: (r) => (kind === "ep" ? r.activity : `${r.itemName || ""} ${r.tier || ""}`),
@@ -121,7 +121,7 @@ function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
     setError(null);
     FetchLedger(kind, query, page)
       .then((res) => {
-        setRows(res.rows);
+        setRows(res.rows ?? []);
         setHasNext(res.hasNext);
       })
       .catch((err) => setError(String(err)))
@@ -192,10 +192,10 @@ function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
 
 function TotalsBrowser() {
   const [query, setQuery] = useState("");
-  const [rows, setRows] = useState<officerapi.TotalsRow[]>([]);
+  const [rows, setRows] = useState<TotalsRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sort = useSort<officerapi.TotalsRow>({
+  const sort = useSort<TotalsRow>({
     character: (r) => r.name,
     main: (r) => r.mainCharacterName,
     status: (r) => r.status,
@@ -208,7 +208,7 @@ function TotalsBrowser() {
     setLoading(true);
     setError(null);
     FetchTotals(query)
-      .then(setRows)
+      .then((rows) => setRows(rows ?? []))
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
   }, [query]);
@@ -245,9 +245,9 @@ function TotalsBrowser() {
               <td>{r.name}</td>
               <td style={{ color: "#9ca3af" }}>{r.mainCharacterName || "—"}</td>
               <td style={{ color: "#9ca3af" }}>{r.status}</td>
-              <td>{r.ep !== undefined ? r.ep.toFixed(1) : "—"}</td>
-              <td>{r.gp !== undefined ? r.gp.toFixed(1) : "—"}</td>
-              <td>{r.priorityRating !== undefined ? r.priorityRating.toFixed(2) : "—"}</td>
+              <td>{r.ep != null ? r.ep.toFixed(1) : "—"}</td>
+              <td>{r.gp != null ? r.gp.toFixed(1) : "—"}</td>
+              <td>{r.priorityRating != null ? r.priorityRating.toFixed(2) : "—"}</td>
             </tr>
           ))}
           {rows.length === 0 && !loading && (
@@ -267,7 +267,7 @@ function CharactersBrowser() {
   const roster = useRoster();
   const [query, setQuery] = useState("");
   const filtered = roster.characters.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase()));
-  const sort = useSort<officerapi.Character>({
+  const sort = useSort<Character>({
     character: (c) => c.name,
     type: (c) => c.charType,
     main: (c) => c.mainCharacterName,
@@ -298,7 +298,7 @@ function CharactersBrowser() {
               <td style={{ color: "#9ca3af" }}>{c.charType}</td>
               <td style={{ color: "#9ca3af" }}>{c.mainCharacterName || "—"}</td>
               <td style={{ color: "#9ca3af" }}>{c.status}</td>
-              <td>{c.priorityRating !== undefined ? c.priorityRating.toFixed(2) : "—"}</td>
+              <td>{c.priorityRating != null ? c.priorityRating.toFixed(2) : "—"}</td>
             </tr>
           ))}
           {filtered.length === 0 && (

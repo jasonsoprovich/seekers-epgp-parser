@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { FetchRoster, LinkCharacter } from "../wailsjs/go/main/App";
-import { officerapi } from "../wailsjs/go/models";
+import { FetchRoster, LinkCharacter } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { Character } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 
 export type ResolvedCharacter = { mainCharacterName: string | null; priorityRating: number | null; matched: boolean };
 
@@ -11,10 +11,10 @@ export type ResolvedCharacter = { mainCharacterName: string | null; priorityRati
 // changes only when this app itself links/creates a character. Session-
 // lifetime cache, no TTL: createCharacter() below keeps it in sync going
 // forward, so there's nothing else that goes stale under it.
-let rosterCache: officerapi.Character[] | null = null;
-let rosterPromise: Promise<officerapi.Character[]> | null = null;
+let rosterCache: Character[] | null = null;
+let rosterPromise: Promise<Character[]> | null = null;
 
-function buildIndex(roster: officerapi.Character[]): Map<string, officerapi.Character> {
+function buildIndex(roster: Character[]): Map<string, Character> {
   return new Map(roster.map((c) => [c.name.toLowerCase(), c]));
 }
 
@@ -23,13 +23,13 @@ function buildIndex(roster: officerapi.Character[]): Map<string, officerapi.Char
 // table updates its Main/Priority columns immediately without another
 // round trip to the site.
 export function useRoster() {
-  const [characters, setCharacters] = useState<officerapi.Character[]>(rosterCache ?? []);
-  const [byLowerName, setByLowerName] = useState<Map<string, officerapi.Character>>(() => buildIndex(rosterCache ?? []));
+  const [characters, setCharacters] = useState<Character[]>(rosterCache ?? []);
+  const [byLowerName, setByLowerName] = useState<Map<string, Character>>(() => buildIndex(rosterCache ?? []));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (rosterCache) return;
-    if (!rosterPromise) rosterPromise = FetchRoster();
+    if (!rosterPromise) rosterPromise = FetchRoster().then((r) => r ?? []);
     rosterPromise
       .then((roster) => {
         rosterCache = roster;
@@ -55,7 +55,7 @@ export function useRoster() {
   // new alt of mainCharacterId, or as a brand-new main when null. Merges
   // the created character straight into local state so the row that
   // triggered this resolves immediately, without a full FetchRoster.
-  async function createCharacter(name: string, mainCharacterId: number | null): Promise<officerapi.Character> {
+  async function createCharacter(name: string, mainCharacterId: number | null): Promise<Character> {
     const created = await LinkCharacter(name, mainCharacterId);
     if (rosterCache) rosterCache = [...rosterCache, created];
     setCharacters((prev) => [...prev, created]);

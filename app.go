@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
@@ -20,13 +20,14 @@ import (
 )
 
 // App holds the running application's state: an in-memory cache of the
-// selected log file, kept in sync with config.json (see startup and
+// selected log file, kept in sync with config.json (see ServiceStartup and
 // SelectLogFile) so it survives restarts and rebuilds instead of forcing
 // a re-pick every time the app relaunches; and a cache of the site's
 // leader-tunable EPGP settings (PLAN.md §4i, task 1.6) — this app never
 // hardcodes the EP cap, minimum attendance, or decay rates, it fetches
 // them.
 type App struct {
+	app *application.App
 	ctx context.Context
 
 	logPath  string
@@ -44,7 +45,13 @@ func NewApp() *App {
 	return &App{}
 }
 
-func (a *App) startup(ctx context.Context) {
+// ServiceStartup is Wails v3's replacement for v2's OnStartup(ctx) hook —
+// called once the application is running, before any bound method can be
+// invoked from the frontend. application.Get() is only valid from this
+// point on (main.go's application.New call hasn't returned yet when this
+// runs).
+func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	a.app = application.Get()
 	a.ctx = ctx
 	if s, err := config.Load(); err == nil {
 		a.logPath = s.LogPath
@@ -58,17 +65,16 @@ func (a *App) startup(ctx context.Context) {
 			a.settings = settings
 		}
 	}
+	return nil
 }
 
 // --- Settings ---
 
 func (a *App) SelectLogFile() (string, error) {
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select your EverQuest log file",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "Log files (*.txt)", Pattern: "*.txt"},
-		},
-	})
+	path, err := a.app.Dialog.OpenFile().
+		SetTitle("Select your EverQuest log file").
+		AddFilter("Log files (*.txt)", "*.txt").
+		PromptForSingleSelection()
 	if err != nil {
 		return "", err
 	}
@@ -127,7 +133,7 @@ func (a *App) FetchGuildSettings() (officerapi.Settings, error) {
 // officer's default browser, so getting set up is "click this, paste the
 // key back in" rather than typing a URL by hand.
 func (a *App) OpenAppKeyPage() {
-	runtime.BrowserOpenURL(a.ctx, officerapi.ServerURL+"/epgp/app-key")
+	_ = a.app.Browser.OpenURL(officerapi.ServerURL + "/epgp/app-key")
 }
 
 // --- Updates ---
@@ -150,7 +156,7 @@ func (a *App) OpenReleasePage(url string) {
 	if url == "" {
 		return
 	}
-	runtime.BrowserOpenURL(a.ctx, url)
+	_ = a.app.Browser.OpenURL(url)
 }
 
 // InstallUpdate downloads and verifies the latest release
@@ -173,7 +179,7 @@ func (a *App) InstallUpdate() error {
 	if err := exec.Command(exePath).Start(); err != nil {
 		return nil
 	}
-	runtime.Quit(a.ctx)
+	a.app.Quit()
 	return nil
 }
 

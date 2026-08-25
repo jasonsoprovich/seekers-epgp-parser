@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { CaptureAttendance, FetchGuildSettings, SubmitAttendance } from "../wailsjs/go/main/App";
-import { ClipboardSetText } from "../wailsjs/runtime/runtime";
-import { main } from "../wailsjs/go/models";
+import { Clipboard } from "@wailsio/runtime";
+import { CaptureAttendance, FetchGuildSettings, SubmitAttendance } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { AttendanceResult } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
@@ -28,7 +28,7 @@ const ACTIVITIES = ["Raid - Start", "Raid - Mid", "Raid - End", "Guild Meeting",
 const GATED_ACTIVITIES = new Set(["Raid - Start", "Raid - Mid", "Raid - End", "Event Attend"]);
 
 export function AttendancePanel() {
-  const [snapshot, setSnapshot] = useState<main.AttendanceResult | null>(null);
+  const [snapshot, setSnapshot] = useState<AttendanceResult | null>(null);
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [activity, setActivity] = useState(ACTIVITIES[0]);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +55,7 @@ export function AttendancePanel() {
     try {
       const result = await CaptureAttendance();
       setSnapshot(result);
-      setRows(result.names.map((name) => ({ name, displayName: name })));
+      setRows((result.names ?? []).map((name) => ({ name, displayName: name })));
     } catch (err) {
       setError(String(err));
       setSnapshot(null);
@@ -82,7 +82,7 @@ export function AttendancePanel() {
   async function onCopy() {
     if (!snapshot) return;
     const lines = rows.map((r) => `${r.name}\t${snapshot.occurredAt}`);
-    await ClipboardSetText(lines.join("\n"));
+    await Clipboard.SetText(lines.join("\n"));
     setCopied(true);
   }
 
@@ -112,8 +112,10 @@ export function AttendancePanel() {
       }
 
       const result = await SubmitAttendance(activity, snapshot.occurredAt, names);
-      const unmatchedNote = result.unmatched.length > 0 ? ` — no match for: ${result.unmatched.join(", ")}` : "";
-      const duplicatesNote = result.duplicates.length > 0 ? ` — already recorded, skipped: ${result.duplicates.join(", ")}` : "";
+      const unmatched = result.unmatched ?? [];
+      const duplicates = result.duplicates ?? [];
+      const unmatchedNote = unmatched.length > 0 ? ` — no match for: ${unmatched.join(", ")}` : "";
+      const duplicatesNote = duplicates.length > 0 ? ` — already recorded, skipped: ${duplicates.join(", ")}` : "";
       setSubmitResult(`Recorded ${activity} for ${result.inserted} character(s).${unmatchedNote}${duplicatesNote}`);
     } catch (err) {
       setError(String(err));
@@ -134,7 +136,7 @@ export function AttendancePanel() {
       {error && <div className="error">{error}</div>}
       {submitResult && <div className="success">{submitResult}</div>}
       {roster.error && <div className="warning">Couldn't load the roster for Main/Priority lookup: {roster.error}</div>}
-      {snapshot?.warnings.map((w, i) => (
+      {snapshot?.warnings?.map((w, i) => (
         <div className="warning" key={i}>
           {w}
         </div>

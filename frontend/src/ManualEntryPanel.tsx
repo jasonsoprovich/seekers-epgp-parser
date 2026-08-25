@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { FetchPointValues, SubmitManualEntry } from "../wailsjs/go/main/App";
-import { officerapi } from "../wailsjs/go/models";
+import { FetchPointValues, SubmitManualEntry } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { PointValue } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 import { useRoster } from "./useRoster";
 
 const CUSTOM = "__custom__";
@@ -12,7 +12,7 @@ const CUSTOM = "__custom__";
 // on purpose, matching "use the current time as the timestamp."
 export function ManualEntryPanel() {
   const [kind, setKind] = useState<"ep" | "gp">("ep");
-  const [pointValues, setPointValues] = useState<officerapi.PointValue[]>([]);
+  const [pointValues, setPointValues] = useState<PointValue[]>([]);
   const [characterId, setCharacterId] = useState<number | "">("");
   const [activitySelect, setActivitySelect] = useState("");
   const [customActivity, setCustomActivity] = useState("");
@@ -26,7 +26,7 @@ export function ManualEntryPanel() {
 
   useEffect(() => {
     FetchPointValues()
-      .then((pv) => setPointValues(kind === "ep" ? pv.ep : pv.gp))
+      .then((pv) => setPointValues((kind === "ep" ? pv.ep : pv.gp) ?? []))
       .catch((err) => setError(String(err)));
   }, [kind]);
 

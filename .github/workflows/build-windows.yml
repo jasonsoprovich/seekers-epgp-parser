@@ -1,9 +1,10 @@
 name: Build Windows
 
-# Cross-compiling this app for Windows from macOS isn't practical — Wails'
-# Windows backend links against WebView2 via CGO, which needs a real
-# MinGW toolchain to cross-compile reliably. Building natively on a
-# windows-latest GitHub-hosted runner sidesteps that entirely.
+# Building natively on a windows-latest GitHub-hosted runner, matching how
+# an officer's own machine builds/runs this — Wails v3's Windows backend no
+# longer needs CGO (CGO_ENABLED=0 is the Taskfile default), so a macOS-hosted
+# cross-compile is possible for a quick local smoke-test build, but CI stays
+# native for a real Windows machine to actually exercise WebView2 on.
 #
 # Two ways this runs:
 #   - push to main / manual dispatch: unversioned "dev" build, uploaded
@@ -40,7 +41,7 @@ jobs:
           node-version: "22"
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.12
 
       - name: Determine version
         id: version
@@ -52,8 +53,12 @@ jobs:
             echo "value=dev" >> "$GITHUB_OUTPUT"
           fi
 
+      # APP_VERSION feeds build/windows/Taskfile.yml's build:native task,
+      # which -X main.Version=$APP_VERSION's it into the ldflags — see that
+      # file for why it's a plain Task CLI var rather than a wails3 build
+      # flag (wails3 build has no -ldflags passthrough of its own).
       - name: Build
-        run: wails build -platform windows/amd64 -ldflags "-X main.Version=${{ steps.version.outputs.value }}"
+        run: wails3 task windows:build:native ARCH=amd64 APP_VERSION=${{ steps.version.outputs.value }}
 
       # PLAN.md §11 Phase 7.2 — internal/updatecheck.Apply verifies this
       # digest before swapping a downloaded exe into place, so it must ship
@@ -64,15 +69,15 @@ jobs:
       - name: Compute checksum
         shell: bash
         run: |
-          cd build/bin
+          cd bin
           sha256sum seekers-epgp-parser.exe > seekers-epgp-parser.exe.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: seekers-epgp-parser-windows
           path: |
-            build/bin/*.exe
-            build/bin/*.sha256
+            bin/*.exe
+            bin/*.sha256
           if-no-files-found: error
 
       - name: Publish release
@@ -80,6 +85,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            build/bin/*.exe
-            build/bin/*.sha256
+            bin/*.exe
+            bin/*.sha256
           generate_release_notes: true

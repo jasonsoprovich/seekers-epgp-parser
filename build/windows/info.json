@@ -1,15 +1,15 @@
 {
 	"fixed": {
-		"file_version": "{{.Info.ProductVersion}}"
+		"file_version": "0.1.0"
 	},
 	"info": {
 		"0000": {
-			"ProductVersion": "{{.Info.ProductVersion}}",
-			"CompanyName": "{{.Info.CompanyName}}",
-			"FileDescription": "{{.Info.ProductName}}",
-			"LegalCopyright": "{{.Info.Copyright}}",
-			"ProductName": "{{.Info.ProductName}}",
-			"Comments": "{{.Info.Comments}}"
+			"ProductVersion": "0.1.0",
+			"CompanyName": "Seekers",
+			"FileDescription": "Officer capture client for Seekers EPGP attendance and loot bids",
+			"LegalCopyright": "(c) 2026, Seekers",
+			"ProductName": "seekers-epgp-parser",
+			"Comments": "https://github.com/jasonsoprovich/seekers-epgp-parser"
 		}
 	}
 }

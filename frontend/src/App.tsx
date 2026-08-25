@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
-import { CheckForUpdate, GetLogPath, InstallUpdate, OpenReleasePage } from "../wailsjs/go/main/App";
-import { updatecheck } from "../wailsjs/go/models";
+import { CheckForUpdate, GetLogPath, InstallUpdate, OpenReleasePage } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { Info } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/updatecheck/models";
 import { AttendancePanel } from "./AttendancePanel";
 import { BidsPanel } from "./BidsPanel";
 import { BrowsePanel } from "./BrowsePanel";
@@ -13,7 +13,7 @@ type Tab = "attendance" | "bids" | "manual" | "browse" | "settings";
 function App() {
   const [tab, setTab] = useState<Tab>("attendance");
   const [logPath, setLogPath] = useState("");
-  const [updateInfo, setUpdateInfo] = useState<updatecheck.Info | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<Info | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState("");
 
