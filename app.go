@@ -5,19 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/updater"
+	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
-	"github.com/jasonsoprovich/seekers-epgp-parser/internal/updatecheck"
 )
+
+// updateRepo is this app's own GitHub repo — where build-windows.yml
+// publishes tagged releases (an exe + a combined SHA256SUMS digest
+// sidecar) for the updater below to check against.
+const updateRepo = "jasonsoprovich/seekers-epgp-parser"
 
 // App holds the running application's state: an in-memory cache of the
 // selected log file, kept in sync with config.json (see ServiceStartup and
@@ -65,6 +70,31 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 			a.settings = settings
 		}
 	}
+
+	// Wails v3's built-in updater (PLAN.md §11 Phase 13.2), replacing the
+	// Phase 7 internal/updatecheck + minio/selfupdate DIY shim. Headless
+	// (WindowNone): this app already has its own startup banner (App.tsx)
+	// driving CheckForUpdate/InstallUpdate below, so the built-in update
+	// window would just be a second, redundant UI. ChecksumAsset points at
+	// the combined SHA256SUMS build-windows.yml publishes alongside the
+	// exe — same "verify before swapping anything in" guarantee Phase 7.2
+	// had, just backed by the framework's verifier instead of a hand-rolled
+	// one.
+	gh, err := github.New(github.Config{
+		Repository:    updateRepo,
+		ChecksumAsset: "SHA256SUMS",
+	})
+	if err != nil {
+		return fmt.Errorf("configuring updater: %w", err)
+	}
+	if err := a.app.Updater.Init(updater.Config{
+		CurrentVersion: strings.TrimPrefix(Version, "v"),
+		Providers:      []updater.Provider{gh},
+		Window:         updater.WindowNone,
+	}); err != nil {
+		return fmt.Errorf("configuring updater: %w", err)
+	}
+
 	return nil
 }
 
@@ -138,12 +168,42 @@ func (a *App) OpenAppKeyPage() {
 
 // --- Updates ---
 
+// UpdateInfo wraps the built-in updater's Check result into what the
+// startup "you're on an old build" banner (App.tsx) needs — mirrors the
+// Phase 7 updatecheck.Info shape so the frontend didn't need reworking
+// past its import path.
+type UpdateInfo struct {
+	Current   string `json:"current"`
+	Latest    string `json:"latest"`
+	Available bool   `json:"available"`
+	URL       string `json:"url"`
+}
+
 // CheckForUpdate compares this build's embedded Version against the
 // repo's latest GitHub release, for the startup "you're on an old build"
 // banner. Errors here (no network, GitHub unreachable) are non-fatal to
-// the rest of the app — the frontend just skips showing a banner.
-func (a *App) CheckForUpdate() (updatecheck.Info, error) {
-	return updatecheck.Check(a.ctx, Version)
+// the rest of the app — the frontend just skips showing a banner. An
+// unversioned "dev" build never reports an update available — there's
+// nothing meaningful to compare a local build against.
+func (a *App) CheckForUpdate() (UpdateInfo, error) {
+	info := UpdateInfo{Current: Version}
+	if Version == "" || Version == "dev" {
+		return info, nil
+	}
+
+	rel, err := a.app.Updater.Check(a.ctx)
+	if err != nil {
+		return info, err
+	}
+	if rel == nil {
+		return info, nil
+	}
+
+	url, _ := rel.Metadata["github.release.htmlURL"].(string)
+	info.Available = true
+	info.Latest = rel.Version
+	info.URL = url
+	return info, nil
 }
 
 // OpenReleasePage opens a GitHub release page (from CheckForUpdate's
@@ -159,28 +219,18 @@ func (a *App) OpenReleasePage(url string) {
 	_ = a.app.Browser.OpenURL(url)
 }
 
-// InstallUpdate downloads and verifies the latest release
-// (updatecheck.Apply — SHA-256 checked before anything is swapped in),
-// then relaunches: spawns a new process from the now-updated exe and
-// quits this one. Config lives outside the binary (os.UserConfigDir(),
-// PLAN.md §7 Phase 7.3) so the swap can't touch the officer's saved API
-// key or log path.
+// InstallUpdate downloads and verifies the release CheckForUpdate already
+// found (DownloadAndInstall — digest checked before anything is staged,
+// same "verify before swapping anything in" guarantee Phase 7.2 had), then
+// Restart spawns a helper process to swap the staged download into place
+// and relaunch, quitting this process itself. Config lives outside the
+// binary (os.UserConfigDir(), PLAN.md §7 Phase 7.3) so the swap can't
+// touch the officer's saved API key or log path.
 func (a *App) InstallUpdate() error {
-	if _, err := updatecheck.Apply(a.ctx); err != nil {
+	if err := a.app.Updater.DownloadAndInstall(a.ctx); err != nil {
 		return err
 	}
-
-	exePath, err := os.Executable()
-	if err != nil {
-		// Update applied but we can't relaunch automatically — not fatal,
-		// the officer just reopens the app manually to pick up the swap.
-		return nil
-	}
-	if err := exec.Command(exePath).Start(); err != nil {
-		return nil
-	}
-	a.app.Quit()
-	return nil
+	return a.app.Updater.Restart(a.ctx)
 }
 
 func (a *App) officerClient() (*officerapi.Client, error) {

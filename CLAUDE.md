@@ -64,19 +64,25 @@ does. This app only talks to `/api/officer/*` over HTTP.
   macOS, `os.UserConfigDir()` generally); the server URL is a hardcoded
   constant (`officerapi.ServerURL`), not user-configurable — there's only
   ever one seekers-tracker instance
-- `internal/updatecheck` — `Check` compares the running build against this
-  repo's GitHub `releases/latest` for the startup banner; `Apply`
-  downloads that release's exe, verifies it against a `.sha256` release
-  asset `build-windows.yml` publishes alongside it, and swaps it into
-  place via `github.com/minio/selfupdate` (Phase 7). `App.InstallUpdate`
-  wraps `Apply`, then relaunches: spawns a new process from the
-  now-updated exe and calls `a.app.Quit()`.
+- **Updates** — Wails v3's built-in `app.Updater` (PLAN.md §11 Phase 13.2),
+  replacing the Phase 7 `internal/updatecheck` + `minio/selfupdate` DIY
+  shim (deleted). Configured once in `App.ServiceStartup` with a
+  `github.New` provider pointed at this repo, `ChecksumAsset:
+  "SHA256SUMS"` (the combined digest file `build-windows.yml` publishes
+  alongside the exe — verified before anything is staged, same guarantee
+  Phase 7.2 had), and `Window: updater.WindowNone` — headless, since this
+  app already has its own startup banner (`App.tsx`) rather than the
+  updater's own popup window. `App.CheckForUpdate` wraps
+  `a.app.Updater.Check` into the `UpdateInfo` shape the banner expects
+  (mirrors the old `updatecheck.Info` shape, so the frontend only needed
+  an import-path change); `App.InstallUpdate` calls
+  `DownloadAndInstall` then `Restart`, which itself spawns the swap-and-
+  relaunch helper and quits this process — no manual `os.Executable()` +
+  `exec.Command` dance needed anymore.
 
 **Config lives outside the binary**, in `os.UserConfigDir()`. This is
 deliberate and already correct: it means a binary swap during a self-update
-cannot lose the officer's settings (PLAN.md §7, Phase 7.3 — confirmed by
-inspection: `selfupdate.Apply` with an empty `TargetPath` resolves to
-`osext.Executable()`, never anything under `os.UserConfigDir()`). Don't move
+cannot lose the officer's settings (PLAN.md §7, Phase 7.3). Don't move
 config next to the executable.
 
 ## Commands

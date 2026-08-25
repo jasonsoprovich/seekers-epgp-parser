@@ -12,9 +12,9 @@ var assets embed.FS
 
 // Version is set at build time via -ldflags "-X main.Version=vX.Y.Z" for
 // tagged releases (see .github/workflows/build-windows.yml). Left as
-// "dev" for local/untagged builds, which updatecheck treats as "never
-// report an update" — there's nothing meaningful to compare a local build
-// against.
+// "dev" for local/untagged builds, which App.CheckForUpdate treats as
+// "never report an update" — there's nothing meaningful to compare a
+// local build against.
 var Version = "dev"
 
 func main() {

@@ -10,13 +10,18 @@ name: Build Windows
 #   - push to main / manual dispatch: unversioned "dev" build, uploaded
 #     as an Actions artifact only (Summary page) — for trying a change
 #     out before cutting a release.
-#   - push of a "vX.Y.Z" tag: versioned build (via -ldflags -X
-#     main.Version=vX.Y.Z) published as a GitHub Release with the .exe
-#     attached. This is what app.go's CheckForUpdate() compares running
-#     officers' builds against, and what officers should actually
-#     install — no installer, no separate WebView2 install needed (it
-#     ships on Windows 11 and most up-to-date Windows 10 machines
-#     already), just download the .exe from the release and run it.
+#   - push of a "vX.Y.Z" tag: versioned build (via -X main.Version=vX.Y.Z,
+#     see the Build step) published as a GitHub Release with the .exe
+#     attached. This is what app.go's built-in-updater CheckForUpdate()
+#     compares running officers' builds against (PLAN.md §11 Phase 13.2),
+#     and what officers should actually install — no installer, no
+#     separate WebView2 install needed (it ships on Windows 11 and most
+#     up-to-date Windows 10 machines already), just download the .exe
+#     from the release and run it. The exe is renamed to embed platform
+#     and arch (seekers-epgp-parser-windows-amd64.exe) because the
+#     updater's github provider picks a release asset by matching those
+#     substrings in the filename (github.DefaultAssetMatcher) — plain
+#     "seekers-epgp-parser.exe" wouldn't match anything.
 on:
   push:
     branches: [main]
@@ -60,24 +65,31 @@ jobs:
       - name: Build
         run: wails3 task windows:build:native ARCH=amd64 APP_VERSION=${{ steps.version.outputs.value }}
 
-      # PLAN.md §11 Phase 7.2 — internal/updatecheck.Apply verifies this
-      # digest before swapping a downloaded exe into place, so it must ship
-      # with every build the app might self-update to, not just tagged
-      # releases. sha256sum's "hex  filename" output is what
-      # downloadChecksum expects (it just takes the first whitespace-
-      # separated field, so a bare hex string would also work).
-      - name: Compute checksum
+      # Rename to embed platform/arch — see the top-of-file comment for why
+      # (github.DefaultAssetMatcher needs it in the filename).
+      - name: Rename release asset
+        shell: bash
+        run: mv bin/seekers-epgp-parser.exe bin/seekers-epgp-parser-windows-amd64.exe
+
+      # PLAN.md §11 Phase 13.2 — app.go's updater.Init sets ChecksumAsset:
+      # "SHA256SUMS", so it must ship with every build the app might
+      # self-update to, not just tagged releases. A single combined file
+      # (not a per-asset .sha256 sidecar, Phase 7.2's shape) since the
+      # updater's github provider fetches one named sidecar and looks up
+      # the picked asset's digest within it — sha256sum's own "hex  filename"
+      # multi-line output is exactly that format.
+      - name: Compute checksums
         shell: bash
         run: |
           cd bin
-          sha256sum seekers-epgp-parser.exe > seekers-epgp-parser.exe.sha256
+          sha256sum *.exe > SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
           name: seekers-epgp-parser-windows
           path: |
             bin/*.exe
-            bin/*.sha256
+            bin/SHA256SUMS
           if-no-files-found: error
 
       - name: Publish release
@@ -86,5 +98,5 @@ jobs:
         with:
           files: |
             bin/*.exe
-            bin/*.sha256
+            bin/SHA256SUMS
           generate_release_notes: true

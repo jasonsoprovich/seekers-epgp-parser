@@ -51,3 +51,16 @@ export interface PointValues {
     "ep": officerapi$0.PointValue[] | null;
     "gp": officerapi$0.PointValue[] | null;
 }
+
+/**
+ * UpdateInfo wraps the built-in updater's Check result into what the
+ * startup "you're on an old build" banner (App.tsx) needs — mirrors the
+ * Phase 7 updatecheck.Info shape so the frontend didn't need reworking
+ * past its import path.
+ */
+export interface UpdateInfo {
+    "current": string;
+    "latest": string;
+    "available": boolean;
+    "url": string;
+}

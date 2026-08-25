@@ -10,5 +10,6 @@ export type {
     AttendanceResult,
     BidRow,
     LedgerPage,
-    PointValues
+    PointValues,
+    UpdateInfo
 } from "./models.js";

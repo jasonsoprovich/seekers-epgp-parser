@@ -22,9 +22,6 @@ import * as config$0 from "./internal/config/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as officerapi$0 from "./internal/officerapi/models.js";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
-import * as updatecheck$0 from "./internal/updatecheck/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -60,9 +57,11 @@ export function CaptureBids(itemName: string): $CancellablePromise<$models.BidRo
  * CheckForUpdate compares this build's embedded Version against the
  * repo's latest GitHub release, for the startup "you're on an old build"
  * banner. Errors here (no network, GitHub unreachable) are non-fatal to
- * the rest of the app — the frontend just skips showing a banner.
+ * the rest of the app — the frontend just skips showing a banner. An
+ * unversioned "dev" build never reports an update available — there's
+ * nothing meaningful to compare a local build against.
  */
-export function CheckForUpdate(): $CancellablePromise<updatecheck$0.Info> {
+export function CheckForUpdate(): $CancellablePromise<$models.UpdateInfo> {
     return $Call.ByID(2347956003);
 }
 
@@ -123,12 +122,13 @@ export function GetSettings(): $CancellablePromise<config$0.Settings> {
 }
 
 /**
- * InstallUpdate downloads and verifies the latest release
- * (updatecheck.Apply — SHA-256 checked before anything is swapped in),
- * then relaunches: spawns a new process from the now-updated exe and
- * quits this one. Config lives outside the binary (os.UserConfigDir(),
- * PLAN.md §7 Phase 7.3) so the swap can't touch the officer's saved API
- * key or log path.
+ * InstallUpdate downloads and verifies the release CheckForUpdate already
+ * found (DownloadAndInstall — digest checked before anything is staged,
+ * same "verify before swapping anything in" guarantee Phase 7.2 had), then
+ * Restart spawns a helper process to swap the staged download into place
+ * and relaunch, quitting this process itself. Config lives outside the
+ * binary (os.UserConfigDir(), PLAN.md §7 Phase 7.3) so the swap can't
+ * touch the officer's saved API key or log path.
  */
 export function InstallUpdate(): $CancellablePromise<void> {
     return $Call.ByID(2443992793);
