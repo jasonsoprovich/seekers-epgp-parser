@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -30,6 +31,13 @@ type App struct {
 
 	logPath  string
 	settings officerapi.Settings
+
+	// Guards liveBidsCancel — Capture Bids (starts a poller) and Submit
+	// (stops one) are both Wails-bound methods JS can call back-to-back,
+	// so the swap needs to be safe against that, not just the ticking
+	// goroutine itself.
+	liveBidsMu     sync.Mutex
+	liveBidsCancel context.CancelFunc
 }
 
 func NewApp() *App {
@@ -406,6 +414,11 @@ func (a *App) CaptureBids(itemName string) ([]BidRow, error) {
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].OccurredAt < rows[j].OccurredAt })
 
+	// PLAN.md §15 / Phase 12 task 12.3: from this point on, push each
+	// newly-detected tell for this item to the site's live view, until
+	// Submit or the next Capture Bids call stops it.
+	a.startLiveBidPush(itemName, startAt)
+
 	return rows, nil
 }
 
@@ -419,8 +432,91 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (office
 	if err != nil {
 		return officerapi.BidsResponse{}, err
 	}
-	return client.SubmitBids(a.ctx, officerapi.BidsRequest{
+	resp, err := client.SubmitBids(a.ctx, officerapi.BidsRequest{
 		ItemName: itemName,
 		Entries:  entries,
 	})
+	if err == nil {
+		// The finalize route itself clears the live DO's state — this just
+		// stops the Go side from continuing to poll into a round that's
+		// already done.
+		a.stopLiveBidPush()
+	}
+	return resp, err
+}
+
+// stopLiveBidPush cancels any in-flight live-bid polling loop. Safe to
+// call when none is running.
+func (a *App) stopLiveBidPush() {
+	a.liveBidsMu.Lock()
+	defer a.liveBidsMu.Unlock()
+	if a.liveBidsCancel != nil {
+		a.liveBidsCancel()
+		a.liveBidsCancel = nil
+	}
+}
+
+// startLiveBidPush polls the log every few seconds for bid tells newly
+// detected since the last poll (within the same [startAt, now) window
+// CaptureBids itself scans) and pushes each one to the site's live-bids
+// endpoint — PLAN.md §15 / Phase 12 task 12.3, giving the website's live
+// view visibility into bids as they come in, before the officer finalizes.
+// Cancels any previous poller first: naming a new item and clicking
+// Capture Bids again implies the previous round is over, same reasoning
+// the DO's own /push handler uses to start a fresh round server-side.
+//
+// Relies on parse.CaptureBids being deterministic and append-only across
+// ticks for a fixed startAt against a growing log file — re-scanning
+// always reproduces the previous tick's candidates as an exact prefix,
+// plus any new ones at the end — so tracking only a count and pushing the
+// new tail slice each tick is correct without needing to diff by value.
+//
+// Best-effort throughout: a push failure (offline, key rejected) is
+// silently skipped, same as the app's other best-effort background calls
+// (FetchKnownItems, the startup settings fetch) — CaptureBids/SubmitBids
+// stay the real record regardless of whether this side channel works.
+func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
+	a.stopLiveBidPush()
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.liveBidsMu.Lock()
+	a.liveBidsCancel = cancel
+	a.liveBidsMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		pushed := 0
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			raw, err := a.readLog()
+			if err != nil {
+				continue
+			}
+			candidates := parse.CaptureBids(raw, startAt, time.Now())
+			if len(candidates) <= pushed {
+				continue
+			}
+
+			client, err := a.officerClient()
+			if err != nil {
+				continue
+			}
+			for _, c := range candidates[pushed:] {
+				_ = client.PushLiveBid(ctx, officerapi.LiveBidPushRequest{
+					ItemName:      itemName,
+					CharacterName: c.CharacterName,
+					Tier:          c.Tier,
+					OccurredAt:    c.OccurredAt.Format(time.RFC3339),
+				})
+			}
+			pushed = len(candidates)
+		}
+	}()
 }

@@ -192,6 +192,23 @@ func (c *Client) SubmitBids(ctx context.Context, req BidsRequest) (BidsResponse,
 	return out, err
 }
 
+// --- POST /api/officer/live-bids/push ---
+
+// LiveBidPushRequest is one detected bid tell, sent as it's captured —
+// PLAN.md §15 / Phase 12 task 12.3. Purely a side channel for the
+// website's live view (a Durable Object, no D1 on this path); SubmitBids
+// above stays the source of truth regardless of whether this succeeds.
+type LiveBidPushRequest struct {
+	ItemName      string `json:"itemName"`
+	CharacterName string `json:"characterName"`
+	Tier          string `json:"tier"`
+	OccurredAt    string `json:"occurredAt"`
+}
+
+func (c *Client) PushLiveBid(ctx context.Context, req LiveBidPushRequest) error {
+	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/push", req, nil)
+}
+
 // --- POST /api/officer/manual-entry ---
 
 // ManualEntryRequest mirrors seekers-tracker's InsertLedgerEntryInput
