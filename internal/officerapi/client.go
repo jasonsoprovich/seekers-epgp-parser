@@ -209,6 +209,28 @@ func (c *Client) PushLiveBid(ctx context.Context, req LiveBidPushRequest) error 
 	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/push", req, nil)
 }
 
+// --- POST /api/officer/live-bids/heartbeat ---
+
+// HeartbeatLiveBids bumps the live session's "last seen" time on the
+// server without pushing a bid — added 2026-08-25 so a quiet stretch of a
+// real round (no new tells, officer still there) doesn't look identical to
+// the officer having closed the app. The site derives the live-view pill's
+// Live/Idle state from how recently this (or PushLiveBid) last arrived.
+func (c *Client) HeartbeatLiveBids(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/heartbeat", nil, nil)
+}
+
+// --- POST /api/officer/live-bids/clear ---
+
+// ClearLiveBids ends the live session immediately — added 2026-08-25
+// alongside the heartbeat above. Previously the only way the live view
+// ever cleared was a successful SubmitBids; quitting the app (or
+// cancelling a capture) mid-round left the site showing that round until
+// the idle TTL expired. Best-effort like every other live-bids call.
+func (c *Client) ClearLiveBids(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/clear", nil, nil)
+}
+
 // --- POST /api/officer/manual-entry ---
 
 // ManualEntryRequest mirrors seekers-tracker's InsertLedgerEntryInput

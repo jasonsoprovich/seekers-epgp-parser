@@ -547,6 +547,21 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 		for {
 			select {
 			case <-ctx.Done():
+				// Best-effort, and deliberately NOT using ctx here — it's
+				// already cancelled by this point (that's what got us into
+				// this branch), so a request built on it would fail
+				// immediately. Fires on every stop path (new capture,
+				// successful submit, app quit alike) — harmless and
+				// idempotent on the first two (the DO's own logic already
+				// resolves those server-side), and the one that actually
+				// matters: quitting the app mid-round used to leave the
+				// site showing a stale round for up to the 90s idle TTL
+				// with no signal at all that anything had changed.
+				if client, err := a.officerClient(); err == nil {
+					clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					_ = client.ClearLiveBids(clearCtx)
+					cancel()
+				}
 				return
 			case <-ticker.C:
 			}
@@ -556,14 +571,21 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 				continue
 			}
 			candidates := parse.CaptureBids(raw, startAt, time.Now())
-			if len(candidates) <= pushed {
-				continue
-			}
 
 			client, err := a.officerClient()
 			if err != nil {
 				continue
 			}
+
+			if len(candidates) <= pushed {
+				// Nothing new this tick — a quiet stretch of a real round,
+				// not evidence the officer's gone. Heartbeat instead of
+				// going silent, so the site's idle TTL doesn't fire just
+				// because nobody's bid in a while.
+				_ = client.HeartbeatLiveBids(ctx)
+				continue
+			}
+
 			for _, c := range candidates[pushed:] {
 				_ = client.PushLiveBid(ctx, officerapi.LiveBidPushRequest{
 					ItemName:      itemName,
