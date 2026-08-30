@@ -543,6 +543,12 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		pushed := 0
+		idleTicks := 0
+		// The DO's live TTL is 90s, so a heartbeat every ~20s on a quiet
+		// round is plenty of margin — and keeps per-key request volume low
+		// when 1-10 officers are all polling at once during a raid
+		// (PLAN.md §15). New tells still push immediately.
+		const heartbeatEveryNIdleTicks = 4
 
 		for {
 			select {
@@ -559,7 +565,7 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 				// with no signal at all that anything had changed.
 				if client, err := a.officerClient(); err == nil {
 					clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					_ = client.ClearLiveBids(clearCtx)
+					_ = client.ClearLiveBids(clearCtx, itemName)
 					cancel()
 				}
 				return
@@ -579,13 +585,18 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 
 			if len(candidates) <= pushed {
 				// Nothing new this tick — a quiet stretch of a real round,
-				// not evidence the officer's gone. Heartbeat instead of
-				// going silent, so the site's idle TTL doesn't fire just
-				// because nobody's bid in a while.
-				_ = client.HeartbeatLiveBids(ctx)
+				// not evidence the officer's gone. Heartbeat so the site's
+				// idle TTL doesn't fire just because nobody's bid in a
+				// while — but not every 5s tick (see heartbeatEveryNIdleTicks):
+				// once right when it goes quiet, then every ~20s.
+				idleTicks++
+				if idleTicks%heartbeatEveryNIdleTicks == 1 {
+					_ = client.HeartbeatLiveBids(ctx, itemName)
+				}
 				continue
 			}
 
+			idleTicks = 0
 			for _, c := range candidates[pushed:] {
 				_ = client.PushLiveBid(ctx, officerapi.LiveBidPushRequest{
 					ItemName:      itemName,
