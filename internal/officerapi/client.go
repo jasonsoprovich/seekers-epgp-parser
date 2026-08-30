@@ -13,14 +13,31 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// ServerURL is the one seekers-tracker instance this app talks to — not
-// user-configurable, since there's only ever one.
-const ServerURL = "https://seekers.fetchinglogic.com"
+// defaultServerURL is the one production seekers-tracker instance — not
+// user-configurable, since there's only ever one real deployment.
+const defaultServerURL = "https://seekers.fetchinglogic.com"
+
+// ServerURL is the base URL every /api/officer/* call (and the
+// "Generate an API Key" browser link) uses. It's the production constant
+// above unless SEEKERS_TRACKER_URL is set, which points it at a local
+// `wrangler dev --local` instance instead for development — see
+// ../seekers-tracker CLAUDE.md "Local-first testing". Deliberately an env
+// var, not a Settings field: it's a developer affordance, not per-officer
+// config, and a real officer never sets it. Resolved once at startup.
+var ServerURL = resolveServerURL()
+
+func resolveServerURL() string {
+	if v := strings.TrimSpace(os.Getenv("SEEKERS_TRACKER_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return defaultServerURL
+}
 
 type Client struct {
 	baseURL string

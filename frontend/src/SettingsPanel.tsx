@@ -91,7 +91,14 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
             type="password"
             placeholder="Generate one on the site, then paste it here"
             value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
+            onChange={(e) => {
+              setApiKey(e.target.value);
+              // The key changed — the last "Saved" no longer describes
+              // what's in the box.
+              setSaved(false);
+              setTestResult(null);
+              setTestError(null);
+            }}
           />
         </label>
         <button className="secondary" onClick={() => OpenAppKeyPage()} style={{ alignSelf: "flex-start" }}>
