@@ -44,6 +44,19 @@ type App struct {
 	// goroutine itself.
 	liveBidsMu     sync.Mutex
 	liveBidsCancel context.CancelFunc
+
+	// The Bids-tab log watcher: spots the officer's own "<item> send tells"
+	// line and emits "bids:announcement" so the frontend can auto-start a
+	// round without them typing the item name. annLastSeen advances past
+	// each emitted line so the same announcement never fires twice.
+	annMu       sync.Mutex
+	annCancel   context.CancelFunc
+	annLastSeen time.Time
+}
+
+type announcementEvent struct {
+	ItemName    string `json:"itemName"`
+	AnnouncedAt string `json:"announcedAt"`
 }
 
 func NewApp() *App {
@@ -61,6 +74,9 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	if s, err := config.Load(); err == nil {
 		a.logPath = s.LogPath
 	}
+	// Start watching for "send tells" announcements right away if a log
+	// file is already configured (respects the AutoDetectBids setting).
+	a.startAnnouncementWatch()
 	// Best-effort, same as CheckForUpdate: no API key yet, or no network,
 	// just means FetchGuildSettings() below (which every settings-dependent
 	// tab should call before trusting a value) does the live fetch instead
@@ -117,6 +133,8 @@ func (a *App) SelectLogFile() (string, error) {
 			s.LogPath = path
 			_ = config.Save(s)
 		}
+		// Re-point the announcement watcher at the new file.
+		a.startAnnouncementWatch()
 	}
 	return a.logPath, nil
 }
@@ -136,6 +154,26 @@ func (a *App) SaveSettings(apiKey string) error {
 	}
 	s.APIKey = apiKey
 	return config.Save(s)
+}
+
+// SetAutoDetectBids toggles the Bids-tab log watcher that auto-starts a
+// round when the officer announces "<item> send tells" in chat. Persisted,
+// and applied immediately (starts/stops the watcher this session too).
+func (a *App) SetAutoDetectBids(enabled bool) error {
+	s, err := config.Load()
+	if err != nil {
+		s = config.Settings{}
+	}
+	s.AutoDetectBids = &enabled
+	if err := config.Save(s); err != nil {
+		return err
+	}
+	if enabled {
+		a.startAnnouncementWatch()
+	} else {
+		a.stopAnnouncementWatch()
+	}
+	return nil
 }
 
 // FetchGuildSettings does a live re-fetch of the site's leader-tunable
@@ -509,6 +547,79 @@ func (a *App) stopLiveBidPush() {
 	if a.liveBidsCancel != nil {
 		a.liveBidsCancel()
 		a.liveBidsCancel = nil
+	}
+}
+
+// startAnnouncementWatch (re)starts the background goroutine that polls the
+// selected log for the officer's own "<item> send tells" line and emits
+// "bids:announcement" for the frontend to auto-start a round. No-op if no
+// log file is selected or the AutoDetectBids setting is off. Only ever
+// looks at *new* lines (after the moment it starts), so a "send tells" the
+// officer said before opening the app doesn't fire.
+func (a *App) startAnnouncementWatch() {
+	a.stopAnnouncementWatch()
+	if a.logPath == "" {
+		return
+	}
+	if s, err := config.Load(); err == nil && !s.AutoDetectBidsEnabled() {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.annMu.Lock()
+	a.annCancel = cancel
+	a.annLastSeen = time.Now()
+	a.annMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			raw, err := a.readLog()
+			if err != nil {
+				continue
+			}
+
+			a.annMu.Lock()
+			since := a.annLastSeen
+			a.annMu.Unlock()
+
+			item, at, ok := parse.DetectAnnouncement(raw, since, time.Now())
+			if !ok {
+				continue
+			}
+
+			a.annMu.Lock()
+			// Guard against a slow tick racing a stop/restart.
+			if a.annCancel == nil {
+				a.annMu.Unlock()
+				return
+			}
+			a.annLastSeen = at
+			a.annMu.Unlock()
+
+			a.app.Event.Emit("bids:announcement", announcementEvent{
+				ItemName:    item,
+				AnnouncedAt: at.Format(time.RFC3339),
+			})
+		}
+	}()
+}
+
+// stopAnnouncementWatch cancels the announcement watcher. Safe to call when
+// none is running.
+func (a *App) stopAnnouncementWatch() {
+	a.annMu.Lock()
+	defer a.annMu.Unlock()
+	if a.annCancel != nil {
+		a.annCancel()
+		a.annCancel = nil
 	}
 }
 

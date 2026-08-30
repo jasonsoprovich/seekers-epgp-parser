@@ -175,6 +175,15 @@ export function SelectLogFile(): $CancellablePromise<string> {
 }
 
 /**
+ * SetAutoDetectBids toggles the Bids-tab log watcher that auto-starts a
+ * round when the officer announces "<item> send tells" in chat. Persisted,
+ * and applied immediately (starts/stops the watcher this session too).
+ */
+export function SetAutoDetectBids(enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(737290635, enabled);
+}
+
+/**
  * SubmitAttendance sends exactly the names the officer is left with after
  * editing/removing rows in the Attendance tab — same "submit what's on
  * screen" contract as the Copy-to-clipboard button next to it, just to the

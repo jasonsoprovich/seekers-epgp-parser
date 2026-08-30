@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
-import { FetchGuildSettings, GetLogPath, GetSettings, OpenAppKeyPage, SaveSettings, SelectLogFile, TestConnection } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import {
+  FetchGuildSettings,
+  GetLogPath,
+  GetSettings,
+  OpenAppKeyPage,
+  SaveSettings,
+  SelectLogFile,
+  SetAutoDetectBids,
+  TestConnection,
+} from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { Settings as GuildSettings } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 
 export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: string) => void }) {
   const [apiKey, setApiKey] = useState("");
   const [logPath, setLogPath] = useState("");
+  const [autoDetectBids, setAutoDetectBidsState] = useState(true);
   const [saved, setSaved] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
@@ -13,10 +23,24 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
   const [guildSettingsError, setGuildSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
-    GetSettings().then((s) => setApiKey(s.apiKey));
+    GetSettings().then((s) => {
+      setApiKey(s.apiKey);
+      // null/undefined (never set) defaults to on — mirrors the Go
+      // Settings.AutoDetectBidsEnabled helper.
+      setAutoDetectBidsState(s.autoDetectBids ?? true);
+    });
     GetLogPath().then(setLogPath);
     refreshGuildSettings();
   }, []);
+
+  async function onToggleAutoDetect(enabled: boolean) {
+    setAutoDetectBidsState(enabled);
+    try {
+      await SetAutoDetectBids(enabled);
+    } catch {
+      setAutoDetectBidsState(!enabled); // revert on failure
+    }
+  }
 
   // "Fetch at startup and re-validate at submit" (PLAN.md §4i) — every
   // number here comes from the site, never hardcoded. This screen just
@@ -104,6 +128,21 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
         <button className="secondary" onClick={() => OpenAppKeyPage()} style={{ alignSelf: "flex-start" }}>
           Generate an API Key on the site ↗
         </button>
+
+        <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={autoDetectBids}
+            onChange={(e) => onToggleAutoDetect(e.target.checked)}
+            style={{ width: "auto" }}
+          />
+          <span>
+            Auto-start bid rounds from log announcements
+            <span style={{ display: "block", color: "#9ca3af", fontSize: 12 }}>
+              When you say "&lt;item&gt; send tells" in chat, the Bids tab starts that round on its own.
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="toolbar">

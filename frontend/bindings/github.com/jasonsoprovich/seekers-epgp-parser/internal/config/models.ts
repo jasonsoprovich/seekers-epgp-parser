@@ -4,4 +4,12 @@
 export interface Settings {
     "apiKey": string;
     "logPath": string;
+
+    /**
+     * Whether the Bids tab watches the log and auto-starts a round when the
+     * officer announces "<item> send tells". A pointer so "absent from the
+     * file" (nil) reads as ON — the default — while an explicit false from
+     * the Settings toggle stays off. Read it through AutoDetectBidsEnabled.
+     */
+    "autoDetectBids"?: boolean | null;
 }

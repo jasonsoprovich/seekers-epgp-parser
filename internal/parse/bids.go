@@ -14,6 +14,87 @@ var tellRe = regexp.MustCompile(`^(\S+) tells you, '(.*)'$`)
 // announcing a different item. See FindAnnouncementStart.
 var ownChatRe = regexp.MustCompile(`^You .*, '(.*)'$`)
 
+// Splits an announcement message on "send tells" so extractItemName can
+// take whichever side holds the item name. Tolerates extra whitespace and
+// any case ("Send Tells", "send  tells").
+var sendTellsSplitRe = regexp.MustCompile(`(?i)\bsend\s+tells\b`)
+
+// extractItemName pulls a probable item name out of an officer's own
+// "send tells" announcement. Officers phrase it a few ways —
+//
+//	"Soul Essence of Aten Ha Ra send tells"
+//	"send tells for Soul Essence of Aten Ha Ra"
+//	"Soul Essence of Aten Ha Ra - send tells now"
+//	"Soul Essence of Aten Ha Ra send tells - last call"
+//
+// — so split on "send tells", take the longer side (the item name is
+// almost always the bulk of the line), and trim only LEADING/TRAILING
+// connectors and punctuation — never interior words, since an item name
+// legitimately contains "of"/"the"/"the Kedge". It's free chat, so this is
+// best-effort: the app shows the result in an editable field and the
+// officer corrects it if it came out wrong.
+func extractItemName(msg string) string {
+	parts := sendTellsSplitRe.Split(msg, 2)
+	cand := strings.TrimSpace(parts[0])
+	if len(parts) == 2 {
+		after := strings.TrimSpace(parts[1])
+		if len(after) > len(cand) {
+			cand = after
+		}
+	}
+
+	trimSet := " \t-:,.!?\"'"
+	cand = strings.Trim(cand, trimSet)
+	lower := strings.ToLower(cand)
+	for _, lead := range []string{"for ", "on ", "to ", "item ", "the item "} {
+		if strings.HasPrefix(lower, lead) {
+			cand = cand[len(lead):]
+			lower = strings.ToLower(cand)
+		}
+	}
+	for _, trail := range []string{" - last call", " last call", " reminder", " now", " asap", " please", " pls", " thanks", " ty"} {
+		if strings.HasSuffix(lower, trail) {
+			cand = cand[:len(cand)-len(trail)]
+			lower = strings.ToLower(cand)
+		}
+	}
+	cand = strings.Trim(cand, trimSet)
+	return strings.Join(strings.Fields(cand), " ")
+}
+
+// DetectAnnouncement returns the item name and timestamp of the log
+// owner's OWN most recent "send tells" announcement strictly after `since`
+// and at or before `cutoff` — a "You ..., '<msg>'" line whose message
+// contains "send tells" (same own-chat / same phrase test
+// FindAnnouncementStart uses). ok is false if there's no such new line.
+//
+// This is what lets the app auto-start a bid round the instant the officer
+// announces one, without them typing the item name first. It only ever
+// looks at the officer's own outgoing chat (ownChatRe), so a *different*
+// officer announcing a *different* item in the same channel never triggers
+// it — same guarantee CaptureBids relies on.
+func DetectAnnouncement(raw string, since, cutoff time.Time) (itemName string, at time.Time, ok bool) {
+	for _, l := range splitLogLines(raw) {
+		if !l.Time.After(since) || l.Time.After(cutoff) {
+			continue
+		}
+		m := ownChatRe.FindStringSubmatch(l.Text)
+		if m == nil {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(m[1]), "send tells") {
+			continue
+		}
+		name := extractItemName(m[1])
+		if name == "" {
+			continue
+		}
+		// Keep scanning — the newest matching line wins, not the first.
+		itemName, at, ok = name, l.Time, true
+	}
+	return
+}
+
 // How far apart two "send tells" announcements for the same item can be
 // and still count as one bidding round (the opening call and a later
 // "- last call" reminder — 2.5 minutes apart in the real sample) rather

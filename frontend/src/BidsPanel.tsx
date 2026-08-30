@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Clipboard } from "@wailsio/runtime";
+import { useEffect, useRef, useState } from "react";
+import { Clipboard, Events } from "@wailsio/runtime";
 import { CaptureBids, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { NoMatchSelect } from "./NoMatchSelect";
@@ -35,6 +35,12 @@ export function BidsPanel() {
   const [tieWarning, setTieWarning] = useState<string | null>(null);
   const [winnerCount, setWinnerCount] = useState(1);
   const [gratsCopied, setGratsCopied] = useState(false);
+  // A "send tells" the watcher detected while a round is already under
+  // review — shown as a switch/dismiss banner rather than clobbering the
+  // in-progress round. Null when there's nothing pending.
+  const [pendingAnnouncement, setPendingAnnouncement] = useState<string | null>(null);
+  // Toast shown briefly when a round auto-starts from a detected announcement.
+  const [autoStarted, setAutoStarted] = useState<string | null>(null);
   const roster = useRoster();
 
   // Best-effort — Settings might not be configured yet, and a missing
@@ -45,21 +51,55 @@ export function BidsPanel() {
       .catch(() => setKnownItems([]));
   }, []);
 
-  async function onCapture() {
+  // Whether a round is currently under review — read from a ref inside the
+  // (once-registered) announcement listener so it sees the live value
+  // without the listener re-subscribing on every state change.
+  const busyRef = useRef(false);
+  useEffect(() => {
+    busyRef.current = capturedItem !== "" || rows.length > 0 || pending;
+  }, [capturedItem, rows.length, pending]);
+
+  // PLAN.md §15 — the app watches the log for the officer's own
+  // "<item> send tells" and fires this so a round auto-starts without them
+  // typing the item name or clicking Capture. If a round's already under
+  // review, don't clobber it — offer a switch instead.
+  useEffect(() => {
+    return Events.On("bids:announcement", (ev: { data?: { itemName?: string } }) => {
+      const item = ev?.data?.itemName?.trim();
+      if (!item) return;
+      if (busyRef.current) {
+        setPendingAnnouncement(item);
+        return;
+      }
+      setItemName(item);
+      void captureFor(item);
+      setAutoStarted(item);
+      setTimeout(() => setAutoStarted((v) => (v === item ? null : v)), 8000);
+    });
+  }, []);
+
+  async function captureFor(name: string) {
+    const target = name.trim();
+    if (!target) return;
     setError(null);
     setSubmitResult(null);
     setTieWarning(null);
+    setPendingAnnouncement(null);
     setPending(true);
     try {
-      const result = await CaptureBids(itemName);
+      const result = await CaptureBids(target);
       setRows((result ?? []).map((r) => ({ ...r, winner: false, displayName: r.characterName })));
-      setCapturedItem(itemName);
+      setCapturedItem(target);
     } catch (err) {
       setError(String(err));
       setRows([]);
     } finally {
       setPending(false);
     }
+  }
+
+  function onCapture() {
+    void captureFor(itemName);
   }
 
   function updateTier(index: number, tier: string) {
@@ -207,9 +247,41 @@ export function BidsPanel() {
       </div>
 
       <div className="warning">
-        Say "&lt;item&gt; send tells" in guild chat first. Capture pulls every bid tell from that announcement up to now — no need to click
-        anything before bids start coming in.
+        Say "&lt;item&gt; send tells" in guild chat — the app starts tracking that round automatically and pushes bids to the site live. No
+        need to type the item or click Capture (that button is still here if you announced before opening the app).
       </div>
+
+      {autoStarted && (
+        <div className="success">
+          Auto-started bids for <strong>{autoStarted}</strong> from your announcement. Edit the name above if it came out wrong.
+        </div>
+      )}
+
+      {pendingAnnouncement && (
+        <div className="warning" style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
+          <span>
+            New item announced: <strong>{pendingAnnouncement}</strong>. Finish or submit the current round first, or switch now (discards
+            the current review).
+          </span>
+          <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button
+              className="primary"
+              onClick={() => {
+                const next = pendingAnnouncement;
+                setRows([]);
+                setCapturedItem("");
+                setItemName(next);
+                void captureFor(next);
+              }}
+            >
+              Switch
+            </button>
+            <button className="secondary" onClick={() => setPendingAnnouncement(null)}>
+              Ignore
+            </button>
+          </span>
+        </div>
+      )}
 
       {rows.length > 0 && (
         <>

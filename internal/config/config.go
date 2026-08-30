@@ -18,6 +18,17 @@ import (
 type Settings struct {
 	APIKey  string `json:"apiKey"`
 	LogPath string `json:"logPath"`
+	// Whether the Bids tab watches the log and auto-starts a round when the
+	// officer announces "<item> send tells". A pointer so "absent from the
+	// file" (nil) reads as ON — the default — while an explicit false from
+	// the Settings toggle stays off. Read it through AutoDetectBidsEnabled.
+	AutoDetectBids *bool `json:"autoDetectBids,omitempty"`
+}
+
+// AutoDetectBidsEnabled defaults to true when the setting has never been
+// written (nil) — see the field comment.
+func (s Settings) AutoDetectBidsEnabled() bool {
+	return s.AutoDetectBids == nil || *s.AutoDetectBids
 }
 
 func configPath() (string, error) {

@@ -146,3 +146,53 @@ func TestResolveLatestPerCharacter_LastBidWins(t *testing.T) {
 		t.Errorf("latest tier = %q, want %q (the revised bid)", got.Tier, TierLow)
 	}
 }
+
+func TestExtractItemName(t *testing.T) {
+	cases := []struct{ msg, want string }{
+		{"Soul Essence of Aten Ha Ra send tells", "Soul Essence of Aten Ha Ra"},
+		{"send tells for Soul Essence of Aten Ha Ra", "Soul Essence of Aten Ha Ra"},
+		{"Soul Essence of Aten Ha Ra - send tells now", "Soul Essence of Aten Ha Ra"},
+		{"Soul Essence of Aten Ha Ra send tells - last call", "Soul Essence of Aten Ha Ra"},
+		{"Send Tells  Robe of the Kedge", "Robe of the Kedge"},
+		{"Blade of the Black Dragon Eye send tells please", "Blade of the Black Dragon Eye"},
+		{"send tells: Torch of Judgment", "Torch of Judgment"},
+		{"item Cloak of Flames send tells", "Cloak of Flames"},
+		{"no trigger phrase here", "no trigger phrase here"}, // caller checks for "send tells" separately
+	}
+	for _, c := range cases {
+		if got := extractItemName(c.msg); got != c.want {
+			t.Errorf("extractItemName(%q) = %q, want %q", c.msg, got, c.want)
+		}
+	}
+}
+
+func TestDetectAnnouncement_RealSample(t *testing.T) {
+	before := time.Date(2026, time.August, 17, 22, 0, 0, 0, time.Local)
+	after := time.Date(2026, time.August, 17, 23, 0, 0, 0, time.Local)
+
+	// The newest of the log owner's own "send tells" lines wins (there are
+	// two — the opening call and the "- last call" repeat).
+	item, at, ok := DetectAnnouncement(bidsSample, before, after)
+	if !ok {
+		t.Fatal("expected to detect the officer's own announcement")
+	}
+	if item != "Soul Essence of Aten Ha Ra" {
+		t.Errorf("item = %q, want %q", item, "Soul Essence of Aten Ha Ra")
+	}
+	wantAt := time.Date(2026, time.August, 17, 22, 22, 18, 0, time.Local)
+	if !at.Equal(wantAt) {
+		t.Errorf("at = %v, want %v (the '- last call' line, newest)", at, wantAt)
+	}
+
+	// Other officers announcing other items in the same channel
+	// ("Mendacious tells the guild, 'Armguard of Shadows send tells'") must
+	// never trigger — only the log owner's own outgoing chat counts.
+	if item == "Armguard of Shadows" || item == "Torch of Judgment" {
+		t.Errorf("picked up another officer's announcement: %q", item)
+	}
+
+	// Nothing new after the last own announcement.
+	if _, _, ok := DetectAnnouncement(bidsSample, wantAt, after); ok {
+		t.Error("expected no detection after the last own announcement")
+	}
+}
