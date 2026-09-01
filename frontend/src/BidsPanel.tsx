@@ -51,7 +51,7 @@ export function BidsPanel() {
   // A "send tells" the watcher detected while a round is already under
   // way — shown as a switch/dismiss banner rather than clobbering the
   // in-progress round. Null when there's nothing pending.
-  const [pendingAnnouncement, setPendingAnnouncement] = useState<string | null>(null);
+  const [pendingAnnouncement, setPendingAnnouncement] = useState<{ item: string; announcedAt: string } | null>(null);
   // Toast shown briefly when a round auto-starts from a detected announcement.
   const [autoStarted, setAutoStarted] = useState<string | null>(null);
   const roster = useRoster();
@@ -80,7 +80,7 @@ export function BidsPanel() {
       const item = ev?.data?.itemName?.trim();
       if (!item) return;
       if (phaseRef.current !== "idle") {
-        setPendingAnnouncement(item);
+        setPendingAnnouncement({ item, announcedAt: ev?.data?.announcedAt ?? "" });
         return;
       }
       setItemName(item);
@@ -333,8 +333,8 @@ export function BidsPanel() {
       {pendingAnnouncement && (
         <div className="warning" style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
           <span>
-            New item announced: <strong>{pendingAnnouncement}</strong>. Finish the current round first, or switch now (discards the current
-            one).
+            <strong>{pendingAnnouncement.item}</strong> was announced again. Finish the current round first, or switch now (discards the
+            current one).
           </span>
           <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <button
@@ -343,8 +343,8 @@ export function BidsPanel() {
                 const next = pendingAnnouncement;
                 setPendingAnnouncement(null);
                 setPhase("idle");
-                setItemName(next ?? "");
-                if (next) void captureFor(next);
+                setItemName(next.item);
+                void captureFor(next.item, next.announcedAt);
               }}
             >
               Switch

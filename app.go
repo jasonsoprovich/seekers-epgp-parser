@@ -913,14 +913,18 @@ func (a *App) startAnnouncementWatch() {
 			a.annLastSeen = at
 			a.annMu.Unlock()
 
-			// A repeat "<same item> send tells - last call" for the round
-			// that's already tracking is not a new item — swallow it (but
-			// still advance annLastSeen above so it doesn't re-fire). Only a
-			// DIFFERENT item mid-round should raise the switch/ignore banner.
+			// A "<same item> send tells - last call" reminder shortly after
+			// the round opened is not a new item — swallow it (annLastSeen is
+			// still advanced above so it won't re-fire). But a same-item
+			// announcement well after the round started is a genuine
+			// re-announce (a re-drop, or a botched round the officer is
+			// restarting, or just re-running cmd/simlog) — let it through so
+			// the frontend can offer Switch, which stops the stale poller.
 			a.liveBidsMu.Lock()
-			current := a.roundItem
+			current, curStart := a.roundItem, a.roundStart
 			a.liveBidsMu.Unlock()
-			if current != "" && strings.EqualFold(strings.TrimSpace(current), strings.TrimSpace(item)) {
+			sameItem := current != "" && strings.EqualFold(strings.TrimSpace(current), strings.TrimSpace(item))
+			if sameItem && at.Sub(curStart) < 2*time.Minute {
 				continue
 			}
 
@@ -1076,16 +1080,33 @@ func (a *App) stopActiveLogWatch() {
 // Capture Bids again implies the previous round is over, same reasoning
 // the DO's own /push handler uses to start a fresh round server-side.
 //
-// Relies on parse.CaptureBids being deterministic and append-only across
-// ticks for a fixed startAt against a growing log file — re-scanning
-// always reproduces the previous tick's candidates as an exact prefix,
-// plus any new ones at the end — so tracking only a count and pushing the
-// new tail slice each tick is correct without needing to diff by value.
+// Normally parse.CaptureBids is append-only across ticks for a fixed
+// startAt against a growing log — each scan reproduces the previous tick's
+// candidates as an exact prefix plus new ones at the end — so a count is
+// enough to push just the new tail. If that invariant breaks (the log was
+// truncated and rewritten under a live round — e.g. a fresh cmd/simlog run
+// — so the scan is no longer a superset of what we pushed) the poller
+// re-pushes from scratch; the DO de-dupes by character so that's safe.
 //
 // Best-effort throughout: a push failure (offline, key rejected) is
 // silently skipped, same as the app's other best-effort background calls
 // (FetchKnownItems, the startup settings fetch) — CaptureBids/SubmitBids
 // stay the real record regardless of whether this side channel works.
+// pushCursor is how many of the current scan's candidates the poller has
+// already pushed, given the previous tick's count and the OccurredAt of the
+// last candidate it pushed. Normally that's just prevPushed (append-only
+// growth). It returns 0 when the scan is no longer an append-only superset
+// of what we pushed — fewer candidates than we'd pushed, or a different
+// candidate now sitting where the last-pushed one was — which means the log
+// was truncated and rewritten under a live round (a fresh cmd/simlog run,
+// say); re-pushing from scratch is safe since the DO de-dupes by character.
+func pushCursor(candidates []parse.BidCandidate, prevPushed int, prevLastAt time.Time) int {
+	if prevPushed > 0 && (len(candidates) < prevPushed || !candidates[prevPushed-1].OccurredAt.Equal(prevLastAt)) {
+		return 0
+	}
+	return prevPushed
+}
+
 func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 	a.stopLiveBidPush()
 
@@ -1098,6 +1119,7 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		pushed := 0
+		var lastPushedAt time.Time // OccurredAt of candidates[pushed-1] at the last push
 		idleTicks := 0
 		// The DO's live TTL is 90s, so a heartbeat every ~20s on a quiet
 		// round is plenty of margin — and keeps per-key request volume low
@@ -1142,6 +1164,8 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 				continue
 			}
 
+			pushed = pushCursor(candidates, pushed, lastPushedAt)
+
 			if len(candidates) <= pushed {
 				// Nothing new this tick — a quiet stretch of a real round,
 				// not evidence the officer's gone. Heartbeat so the site's
@@ -1165,6 +1189,7 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 				})
 			}
 			pushed = len(candidates)
+			lastPushedAt = candidates[pushed-1].OccurredAt
 		}
 	}()
 }
