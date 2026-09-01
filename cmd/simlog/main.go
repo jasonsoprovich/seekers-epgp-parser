@@ -92,6 +92,7 @@ func main() {
 		withDecoys   = flag.Bool("decoys", true, "interleave off-topic tells that must be ignored")
 		whoCount     = flag.Int("who", 0, "emit this many /who guild snapshots first (each in a different zone with a slightly different roster) — for testing that Attendance captures only the latest. Use with --bids 0 for an attendance-only run.")
 		namesCSV     = flag.String("names", "", "comma-separated bidder names (default: baked-in real roster)")
+		appendMode   = flag.Bool("append", false, "keep the existing log contents (default: truncate it first, so each run is a clean raid — re-running without this used to make the parser re-ingest the previous run's announcement + bids)")
 		dryRun       = flag.Bool("dry-run", false, "print lines instead of writing them")
 	)
 	flag.Parse()
@@ -128,8 +129,24 @@ func main() {
 		fmt.Printf("game dir : %s\n", expand(*gameDir))
 	}
 
+	// Each run is a fresh raid by default — otherwise the parser re-scans
+	// the whole file and folds a prior run's "send tells" + bids into the
+	// new round (they merge inside parse.announcementSessionGap).
+	if !*appendMode && !*dryRun {
+		if err := os.WriteFile(target, nil, 0o644); err != nil {
+			fatal(err.Error())
+		}
+	}
+
+	mode := "truncated"
+	if *appendMode {
+		mode = "appending"
+	}
+	if *dryRun {
+		mode = "dry-run"
+	}
 	w := &writer{path: target, dryRun: *dryRun}
-	fmt.Printf("log file : %s\ncharacter: %s\nitem     : %q\nbidders  : %d\n\n", target, *character, *item, *nBids)
+	fmt.Printf("log file : %s  (%s)\ncharacter: %s\nitem     : %q\nbidders  : %d\n\n", target, mode, *character, *item, *nBids)
 
 	if *whoCount > 0 {
 		emitWhoRounds(w, bidders, *whoCount)

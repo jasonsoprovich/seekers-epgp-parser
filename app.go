@@ -57,6 +57,14 @@ type App struct {
 	roundStart     time.Time
 	roundResolved  bool
 	pendingLogPath string
+	// A lower bound on where the next capture window may start — bumped to
+	// "now" whenever a round ends (Discard / Submit / End Round). Without it,
+	// re-announcing the SAME item within parse.announcementSessionGap
+	// (10 min) makes FindAnnouncementStart merge back into the finished
+	// round and re-ingest all its bids (a real bug: hit repeatedly while
+	// re-running cmd/simlog against the same log, and it would also happen
+	// on a genuine same-item re-drop from the next boss).
+	roundFloor time.Time
 
 	// The active-character log watcher: when GameDir is set (not a
 	// hand-picked file), polls for which eqlog_<char>_<server>.txt is being
@@ -654,14 +662,23 @@ func buildRows(raw string, startAt, stopAt time.Time) []BidRow {
 }
 
 // CaptureBids opens a live round: name the item, click once (or let the
-// "send tells" watcher do it), and the round starts tracking. It finds the
-// most recent "<item> send tells" line the officer said themselves (at or
-// before now) as the window start — see parse.FindAnnouncementStart — then
-// starts the poller that both pushes each new tell to the site's live view
+// "send tells" watcher do it), and the round starts tracking.
+//
+// announcedAt is the RFC3339 timestamp of the specific "<item> send tells"
+// line the watcher detected (empty when the officer clicked Capture Bids by
+// hand). When set, it IS the window start — trusting the exact line the
+// watcher found, rather than re-deriving with parse.FindAnnouncementStart,
+// which merges announcements within a 10-min gap and so would fold a
+// re-announcement back into a just-finished round. The manual path still
+// uses FindAnnouncementStart. Either way the start is clamped to roundFloor
+// (bumped every time a round ends) so a finished round's bids can't leak
+// into the next one.
+//
+// From there the poller both pushes each new tell to the site's live view
 // and re-emits the growing round to this app on "bids:round" until
-// EndBidRound or SubmitBids. The returned BidRound is the first frame;
-// it's marked Live.
-func (a *App) CaptureBids(itemName string) (BidRound, error) {
+// EndBidRound or SubmitBids. The returned BidRound is the first frame; it's
+// marked Live.
+func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error) {
 	if itemName == "" {
 		return BidRound{}, errors.New("name the item you're collecting bids for")
 	}
@@ -671,10 +688,24 @@ func (a *App) CaptureBids(itemName string) (BidRound, error) {
 	}
 
 	now := time.Now()
-	startAt, ok := parse.FindAnnouncementStart(raw, itemName, now)
-	if !ok {
-		return BidRound{}, fmt.Errorf("no %q \"send tells\" announcement found in your log — say it in guild chat first, or check the item name spelling", itemName)
+	var startAt time.Time
+	if announcedAt != "" {
+		if t, perr := time.Parse(time.RFC3339, announcedAt); perr == nil {
+			startAt = t
+		}
 	}
+	if startAt.IsZero() {
+		s, ok := parse.FindAnnouncementStart(raw, itemName, now)
+		if !ok {
+			return BidRound{}, fmt.Errorf("no %q \"send tells\" announcement found in your log — say it in guild chat first, or check the item name spelling", itemName)
+		}
+		startAt = s
+	}
+	a.liveBidsMu.Lock()
+	if !a.roundFloor.IsZero() && startAt.Before(a.roundFloor) {
+		startAt = a.roundFloor
+	}
+	a.liveBidsMu.Unlock()
 
 	// Switching items mid-session: clear the previous round off the site
 	// unless it was already finalized (SubmitBids left it "resolved" for
@@ -713,6 +744,7 @@ func (a *App) CaptureBids(itemName string) (BidRound, error) {
 func (a *App) EndBidRound() (BidRound, error) {
 	a.liveBidsMu.Lock()
 	item, start := a.roundItem, a.roundStart
+	a.roundFloor = time.Now() // this round is done collecting — a later re-announce is a new round
 	a.liveBidsMu.Unlock()
 
 	a.stopLiveBidPush()
@@ -740,6 +772,7 @@ func (a *App) DiscardBidRound() {
 	item := a.roundItem
 	a.roundItem = ""
 	a.roundResolved = false
+	a.roundFloor = time.Now() // don't let a re-announce re-ingest this round's bids
 	a.liveBidsMu.Unlock()
 	a.stopLiveBidPush()
 	if item != "" {
@@ -766,6 +799,7 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (office
 		a.liveBidsMu.Lock()
 		a.roundItem = ""
 		a.roundResolved = true
+		a.roundFloor = time.Now() // finalized — a re-drop of this item is a fresh round
 		a.liveBidsMu.Unlock()
 		a.stopLiveBidPush()
 		// Phase 16: leave the round on /live-bids, now flagged resolved with

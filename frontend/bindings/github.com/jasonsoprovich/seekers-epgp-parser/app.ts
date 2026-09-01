@@ -41,16 +41,25 @@ export function CaptureAttendance(): $CancellablePromise<$models.AttendanceResul
 
 /**
  * CaptureBids opens a live round: name the item, click once (or let the
- * "send tells" watcher do it), and the round starts tracking. It finds the
- * most recent "<item> send tells" line the officer said themselves (at or
- * before now) as the window start — see parse.FindAnnouncementStart — then
- * starts the poller that both pushes each new tell to the site's live view
+ * "send tells" watcher do it), and the round starts tracking.
+ * 
+ * announcedAt is the RFC3339 timestamp of the specific "<item> send tells"
+ * line the watcher detected (empty when the officer clicked Capture Bids by
+ * hand). When set, it IS the window start — trusting the exact line the
+ * watcher found, rather than re-deriving with parse.FindAnnouncementStart,
+ * which merges announcements within a 10-min gap and so would fold a
+ * re-announcement back into a just-finished round. The manual path still
+ * uses FindAnnouncementStart. Either way the start is clamped to roundFloor
+ * (bumped every time a round ends) so a finished round's bids can't leak
+ * into the next one.
+ * 
+ * From there the poller both pushes each new tell to the site's live view
  * and re-emits the growing round to this app on "bids:round" until
- * EndBidRound or SubmitBids. The returned BidRound is the first frame;
- * it's marked Live.
+ * EndBidRound or SubmitBids. The returned BidRound is the first frame; it's
+ * marked Live.
  */
-export function CaptureBids(itemName: string): $CancellablePromise<$models.BidRound> {
-    return $Call.ByID(1880411077, itemName);
+export function CaptureBids(itemName: string, announcedAt: string): $CancellablePromise<$models.BidRound> {
+    return $Call.ByID(1880411077, itemName, announcedAt);
 }
 
 /**

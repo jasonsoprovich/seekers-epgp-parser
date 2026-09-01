@@ -76,7 +76,7 @@ export function BidsPanel() {
   // typing the item name or clicking Capture. If a round's already under
   // way, don't clobber it — offer a switch instead.
   useEffect(() => {
-    return Events.On("bids:announcement", (ev: { data?: { itemName?: string } }) => {
+    return Events.On("bids:announcement", (ev: { data?: { itemName?: string; announcedAt?: string } }) => {
       const item = ev?.data?.itemName?.trim();
       if (!item) return;
       if (phaseRef.current !== "idle") {
@@ -84,7 +84,9 @@ export function BidsPanel() {
         return;
       }
       setItemName(item);
-      void captureFor(item);
+      // Pass the detected line's timestamp — CaptureBids anchors the window
+      // to exactly it, so a re-announcement can't fold in a finished round.
+      void captureFor(item, ev?.data?.announcedAt ?? "");
       setAutoStarted(item);
       setTimeout(() => setAutoStarted((v) => (v === item ? null : v)), 8000);
     });
@@ -104,7 +106,7 @@ export function BidsPanel() {
     });
   }, []);
 
-  async function captureFor(name: string) {
+  async function captureFor(name: string, announcedAt = "") {
     const target = name.trim();
     if (!target) return;
     setError(null);
@@ -113,7 +115,7 @@ export function BidsPanel() {
     setPendingAnnouncement(null);
     setPending(true);
     try {
-      const round = await CaptureBids(target);
+      const round = await CaptureBids(target, announcedAt);
       setRows(toReviewRows(round));
       setCapturedItem(round.itemName);
       setRoundStartedAt(round.startedAt);
