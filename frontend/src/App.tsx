@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Events } from "@wailsio/runtime";
 import "./App.css";
 import { CheckForUpdate, GetLogPath, InstallUpdate, OpenReleasePage } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { UpdateInfo } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
@@ -13,6 +14,7 @@ type Tab = "attendance" | "bids" | "manual" | "browse" | "settings";
 function App() {
   const [tab, setTab] = useState<Tab>("attendance");
   const [logPath, setLogPath] = useState("");
+  const [activeChar, setActiveChar] = useState("");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState("");
@@ -20,6 +22,15 @@ function App() {
   // Refreshed whenever Settings changes it — see SettingsPanel's onLogPathChange.
   useEffect(() => {
     GetLogPath().then((p) => p && setLogPath(p));
+  }, []);
+
+  // The active-character watcher re-points the log on its own when the
+  // officer swaps toons mid-raid — reflect that in the footer.
+  useEffect(() => {
+    return Events.On("log:active", (ev: { data?: { path?: string; character?: string; server?: string } }) => {
+      if (ev?.data?.path) setLogPath(ev.data.path);
+      if (ev?.data?.character) setActiveChar(ev.data.server ? `${ev.data.character} (${ev.data.server})` : ev.data.character);
+    });
   }, []);
 
   // Best-effort — no network, or an unversioned "dev" build, both just
@@ -78,7 +89,10 @@ function App() {
           <button className={`nav-button ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>
             Settings
           </button>
-          <div className="log-status">{logPath ? logPath : "No log file selected — see Settings"}</div>
+          <div className="log-status">
+            {activeChar && <div style={{ color: "#10b981", marginBottom: 2 }}>{activeChar} · watching</div>}
+            {logPath ? logPath : "No log file selected — see Settings"}
+          </div>
         </div>
         <div className="main">
           {tab === "attendance" && <AttendancePanel />}

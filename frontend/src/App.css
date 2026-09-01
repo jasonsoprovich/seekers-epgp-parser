@@ -361,3 +361,68 @@ tr.winner td {
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
+
+/* Live/review round header on the Bids tab. */
+.round-card {
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: #10151f;
+}
+
+.round-card-live {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.live-pill.idle {
+  background: rgba(107, 114, 128, 0.2);
+  color: #9ca3af;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.live-pill:not(.idle) .live-dot {
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* Settings: detected-character list. */
+.char-list {
+  width: 100%;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.char-list td,
+.char-list th {
+  padding: 5px 8px;
+}
+
+.char-list tr.active td {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}

@@ -16,8 +16,21 @@ import (
 )
 
 type Settings struct {
-	APIKey  string `json:"apiKey"`
+	APIKey string `json:"apiKey"`
+	// LogPath is the log file currently being watched. When GameDir is set
+	// and ManualLogPath is false, the app keeps this pointed at whichever
+	// character's eqlog is being written to right now (see internal/eqlogs);
+	// otherwise it's whatever file the officer picked by hand.
 	LogPath string `json:"logPath"`
+	// GameDir is the EverQuest install folder (or its Logs subfolder). When
+	// set, the app auto-detects the active character's log under it and
+	// follows character swaps mid-raid, instead of pinning one file.
+	GameDir string `json:"gameDir,omitempty"`
+	// ManualLogPath is true when the officer picked a specific log file via
+	// "Select Log File" rather than a game folder — the active-character
+	// watcher then leaves LogPath alone so it doesn't override their choice.
+	// Re-picking a game folder clears this.
+	ManualLogPath bool `json:"manualLogPath,omitempty"`
 	// Whether the Bids tab watches the log and auto-starts a round when the
 	// officer announces "<item> send tells". A pointer so "absent from the
 	// file" (nil) reads as ON — the default — while an explicit false from

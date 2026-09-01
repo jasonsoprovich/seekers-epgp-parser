@@ -40,16 +40,16 @@ export function CaptureAttendance(): $CancellablePromise<$models.AttendanceResul
 }
 
 /**
- * CaptureBids takes a snapshot: name the item, click once, done. It finds
- * the most recent "<item> send tells" line the officer said themselves (at
- * or before now) and treats that as the window start — see
- * parse.FindAnnouncementStart — so there's no separate Start step to
- * forget before bids start coming in. Every candidate tell in that window
- * comes back, in log order, with later-from-the-same-character rows
- * marked Superseded (default) — never dropped, so the officer can override
- * which one actually wins before submitting.
+ * CaptureBids opens a live round: name the item, click once (or let the
+ * "send tells" watcher do it), and the round starts tracking. It finds the
+ * most recent "<item> send tells" line the officer said themselves (at or
+ * before now) as the window start — see parse.FindAnnouncementStart — then
+ * starts the poller that both pushes each new tell to the site's live view
+ * and re-emits the growing round to this app on "bids:round" until
+ * EndBidRound or SubmitBids. The returned BidRound is the first frame;
+ * it's marked Live.
  */
-export function CaptureBids(itemName: string): $CancellablePromise<$models.BidRow[] | null> {
+export function CaptureBids(itemName: string): $CancellablePromise<$models.BidRound> {
     return $Call.ByID(1880411077, itemName);
 }
 
@@ -63,6 +63,25 @@ export function CaptureBids(itemName: string): $CancellablePromise<$models.BidRo
  */
 export function CheckForUpdate(): $CancellablePromise<$models.UpdateInfo> {
     return $Call.ByID(2347956003);
+}
+
+/**
+ * DetectedLogs re-scans the configured game folder — backs the Settings
+ * character list's Refresh button. Empty (not an error) if no game folder
+ * is set yet.
+ */
+export function DetectedLogs(): $CancellablePromise<$models.GameDirInfo> {
+    return $Call.ByID(2742340152);
+}
+
+/**
+ * EndBidRound stops the live poller (its ctx.Done branch clears the site's
+ * DO round — correct, the round is over) and returns one last, frozen scan
+ * for the officer to edit and submit. Idempotent-ish: with no round open
+ * it just returns an empty, non-live BidRound.
+ */
+export function EndBidRound(): $CancellablePromise<$models.BidRound> {
+    return $Call.ByID(1893240499);
 }
 
 /**
@@ -168,6 +187,18 @@ export function OpenReleasePage(url: string): $CancellablePromise<void> {
 
 export function SaveSettings(apiKey: string): $CancellablePromise<void> {
     return $Call.ByID(1949631069, apiKey);
+}
+
+/**
+ * SelectGameDir asks for the EverQuest install folder (or its Logs
+ * subfolder), then auto-detects the active character's log under it — the
+ * PQ-Companion-style flow. From here on the app follows character swaps on
+ * its own (startActiveLogWatch); the officer never re-picks a file when
+ * they change toons for a raid. Clears the manual-file flag SelectLogFile
+ * may have set.
+ */
+export function SelectGameDir(): $CancellablePromise<$models.GameDirInfo> {
+    return $Call.ByID(3145746342);
 }
 
 export function SelectLogFile(): $CancellablePromise<string> {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Clipboard, Events } from "@wailsio/runtime";
-import { CaptureBids, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
-import type { BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
+import { CaptureBids, EndBidRound, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
@@ -23,20 +23,33 @@ const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low
 // the Main column is where the resolved main shows up instead.
 type BidRow = CapturedBidRow & { winner: boolean; displayName: string };
 
+// idle: nothing running, the manual "name it + Capture" escape hatch is shown.
+// live: a round is tracking; the table refreshes itself from "bids:round"
+//       events every few seconds and nothing is editable yet.
+// review: the officer clicked End Round & Review — the table is frozen and
+//       editable, Determine Winner / Submit apply.
+type Phase = "idle" | "live" | "review";
+
+function toReviewRows(round: BidRound | null): BidRow[] {
+  return (round?.rows ?? []).map((r) => ({ ...r, winner: false, displayName: r.characterName }));
+}
+
 export function BidsPanel() {
   const [itemName, setItemName] = useState("");
   const [knownItems, setKnownItems] = useState<string[]>([]);
   const [rows, setRows] = useState<BidRow[]>([]);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [capturedItem, setCapturedItem] = useState("");
+  const [roundStartedAt, setRoundStartedAt] = useState<string>("");
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [tieWarning, setTieWarning] = useState<string | null>(null);
   const [winnerCount, setWinnerCount] = useState(1);
   const [gratsCopied, setGratsCopied] = useState(false);
   // A "send tells" the watcher detected while a round is already under
-  // review — shown as a switch/dismiss banner rather than clobbering the
+  // way — shown as a switch/dismiss banner rather than clobbering the
   // in-progress round. Null when there's nothing pending.
   const [pendingAnnouncement, setPendingAnnouncement] = useState<string | null>(null);
   // Toast shown briefly when a round auto-starts from a detected announcement.
@@ -51,23 +64,22 @@ export function BidsPanel() {
       .catch(() => setKnownItems([]));
   }, []);
 
-  // Whether a round is currently under review — read from a ref inside the
-  // (once-registered) announcement listener so it sees the live value
-  // without the listener re-subscribing on every state change.
-  const busyRef = useRef(false);
+  // Read the live phase from a ref inside the once-registered listeners so
+  // they see the current value without re-subscribing on every change.
+  const phaseRef = useRef<Phase>("idle");
   useEffect(() => {
-    busyRef.current = capturedItem !== "" || rows.length > 0 || pending;
-  }, [capturedItem, rows.length, pending]);
+    phaseRef.current = phase;
+  }, [phase]);
 
   // PLAN.md §15 — the app watches the log for the officer's own
   // "<item> send tells" and fires this so a round auto-starts without them
   // typing the item name or clicking Capture. If a round's already under
-  // review, don't clobber it — offer a switch instead.
+  // way, don't clobber it — offer a switch instead.
   useEffect(() => {
     return Events.On("bids:announcement", (ev: { data?: { itemName?: string } }) => {
       const item = ev?.data?.itemName?.trim();
       if (!item) return;
-      if (busyRef.current) {
+      if (phaseRef.current !== "idle") {
         setPendingAnnouncement(item);
         return;
       }
@@ -75,6 +87,20 @@ export function BidsPanel() {
       void captureFor(item);
       setAutoStarted(item);
       setTimeout(() => setAutoStarted((v) => (v === item ? null : v)), 8000);
+    });
+  }, []);
+
+  // While a round is live the Go-side poller re-emits the whole round every
+  // few seconds as tells arrive. Replace the table wholesale — nothing is
+  // editable in this phase, so there's nothing to merge or clobber.
+  useEffect(() => {
+    return Events.On("bids:round", (ev: { data?: BidRound }) => {
+      if (phaseRef.current !== "live") return;
+      const round = ev?.data;
+      if (!round?.live) return;
+      setRows(toReviewRows(round));
+      setCapturedItem(round.itemName);
+      setRoundStartedAt(round.startedAt);
     });
   }, []);
 
@@ -87,12 +113,15 @@ export function BidsPanel() {
     setPendingAnnouncement(null);
     setPending(true);
     try {
-      const result = await CaptureBids(target);
-      setRows((result ?? []).map((r) => ({ ...r, winner: false, displayName: r.characterName })));
-      setCapturedItem(target);
+      const round = await CaptureBids(target);
+      setRows(toReviewRows(round));
+      setCapturedItem(round.itemName);
+      setRoundStartedAt(round.startedAt);
+      setPhase("live");
     } catch (err) {
       setError(String(err));
       setRows([]);
+      setPhase("idle");
     } finally {
       setPending(false);
     }
@@ -100,6 +129,34 @@ export function BidsPanel() {
 
   function onCapture() {
     void captureFor(itemName);
+  }
+
+  async function onEndRound() {
+    setPending(true);
+    setError(null);
+    try {
+      const round = await EndBidRound();
+      setRows(toReviewRows(round));
+      if (round.itemName) setCapturedItem(round.itemName);
+      setPhase("review");
+    } catch (err) {
+      // The round still ended server-side; surface the error but let the
+      // officer review whatever rows came back.
+      setError(String(err));
+      setPhase("review");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function resetToIdle() {
+    setRows([]);
+    setPhase("idle");
+    setCapturedItem("");
+    setRoundStartedAt("");
+    setItemName("");
+    setTieWarning(null);
+    setGratsCopied(false);
   }
 
   function updateTier(index: number, tier: string) {
@@ -196,6 +253,7 @@ export function BidsPanel() {
         `Recorded ${result.inserted} bid(s) on ${capturedItem} — ${winners.length} won (GP charged), ${lostCount} lost (no GP charge).${notes.length > 0 ? " — " + notes.join("; ") : ""}`,
       );
       if (result.inserted > 0) setKnownItems((prev) => (prev.includes(capturedItem) ? prev : [...prev, capturedItem].sort()));
+      resetToIdle();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -204,6 +262,7 @@ export function BidsPanel() {
   }
 
   const winners = rows.filter((r) => r.winner);
+  const startedLabel = roundStartedAt ? new Date(roundStartedAt).toLocaleTimeString() : "";
 
   return (
     <div>
@@ -216,7 +275,7 @@ export function BidsPanel() {
       {submitResult && <div className="success">{submitResult}</div>}
       {roster.error && <div className="warning">Couldn't load the roster for Main/Priority lookup: {roster.error}</div>}
 
-      {winners.length > 0 && (
+      {phase === "review" && winners.length > 0 && (
         <div className="winner-summary">
           <div>
             <strong>Winner{winners.length > 1 ? "s" : ""}:</strong> {gratsMessage(winners)}
@@ -227,51 +286,56 @@ export function BidsPanel() {
         </div>
       )}
 
-      <div className="toolbar">
-        <input
-          type="text"
-          list="known-items"
-          placeholder="Item name (e.g. Soul Essence of Aten Ha Ra)"
-          value={itemName}
-          onChange={(e) => setItemName(e.target.value)}
-          style={{ minWidth: 320 }}
-        />
-        <datalist id="known-items">
-          {knownItems.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-        <button className="primary" onClick={onCapture} disabled={pending || !itemName.trim()}>
-          {pending ? "Capturing…" : "Capture Bids"}
-        </button>
-      </div>
+      {phase === "idle" && (
+        <>
+          <div className="toolbar">
+            <input
+              type="text"
+              list="known-items"
+              placeholder="Item name (e.g. Soul Essence of Aten Ha Ra)"
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              style={{ minWidth: 320 }}
+            />
+            <datalist id="known-items">
+              {knownItems.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            <button className="primary" onClick={onCapture} disabled={pending || !itemName.trim()}>
+              {pending ? "Starting…" : "Capture Bids"}
+            </button>
+          </div>
 
-      <div className="warning">
-        Say "&lt;item&gt; send tells" in guild chat — the app starts tracking that round automatically and pushes bids to the site live. No
-        need to type the item or click Capture (that button is still here if you announced before opening the app).
-      </div>
+          <div className="warning">
+            Say "&lt;item&gt; send tells" in guild chat — the app starts tracking that round automatically and pushes bids to the site live.
+            No need to type the item or click Capture (that button is here for when you announced before opening the app).
+          </div>
+        </>
+      )}
 
       {autoStarted && (
         <div className="success">
-          Auto-started bids for <strong>{autoStarted}</strong> from your announcement. Edit the name above if it came out wrong.
+          Auto-started bids for <strong>{autoStarted}</strong> from your announcement. It's tracking live now — click End Round &amp; Review
+          when calls are done.
         </div>
       )}
 
       {pendingAnnouncement && (
         <div className="warning" style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
           <span>
-            New item announced: <strong>{pendingAnnouncement}</strong>. Finish or submit the current round first, or switch now (discards
-            the current review).
+            New item announced: <strong>{pendingAnnouncement}</strong>. Finish the current round first, or switch now (discards the current
+            one).
           </span>
           <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <button
               className="primary"
               onClick={() => {
                 const next = pendingAnnouncement;
-                setRows([]);
-                setCapturedItem("");
-                setItemName(next);
-                void captureFor(next);
+                setPendingAnnouncement(null);
+                setPhase("idle");
+                setItemName(next ?? "");
+                if (next) void captureFor(next);
               }}
             >
               Switch
@@ -283,78 +347,108 @@ export function BidsPanel() {
         </div>
       )}
 
-      {rows.length > 0 && (
-        <>
-          <div className="toolbar">
-            <span style={{ color: "#9ca3af", fontSize: 13 }}>
-              {capturedItem} — {rows.length} bid(s)
+      {(phase === "live" || phase === "review") && (
+        <div className={phase === "live" ? "round-card round-card-live" : "round-card"}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span className={phase === "live" ? "live-pill" : "live-pill idle"}>
+              <span className="live-dot" />
+              {phase === "live" ? "LIVE" : "REVIEW"}
             </span>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
-              Winners:
-              <input
-                type="text"
-                inputMode="numeric"
-                value={winnerCount}
-                onChange={(e) => setWinnerCount(Math.max(1, Number(e.target.value.replace(/\D/g, "")) || 1))}
-                style={{ width: 40, textAlign: "center" }}
-                title="How many winners to pick — more than 1 for a duplicate drop"
-              />
-            </label>
-            <button className="secondary" onClick={determineWinner}>
-              Determine Winner{winnerCount > 1 ? "s" : ""}
-            </button>
-            <button className="primary" onClick={onSubmit} disabled={submitting}>
-              {submitting ? "Submitting…" : "Submit to site"}
-            </button>
+            <strong style={{ fontSize: 15 }}>{capturedItem || "—"}</strong>
+            <span style={{ color: "#9ca3af", fontSize: 13 }}>
+              {startedLabel && `started ${startedLabel} · `}
+              {rows.length} bid{rows.length === 1 ? "" : "s"}
+              {phase === "live" && " · watching…"}
+            </span>
+            {phase === "live" && (
+              <button className="primary" style={{ marginLeft: "auto" }} onClick={onEndRound} disabled={pending}>
+                {pending ? "Ending…" : "End Round & Review"}
+              </button>
+            )}
           </div>
-          <table className="col-fixed">
-            <colgroup>
-              <col style={{ width: "14%" }} />
-              <col style={{ width: "14%" }} />
-              <col style={{ width: "8%" }} />
-              <col style={{ width: "9%" }} />
-              <col style={{ width: "14%" }} />
-              <col />
-              <col style={{ width: "8%" }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Character</th>
-                <th>Main</th>
-                <th>Priority</th>
-                <th>Time</th>
-                <th>Tier</th>
-                <th>Raw message</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const resolved = roster.resolve(r.characterName);
-                return (
-                  <tr
-                    key={i}
-                    className={[r.ambiguous ? "ambiguous" : "", r.superseded ? "superseded" : "", r.winner ? "winner" : ""].join(" ").trim()}
-                    onClick={() => toggleWinner(i)}
-                    style={{ cursor: "pointer" }}
-                    title="Click the row to mark/unmark this bid as a winner"
-                  >
-                    <td>{r.displayName}</td>
-                    <td onClick={(e) => e.stopPropagation()} style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
-                      {resolved.matched ? (
-                        resolved.mainCharacterName
-                      ) : (
-                        <NoMatchSelect
-                          name={r.displayName}
-                          roster={roster}
-                          onResolved={(canonicalName) => resolveIdentity(i, canonicalName)}
-                          onError={setError}
-                        />
-                      )}
-                    </td>
-                    <td style={{ color: "#9ca3af" }}>{resolved.priorityRating !== null ? resolved.priorityRating.toFixed(2) : "—"}</td>
-                    <td>{new Date(r.occurredAt).toLocaleTimeString()}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
+        </div>
+      )}
+
+      {phase === "review" && rows.length > 0 && (
+        <div className="toolbar">
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
+            Winners:
+            <input
+              type="text"
+              inputMode="numeric"
+              value={winnerCount}
+              onChange={(e) => setWinnerCount(Math.max(1, Number(e.target.value.replace(/\D/g, "")) || 1))}
+              style={{ width: 40, textAlign: "center" }}
+              title="How many winners to pick — more than 1 for a duplicate drop"
+            />
+          </label>
+          <button className="secondary" onClick={determineWinner}>
+            Determine Winner{winnerCount > 1 ? "s" : ""}
+          </button>
+          <button className="primary" onClick={onSubmit} disabled={submitting}>
+            {submitting ? "Submitting…" : "Submit to site"}
+          </button>
+          <button className="secondary" onClick={resetToIdle} disabled={submitting}>
+            Discard
+          </button>
+        </div>
+      )}
+
+      {(phase === "live" || phase === "review") && rows.length > 0 && (
+        <table className="col-fixed">
+          <colgroup>
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "14%" }} />
+            <col />
+            <col style={{ width: "8%" }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Character</th>
+              <th>Main</th>
+              <th>Priority</th>
+              <th>Time</th>
+              <th>Tier</th>
+              <th>Raw message</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const resolved = roster.resolve(r.characterName);
+              const live = phase === "live";
+              return (
+                <tr
+                  key={i}
+                  className={[r.ambiguous ? "ambiguous" : "", r.superseded ? "superseded" : "", r.winner ? "winner" : ""].join(" ").trim()}
+                  onClick={live ? undefined : () => toggleWinner(i)}
+                  style={{ cursor: live ? "default" : "pointer" }}
+                  title={live ? undefined : "Click the row to mark/unmark this bid as a winner"}
+                >
+                  <td>{r.displayName}</td>
+                  <td onClick={(e) => e.stopPropagation()} style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
+                    {resolved.matched ? (
+                      resolved.mainCharacterName
+                    ) : live ? (
+                      <span style={{ color: "#f87171" }}>no match</span>
+                    ) : (
+                      <NoMatchSelect
+                        name={r.displayName}
+                        roster={roster}
+                        onResolved={(canonicalName) => resolveIdentity(i, canonicalName)}
+                        onError={setError}
+                      />
+                    )}
+                  </td>
+                  <td style={{ color: "#9ca3af" }}>{resolved.priorityRating !== null ? resolved.priorityRating.toFixed(2) : "—"}</td>
+                  <td>{new Date(r.occurredAt).toLocaleTimeString()}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    {live ? (
+                      <span style={{ color: r.ambiguous ? "#fbbf24" : "#d1d5db" }}>{r.tier || "—"}</span>
+                    ) : (
                       <select value={TIERS.includes(r.tier) ? r.tier : ""} onChange={(e) => updateTier(i, e.target.value)}>
                         {!TIERS.includes(r.tier) && (
                           <option value="" disabled>
@@ -367,24 +461,32 @@ export function BidsPanel() {
                           </option>
                         ))}
                       </select>
-                      {r.ambiguous && <span className="badge ambiguous" style={{ marginLeft: 6 }}>needs review</span>}
-                      {r.superseded && <span className="badge superseded" style={{ marginLeft: 6 }}>superseded</span>}
-                    </td>
-                    <td style={{ color: "#6b7280" }}>{r.rawMessage}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    )}
+                    {r.ambiguous && <span className="badge ambiguous" style={{ marginLeft: 6 }}>needs review</span>}
+                    {r.superseded && <span className="badge superseded" style={{ marginLeft: 6 }}>superseded</span>}
+                  </td>
+                  <td style={{ color: "#6b7280" }}>{r.rawMessage}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    {!live && (
                       <button className="danger" onClick={() => removeRow(i)}>
                         Remove
                       </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
 
-      {rows.length === 0 && !error && <div className="empty">Name the item and click Capture Bids when you're ready to review.</div>}
+      {phase === "live" && rows.length === 0 && (
+        <div className="empty">Tracking {capturedItem} — bids will appear here as members send tells.</div>
+      )}
+      {phase === "review" && rows.length === 0 && <div className="empty">No bids were captured for this round.</div>}
+      {phase === "idle" && !error && !autoStarted && (
+        <div className="empty">Name the item and click Capture Bids, or just announce "&lt;item&gt; send tells" in game.</div>
+      )}
     </div>
   );
 }

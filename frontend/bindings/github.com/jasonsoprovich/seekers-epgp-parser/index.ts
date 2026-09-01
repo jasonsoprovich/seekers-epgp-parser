@@ -8,7 +8,9 @@ export {
 
 export type {
     AttendanceResult,
+    BidRound,
     BidRow,
+    GameDirInfo,
     LedgerPage,
     PointValues,
     UpdateInfo

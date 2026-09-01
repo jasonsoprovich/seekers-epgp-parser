@@ -3,6 +3,9 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as eqlogs$0 from "./internal/eqlogs/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as officerapi$0 from "./internal/officerapi/models.js";
 
 /**
@@ -14,6 +17,21 @@ export interface AttendanceResult {
     "zone": string;
     "names": string[] | null;
     "warnings": string[] | null;
+}
+
+/**
+ * BidRound is the state of one bid round the Bids tab renders. While Live
+ * is true the poller re-emits this on "bids:round" every few seconds as
+ * tells arrive; End Round & Review (EndBidRound) freezes it (Live false)
+ * and the officer edits/submits from there. Wrapping the rows in a struct
+ * rather than returning a bare []BidRow also sidesteps the Wails "extra
+ * return value silently dropped" gotcha for the StartedAt/Live fields.
+ */
+export interface BidRound {
+    "itemName": string;
+    "startedAt": string;
+    "rows": BidRow[] | null;
+    "live": boolean;
 }
 
 /**
@@ -30,6 +48,20 @@ export interface BidRow {
      * an earlier bid from the same character, kept visible but not the default winner
      */
     "superseded": boolean;
+}
+
+/**
+ * GameDirInfo is what the Settings screen renders after the officer picks
+ * their EverQuest folder: the folder itself, every character log found
+ * under it, and which one the app is now following (the most recently
+ * written — the character they're currently playing).
+ */
+export interface GameDirInfo {
+    "gameDir": string;
+    "logs": eqlogs$0.CharacterLog[] | null;
+    "activePath": string;
+    "activeChar": string;
+    "activeServer": string;
 }
 
 /**

@@ -56,6 +56,12 @@ does. This app only talks to `/api/officer/*` over HTTP.
   guard with `?? []` at the call site rather than asserting it away.
 - `internal/parse` — pure log-parsing logic, no file I/O or network,
   tested against real sample logs in `internal/parse/testdata/`
+- `internal/eqlogs` — pure filesystem inspection (like `internal/parse`,
+  no dialogs/config/Wails): finds `eqlog_<Character>_<server>.txt` files
+  under a game folder and picks the most-recently-written as the "active
+  character". Backs `App.SelectGameDir` — an officer raids on their main
+  or an alt, and the app follows whichever is being written to instead of
+  pinning one path.
 - `internal/officerapi` — HTTP client for seekers-tracker's
   `/api/officer/*` routes (`x-api-key` header)
 - `internal/config` — persists the officer's API key and selected log path
@@ -95,7 +101,21 @@ wails3 generate bindings -clean=true -ts -i   # regenerate frontend/bindings/* a
 wails3 build                      # full app build -> bin/seekers-epgp-parser (raw binary, no .app bundle)
 wails3 package                    # -> bin/seekers-epgp-parser.app, for a real macOS bundle to open
 ./bin/seekers-epgp-parser          # launch the raw binary (macOS/Linux dev)
+
+go run ./cmd/simlog --dry-run       # preview a simulated bid round
+go run ./cmd/simlog                  # replay one live into ~/Downloads/EverQuest-sim/Logs/eqlog_Osui_pq.proj.txt
+go run ./cmd/simlog --who 3 --bids 0 # attendance only: 3 /who snapshots, capture the last
 ```
+
+`cmd/simlog` replays a realistic loot-bid round into an EQ log
+(optional `/who` snapshots → warm-up chatter → the officer's own
+`"<item> send tells"` → ~15 real-roster tells, live-timestamped and paced)
+so the whole live path — announcement auto-start, the Bids tab's live
+round view, the `/live-bids` site view — can be watched without a raid.
+`--who N` emits N `/who guild` blocks (different zones, growing roster) to
+exercise Attendance's "capture only the latest" behaviour. It only appends
+text; point the app at `--game-dir` first and set `SEEKERS_TRACKER_URL` to
+a local `wrangler dev`.
 
 From `frontend/`: `npm run build` (tsc + vite) typechecks the frontend
 alone, faster than a full `wails3 build` for iterating on UI-only changes —
@@ -176,6 +196,29 @@ or just use `wails3 build`, which does both.
   merges the created character into local state so the triggering row
   resolves without a full `FetchRoster` round trip. If that site route's
   contract changes, this is the other end of it.
+- **Active-character log filename split** (`internal/eqlogs.parseLogName`):
+  `eqlog_<Character>_<server>.txt` — split on the **last** `_`, not the
+  first. The server shortname contains dots (the guild's real files are
+  `..._pq.proj.txt`) and could contain an underscore; the character is
+  everything between `eqlog_` and the final `_`.
+- **Never swap the watched log mid-round.** `startActiveLogWatch` follows
+  character swaps by re-pointing `logPath`, but while `a.roundItem != ""`
+  it stashes the swap in `pendingLogPath` and `applyPendingLogSwap` runs
+  it only once `EndBidRound`/`SubmitBids` closes the round — swapping
+  under a live `CaptureBids` window would rewind it onto a different file
+  and drop the round's bids.
+- **`CaptureBids` returns `BidRound`, not `[]BidRow`.** The Bids tab is a
+  live round view now (idle → live → review in `BidsPanel.tsx`): the
+  live-push poller re-emits `bids:round` every tick so the table fills in
+  as tells land, and `EndBidRound` freezes it into the editable review
+  flow. `buildRows` is shared by capture, poller and end so all three
+  produce identical rows for the same log.
+- **The announcement watcher suppresses a repeat of the SAME item while a
+  round is live.** `startAnnouncementWatch` skips emitting `bids:announcement`
+  when the detected item `EqualFold`s the open round's `roundItem` — a
+  `"<same item> send tells - last call"` reminder is not a new item and
+  must not raise the frontend's switch/ignore banner. A *different* item
+  mid-round still does.
 - **Attendance dedupe is a server concern, but affects capture UX.**
   Project Quarm prohibits multiboxing, so one `/who` capture can't contain
   two characters from the same player. But a player may swap characters

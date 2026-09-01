@@ -15,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/eqlogs"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
 )
@@ -38,12 +39,29 @@ type App struct {
 	logPath  string
 	settings officerapi.Settings
 
-	// Guards liveBidsCancel — Capture Bids (starts a poller) and Submit
-	// (stops one) are both Wails-bound methods JS can call back-to-back,
-	// so the swap needs to be safe against that, not just the ticking
-	// goroutine itself.
+	// Guards liveBidsCancel and the round-state fields below — Capture
+	// Bids (starts a poller, opens a round), End Round and Submit (stop the
+	// poller, close the round) are all Wails-bound methods JS can call
+	// back-to-back, so the swap needs to be safe against that, not just the
+	// ticking goroutine itself.
 	liveBidsMu     sync.Mutex
 	liveBidsCancel context.CancelFunc
+	// The item a round is currently open for ("" = no round), its window
+	// start, and a log-file swap the active-character watcher wanted to
+	// make but deferred because a round was live (applied when the round
+	// closes — swapping mid-round would rewind the capture window onto a
+	// different file). All under liveBidsMu.
+	roundItem      string
+	roundStart     time.Time
+	pendingLogPath string
+
+	// The active-character log watcher: when GameDir is set (not a
+	// hand-picked file), polls for which eqlog_<char>_<server>.txt is being
+	// written to right now and re-points logPath + the announcement watch
+	// at it when the officer swaps characters mid-raid. Mirrors the
+	// annCancel pattern below.
+	activeLogMu     sync.Mutex
+	activeLogCancel context.CancelFunc
 
 	// The Bids-tab log watcher: spots the officer's own "<item> send tells"
 	// line and emits "bids:announcement" so the frontend can auto-start a
@@ -73,9 +91,20 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	a.ctx = ctx
 	if s, err := config.Load(); err == nil {
 		a.logPath = s.LogPath
+		// If a game folder is configured, re-resolve the active character's
+		// log on launch — the officer may have last raided on a different
+		// character than the one saved in LogPath.
+		if s.GameDir != "" && !s.ManualLogPath {
+			if active, ok := a.resolveActiveLog(s.GameDir); ok {
+				a.logPath = active.Path
+				a.persistLogPath(active.Path)
+			}
+		}
 	}
-	// Start watching for "send tells" announcements right away if a log
-	// file is already configured (respects the AutoDetectBids setting).
+	// Follow character swaps if a game folder is configured, and watch for
+	// "send tells" announcements right away if a log file is already known
+	// (both respect their Settings toggles / preconditions).
+	a.startActiveLogWatch()
 	a.startAnnouncementWatch()
 	// Best-effort, same as CheckForUpdate: no API key yet, or no network,
 	// just means FetchGuildSettings() below (which every settings-dependent
@@ -126,13 +155,15 @@ func (a *App) SelectLogFile() (string, error) {
 	}
 	if path != "" {
 		a.logPath = path
-		// Best-effort — a failed save here shouldn't block using the log
-		// file for the rest of this session, just means it won't survive
-		// a restart.
+		// A hand-picked file wins over game-folder auto-detection: mark it
+		// manual so startActiveLogWatch stands down and stops re-pointing
+		// logPath on the officer.
 		if s, err := config.Load(); err == nil {
 			s.LogPath = path
+			s.ManualLogPath = true
 			_ = config.Save(s)
 		}
+		a.stopActiveLogWatch()
 		// Re-point the announcement watcher at the new file.
 		a.startAnnouncementWatch()
 	}
@@ -141,6 +172,119 @@ func (a *App) SelectLogFile() (string, error) {
 
 func (a *App) GetLogPath() string {
 	return a.logPath
+}
+
+// GameDirInfo is what the Settings screen renders after the officer picks
+// their EverQuest folder: the folder itself, every character log found
+// under it, and which one the app is now following (the most recently
+// written — the character they're currently playing).
+type GameDirInfo struct {
+	GameDir      string                `json:"gameDir"`
+	Logs         []eqlogs.CharacterLog `json:"logs"`
+	ActivePath   string                `json:"activePath"`
+	ActiveChar   string                `json:"activeChar"`
+	ActiveServer string                `json:"activeServer"`
+}
+
+// SelectGameDir asks for the EverQuest install folder (or its Logs
+// subfolder), then auto-detects the active character's log under it — the
+// PQ-Companion-style flow. From here on the app follows character swaps on
+// its own (startActiveLogWatch); the officer never re-picks a file when
+// they change toons for a raid. Clears the manual-file flag SelectLogFile
+// may have set.
+func (a *App) SelectGameDir() (GameDirInfo, error) {
+	dir, err := a.app.Dialog.OpenFile().
+		SetTitle("Select your EverQuest folder").
+		CanChooseFiles(false).
+		CanChooseDirectories(true).
+		PromptForSingleSelection()
+	if err != nil {
+		return GameDirInfo{}, err
+	}
+	if dir == "" {
+		return a.gameDirInfo(), nil // cancelled — report current state
+	}
+
+	logs, err := eqlogs.Discover(dir)
+	if err != nil {
+		return GameDirInfo{}, fmt.Errorf("reading %s: %w", dir, err)
+	}
+	if len(logs) == 0 {
+		return GameDirInfo{}, fmt.Errorf("no eqlog_<character>_<server>.txt files found under %s — pick your EverQuest folder or its Logs folder", dir)
+	}
+
+	s, err := config.Load()
+	if err != nil {
+		s = config.Settings{}
+	}
+	s.GameDir = dir
+	s.ManualLogPath = false
+	if active, ok := eqlogs.Active(logs); ok {
+		s.LogPath = active.Path
+		a.logPath = active.Path
+	}
+	_ = config.Save(s)
+
+	a.startActiveLogWatch()
+	a.startAnnouncementWatch()
+	return a.gameDirInfo(), nil
+}
+
+// DetectedLogs re-scans the configured game folder — backs the Settings
+// character list's Refresh button. Empty (not an error) if no game folder
+// is set yet.
+func (a *App) DetectedLogs() (GameDirInfo, error) {
+	s, err := config.Load()
+	if err != nil || s.GameDir == "" {
+		return GameDirInfo{Logs: []eqlogs.CharacterLog{}}, nil
+	}
+	if _, err := eqlogs.Discover(s.GameDir); err != nil {
+		return GameDirInfo{}, err
+	}
+	return a.gameDirInfo(), nil
+}
+
+// gameDirInfo builds the current GameDirInfo from config + a fresh scan.
+func (a *App) gameDirInfo() GameDirInfo {
+	info := GameDirInfo{Logs: []eqlogs.CharacterLog{}}
+	s, err := config.Load()
+	if err != nil || s.GameDir == "" {
+		return info
+	}
+	info.GameDir = s.GameDir
+	logs, err := eqlogs.Discover(s.GameDir)
+	if err != nil {
+		return info
+	}
+	info.Logs = logs
+	for _, l := range logs {
+		if l.Path == a.logPath {
+			info.ActivePath = l.Path
+			info.ActiveChar = l.Character
+			info.ActiveServer = l.Server
+		}
+	}
+	return info
+}
+
+// resolveActiveLog returns the most-recently-written character log under
+// gameDir. Pure lookup, no state changes — callers decide whether to
+// switch to it.
+func (a *App) resolveActiveLog(gameDir string) (eqlogs.CharacterLog, bool) {
+	logs, err := eqlogs.Discover(gameDir)
+	if err != nil {
+		return eqlogs.CharacterLog{}, false
+	}
+	return eqlogs.Active(logs)
+}
+
+// persistLogPath best-effort writes logPath back to config (so a swap the
+// watcher made survives a restart), leaving every other field alone.
+func (a *App) persistLogPath(path string) {
+	if s, err := config.Load(); err == nil {
+		s.LogPath = path
+		_ = config.Save(s)
+	}
 }
 
 func (a *App) GetSettings() (config.Settings, error) {
@@ -467,30 +611,26 @@ type BidRow struct {
 	Superseded    bool   `json:"superseded"` // an earlier bid from the same character, kept visible but not the default winner
 }
 
-// CaptureBids takes a snapshot: name the item, click once, done. It finds
-// the most recent "<item> send tells" line the officer said themselves (at
-// or before now) and treats that as the window start — see
-// parse.FindAnnouncementStart — so there's no separate Start step to
-// forget before bids start coming in. Every candidate tell in that window
-// comes back, in log order, with later-from-the-same-character rows
-// marked Superseded (default) — never dropped, so the officer can override
-// which one actually wins before submitting.
-func (a *App) CaptureBids(itemName string) ([]BidRow, error) {
-	if itemName == "" {
-		return nil, errors.New("name the item you're collecting bids for")
-	}
-	raw, err := a.readLog()
-	if err != nil {
-		return nil, err
-	}
+// BidRound is the state of one bid round the Bids tab renders. While Live
+// is true the poller re-emits this on "bids:round" every few seconds as
+// tells arrive; End Round & Review (EndBidRound) freezes it (Live false)
+// and the officer edits/submits from there. Wrapping the rows in a struct
+// rather than returning a bare []BidRow also sidesteps the Wails "extra
+// return value silently dropped" gotcha for the StartedAt/Live fields.
+type BidRound struct {
+	ItemName  string   `json:"itemName"`
+	StartedAt string   `json:"startedAt"`
+	Rows      []BidRow `json:"rows"`
+	Live      bool     `json:"live"`
+}
 
-	now := time.Now()
-	startAt, ok := parse.FindAnnouncementStart(raw, itemName, now)
-	if !ok {
-		return nil, fmt.Errorf("no %q \"send tells\" announcement found in your log — say it in guild chat first, or check the item name spelling", itemName)
-	}
-
-	candidates := parse.CaptureBids(raw, startAt, now)
+// buildRows turns a parse window into the review-table rows the frontend
+// wants: every candidate tell in log order, later-from-the-same-character
+// rows flagged Superseded (kept visible, not dropped, so the officer can
+// override which one wins). Shared by CaptureBids, the live poller, and
+// EndBidRound so all three produce byte-identical rows for the same log.
+func buildRows(raw string, startAt, stopAt time.Time) []BidRow {
+	candidates := parse.CaptureBids(raw, startAt, stopAt)
 	latest := parse.ResolveLatestPerCharacter(candidates)
 
 	rows := make([]BidRow, 0, len(candidates))
@@ -507,13 +647,76 @@ func (a *App) CaptureBids(itemName string) ([]BidRow, error) {
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].OccurredAt < rows[j].OccurredAt })
+	return rows
+}
 
-	// PLAN.md §15 / Phase 12 task 12.3: from this point on, push each
-	// newly-detected tell for this item to the site's live view, until
-	// Submit or the next Capture Bids call stops it.
+// CaptureBids opens a live round: name the item, click once (or let the
+// "send tells" watcher do it), and the round starts tracking. It finds the
+// most recent "<item> send tells" line the officer said themselves (at or
+// before now) as the window start — see parse.FindAnnouncementStart — then
+// starts the poller that both pushes each new tell to the site's live view
+// and re-emits the growing round to this app on "bids:round" until
+// EndBidRound or SubmitBids. The returned BidRound is the first frame;
+// it's marked Live.
+func (a *App) CaptureBids(itemName string) (BidRound, error) {
+	if itemName == "" {
+		return BidRound{}, errors.New("name the item you're collecting bids for")
+	}
+	raw, err := a.readLog()
+	if err != nil {
+		return BidRound{}, err
+	}
+
+	now := time.Now()
+	startAt, ok := parse.FindAnnouncementStart(raw, itemName, now)
+	if !ok {
+		return BidRound{}, fmt.Errorf("no %q \"send tells\" announcement found in your log — say it in guild chat first, or check the item name spelling", itemName)
+	}
+
+	a.liveBidsMu.Lock()
+	a.roundItem = itemName
+	a.roundStart = startAt
+	a.liveBidsMu.Unlock()
+
+	// PLAN.md §15 / Phase 12 task 12.3: from here on, push each
+	// newly-detected tell for this item to the site's live view, and
+	// re-emit the round locally, until EndBidRound or SubmitBids stops it.
 	a.startLiveBidPush(itemName, startAt)
 
-	return rows, nil
+	return BidRound{
+		ItemName:  itemName,
+		StartedAt: startAt.Format(time.RFC3339),
+		Rows:      buildRows(raw, startAt, now),
+		Live:      true,
+	}, nil
+}
+
+// EndBidRound stops the live poller (its ctx.Done branch clears the site's
+// DO round — correct, the round is over) and returns one last, frozen scan
+// for the officer to edit and submit. Idempotent-ish: with no round open
+// it just returns an empty, non-live BidRound.
+func (a *App) EndBidRound() (BidRound, error) {
+	a.liveBidsMu.Lock()
+	item, start := a.roundItem, a.roundStart
+	a.roundItem = ""
+	a.liveBidsMu.Unlock()
+
+	a.stopLiveBidPush()
+	defer a.applyPendingLogSwap()
+
+	if item == "" {
+		return BidRound{Rows: []BidRow{}}, nil
+	}
+	raw, err := a.readLog()
+	if err != nil {
+		return BidRound{ItemName: item, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}, err
+	}
+	return BidRound{
+		ItemName:  item,
+		StartedAt: start.Format(time.RFC3339),
+		Rows:      buildRows(raw, start, time.Now()),
+		Live:      false,
+	}, nil
 }
 
 // SubmitBids records every remaining row from the Bids tab as a bid (won
@@ -531,10 +734,14 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (office
 		Entries:  entries,
 	})
 	if err == nil {
+		a.liveBidsMu.Lock()
+		a.roundItem = ""
+		a.liveBidsMu.Unlock()
 		// The finalize route itself clears the live DO's state — this just
 		// stops the Go side from continuing to poll into a round that's
 		// already done.
 		a.stopLiveBidPush()
+		a.applyPendingLogSwap()
 	}
 	return resp, err
 }
@@ -604,6 +811,17 @@ func (a *App) startAnnouncementWatch() {
 			a.annLastSeen = at
 			a.annMu.Unlock()
 
+			// A repeat "<same item> send tells - last call" for the round
+			// that's already tracking is not a new item — swallow it (but
+			// still advance annLastSeen above so it doesn't re-fire). Only a
+			// DIFFERENT item mid-round should raise the switch/ignore banner.
+			a.liveBidsMu.Lock()
+			current := a.roundItem
+			a.liveBidsMu.Unlock()
+			if current != "" && strings.EqualFold(strings.TrimSpace(current), strings.TrimSpace(item)) {
+				continue
+			}
+
 			a.app.Event.Emit("bids:announcement", announcementEvent{
 				ItemName:    item,
 				AnnouncedAt: at.Format(time.RFC3339),
@@ -620,6 +838,130 @@ func (a *App) stopAnnouncementWatch() {
 	if a.annCancel != nil {
 		a.annCancel()
 		a.annCancel = nil
+	}
+}
+
+// activeLogEvent is emitted on "log:active" whenever the followed character
+// changes, so the Settings screen and the sidebar footer can update
+// without polling.
+type activeLogEvent struct {
+	Path      string `json:"path"`
+	Character string `json:"character"`
+	Server    string `json:"server"`
+}
+
+// startActiveLogWatch (re)starts the goroutine that follows the officer's
+// active character: every 10s it re-checks which eqlog under GameDir is
+// being written to and, if that's changed, re-points logPath and the
+// announcement watch at it. No-op unless a GameDir is configured and the
+// officer hasn't overridden it with a hand-picked file (ManualLogPath).
+//
+// A swap is DEFERRED while a bid round is live — rewinding the capture
+// window onto a different file mid-round would drop the round's bids. The
+// pending path is stashed and applied by applyPendingLogSwap when the
+// round closes.
+func (a *App) startActiveLogWatch() {
+	a.stopActiveLogWatch()
+
+	s, err := config.Load()
+	if err != nil || s.GameDir == "" || s.ManualLogPath {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.activeLogMu.Lock()
+	a.activeLogCancel = cancel
+	a.activeLogMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			active, ok := a.resolveActiveLog(s.GameDir)
+			if !ok || active.Path == a.logPath {
+				continue
+			}
+
+			a.liveBidsMu.Lock()
+			roundLive := a.roundItem != ""
+			if roundLive {
+				a.pendingLogPath = active.Path
+			}
+			a.liveBidsMu.Unlock()
+			if roundLive {
+				continue // apply once the round closes
+			}
+
+			a.switchActiveLog(active)
+		}
+	}()
+}
+
+// switchActiveLog re-points logPath at a newly-active character's log,
+// persists it, restarts the announcement watch against it, and tells the
+// frontend.
+func (a *App) switchActiveLog(active eqlogs.CharacterLog) {
+	a.logPath = active.Path
+	a.persistLogPath(active.Path)
+	a.startAnnouncementWatch()
+	if a.app != nil {
+		a.app.Event.Emit("log:active", activeLogEvent{
+			Path:      active.Path,
+			Character: active.Character,
+			Server:    active.Server,
+		})
+	}
+}
+
+// applyPendingLogSwap performs a character-swap the watcher deferred
+// because a round was live. Called from the round-closing paths
+// (EndBidRound, SubmitBids). Under liveBidsMu already? No — callers must
+// NOT hold it (switchActiveLog does its own work); they call this after
+// clearing roundItem and releasing the lock.
+func (a *App) applyPendingLogSwap() {
+	a.liveBidsMu.Lock()
+	path := a.pendingLogPath
+	a.pendingLogPath = ""
+	a.liveBidsMu.Unlock()
+	if path == "" || path == a.logPath {
+		return
+	}
+	s, err := config.Load()
+	if err != nil || s.GameDir == "" {
+		return
+	}
+	for _, l := range mustDiscover(s.GameDir) {
+		if l.Path == path {
+			a.switchActiveLog(l)
+			return
+		}
+	}
+}
+
+// mustDiscover is eqlogs.Discover with the error swallowed to an empty
+// slice — used where a scan failure just means "no swap this time".
+func mustDiscover(gameDir string) []eqlogs.CharacterLog {
+	logs, err := eqlogs.Discover(gameDir)
+	if err != nil {
+		return nil
+	}
+	return logs
+}
+
+// stopActiveLogWatch cancels the active-character watcher. Safe to call
+// when none is running.
+func (a *App) stopActiveLogWatch() {
+	a.activeLogMu.Lock()
+	defer a.activeLogMu.Unlock()
+	if a.activeLogCancel != nil {
+		a.activeLogCancel()
+		a.activeLogCancel = nil
 	}
 }
 
@@ -687,7 +1029,19 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 			if err != nil {
 				continue
 			}
-			candidates := parse.CaptureBids(raw, startAt, time.Now())
+			now := time.Now()
+			candidates := parse.CaptureBids(raw, startAt, now)
+
+			// Re-emit the round to THIS app every tick (bids or not) so the
+			// Bids tab's live table and bid count track reality without its
+			// own timer. Local-only and independent of the site push below —
+			// the officer's own view updates even with no API key set.
+			a.app.Event.Emit("bids:round", BidRound{
+				ItemName:  itemName,
+				StartedAt: startAt.Format(time.RFC3339),
+				Rows:      buildRows(raw, startAt, now),
+				Live:      true,
+			})
 
 			client, err := a.officerClient()
 			if err != nil {
