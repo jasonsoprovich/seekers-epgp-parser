@@ -256,6 +256,32 @@ func (c *Client) ClearLiveBids(ctx context.Context, itemName string) error {
 	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/clear", liveBidItemRef{ItemName: itemName}, nil)
 }
 
+// --- POST /api/officer/live-bids/resolve ---
+
+// LiveBidWinner is one winning bid for ResolveLiveBids — the site resolves
+// the character's current priority itself, same as PushLiveBid.
+type LiveBidWinner struct {
+	CharacterName string `json:"characterName"`
+	Tier          string `json:"tier"`
+}
+
+type resolveLiveBidsRequest struct {
+	ItemName string          `json:"itemName"`
+	Winners  []LiveBidWinner `json:"winners"`
+}
+
+// ResolveLiveBids marks this officer's round for `itemName` finalized on the
+// site's live view — the card stays visible with its winner(s) for a review
+// window (PLAN.md Phase 16) instead of vanishing the instant SubmitBids
+// succeeds. Best-effort like every other live-bids call; SubmitBids is the
+// real record regardless.
+func (c *Client) ResolveLiveBids(ctx context.Context, itemName string, winners []LiveBidWinner) error {
+	if winners == nil {
+		winners = []LiveBidWinner{}
+	}
+	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/resolve", resolveLiveBidsRequest{ItemName: itemName, Winners: winners}, nil)
+}
+
 // --- POST /api/officer/manual-entry ---
 
 // ManualEntryRequest mirrors seekers-tracker's InsertLedgerEntryInput

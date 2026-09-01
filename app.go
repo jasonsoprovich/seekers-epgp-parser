@@ -47,12 +47,15 @@ type App struct {
 	liveBidsMu     sync.Mutex
 	liveBidsCancel context.CancelFunc
 	// The item a round is currently open for ("" = no round), its window
-	// start, and a log-file swap the active-character watcher wanted to
-	// make but deferred because a round was live (applied when the round
-	// closes — swapping mid-round would rewind the capture window onto a
-	// different file). All under liveBidsMu.
+	// start, whether SubmitBids has finalized it (so the poller's stop path
+	// doesn't clear a round the site should now keep as "resolved"), and a
+	// log-file swap the active-character watcher wanted to make but deferred
+	// because a round was live (applied when the round closes — swapping
+	// mid-round would rewind the capture window onto a different file). All
+	// under liveBidsMu.
 	roundItem      string
 	roundStart     time.Time
+	roundResolved  bool
 	pendingLogPath string
 
 	// The active-character log watcher: when GameDir is set (not a
@@ -673,10 +676,19 @@ func (a *App) CaptureBids(itemName string) (BidRound, error) {
 		return BidRound{}, fmt.Errorf("no %q \"send tells\" announcement found in your log — say it in guild chat first, or check the item name spelling", itemName)
 	}
 
+	// Switching items mid-session: clear the previous round off the site
+	// unless it was already finalized (SubmitBids left it "resolved" for
+	// members to review — Phase 16; the DO also sweeps this officer's
+	// resolved rounds when the new item's first bid pushes).
 	a.liveBidsMu.Lock()
+	prevItem, prevResolved := a.roundItem, a.roundResolved
 	a.roundItem = itemName
 	a.roundStart = startAt
+	a.roundResolved = false
 	a.liveBidsMu.Unlock()
+	if prevItem != "" && prevItem != itemName && !prevResolved {
+		a.clearLiveBids(prevItem)
+	}
 
 	// PLAN.md §15 / Phase 12 task 12.3: from here on, push each
 	// newly-detected tell for this item to the site's live view, and
@@ -691,18 +703,19 @@ func (a *App) CaptureBids(itemName string) (BidRound, error) {
 	}, nil
 }
 
-// EndBidRound stops the live poller (its ctx.Done branch clears the site's
-// DO round — correct, the round is over) and returns one last, frozen scan
-// for the officer to edit and submit. Idempotent-ish: with no round open
-// it just returns an empty, non-live BidRound.
+// EndBidRound stops the live poller and returns one last, frozen scan for
+// the officer to edit and submit. It does NOT clear the site's round — the
+// bids stay visible on /live-bids while the officer picks a winner, and
+// SubmitBids then flips that round to "resolved" (Phase 16). If the officer
+// abandons the round instead, DiscardBidRound clears it, or the DO's idle
+// sweep drops it after ~5 min. Idempotent-ish: with no round open it just
+// returns an empty, non-live BidRound.
 func (a *App) EndBidRound() (BidRound, error) {
 	a.liveBidsMu.Lock()
 	item, start := a.roundItem, a.roundStart
-	a.roundItem = ""
 	a.liveBidsMu.Unlock()
 
 	a.stopLiveBidPush()
-	defer a.applyPendingLogSwap()
 
 	if item == "" {
 		return BidRound{Rows: []BidRow{}}, nil
@@ -717,6 +730,22 @@ func (a *App) EndBidRound() (BidRound, error) {
 		Rows:      buildRows(raw, start, time.Now()),
 		Live:      false,
 	}, nil
+}
+
+// DiscardBidRound throws away the current round without recording it —
+// clears it off the site's live view and drops local round state. Wired to
+// the Bids tab's "Discard" button.
+func (a *App) DiscardBidRound() {
+	a.liveBidsMu.Lock()
+	item := a.roundItem
+	a.roundItem = ""
+	a.roundResolved = false
+	a.liveBidsMu.Unlock()
+	a.stopLiveBidPush()
+	if item != "" {
+		a.clearLiveBids(item)
+	}
+	a.applyPendingLogSwap()
 }
 
 // SubmitBids records every remaining row from the Bids tab as a bid (won
@@ -736,11 +765,22 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (office
 	if err == nil {
 		a.liveBidsMu.Lock()
 		a.roundItem = ""
+		a.roundResolved = true
 		a.liveBidsMu.Unlock()
-		// The finalize route itself clears the live DO's state — this just
-		// stops the Go side from continuing to poll into a round that's
-		// already done.
 		a.stopLiveBidPush()
+		// Phase 16: leave the round on /live-bids, now flagged resolved with
+		// its winner(s), for a review window rather than yanking it. The
+		// finalize route (POST /api/officer/bids) no longer touches the DO
+		// at all, so this is the only signal the live view gets.
+		winners := make([]officerapi.LiveBidWinner, 0, len(entries))
+		for _, e := range entries {
+			if e.IsWinner {
+				winners = append(winners, officerapi.LiveBidWinner{CharacterName: e.CharacterName, Tier: e.Tier})
+			}
+		}
+		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.ResolveLiveBids(bg, itemName, winners)
+		cancel()
 		a.applyPendingLogSwap()
 	}
 	return resp, err
@@ -755,6 +795,34 @@ func (a *App) stopLiveBidPush() {
 		a.liveBidsCancel()
 		a.liveBidsCancel = nil
 	}
+}
+
+// clearLiveBids removes an item's round from the site's live view,
+// best-effort with its own short-lived context (callers may be tearing down
+// and have already cancelled a.ctx).
+func (a *App) clearLiveBids(itemName string) {
+	client, err := a.officerClient()
+	if err != nil {
+		return
+	}
+	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = client.ClearLiveBids(bg, itemName)
+	cancel()
+}
+
+// ServiceShutdown is Wails v3's optional teardown hook (services.go). If the
+// officer quits mid-collection — before Submit resolved the round — clear it
+// off the site so /live-bids doesn't show a dead round until the idle sweep.
+// A round already resolved by Submit is left alone (members are reviewing
+// it).
+func (a *App) ServiceShutdown() error {
+	a.liveBidsMu.Lock()
+	item, resolved := a.roundItem, a.roundResolved
+	a.liveBidsMu.Unlock()
+	if item != "" && !resolved {
+		a.clearLiveBids(item)
+	}
+	return nil
 }
 
 // startAnnouncementWatch (re)starts the background goroutine that polls the
@@ -1006,21 +1074,13 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 		for {
 			select {
 			case <-ctx.Done():
-				// Best-effort, and deliberately NOT using ctx here — it's
-				// already cancelled by this point (that's what got us into
-				// this branch), so a request built on it would fail
-				// immediately. Fires on every stop path (new capture,
-				// successful submit, app quit alike) — harmless and
-				// idempotent on the first two (the DO's own logic already
-				// resolves those server-side), and the one that actually
-				// matters: quitting the app mid-round used to leave the
-				// site showing a stale round for up to the 90s idle TTL
-				// with no signal at all that anything had changed.
-				if client, err := a.officerClient(); err == nil {
-					clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					_ = client.ClearLiveBids(clearCtx, itemName)
-					cancel()
-				}
+				// Just stop polling. Whether the site's round is cleared,
+				// resolved, or left to idle-sweep is decided by whichever
+				// call stopped this poller — EndBidRound leaves it,
+				// SubmitBids resolves it, DiscardBidRound / a round switch /
+				// ServiceShutdown clear it. (Phase 16 — before this the
+				// poller blanket-cleared on every stop path, which also
+				// wiped a just-resolved round.)
 				return
 			case <-ticker.C:
 			}

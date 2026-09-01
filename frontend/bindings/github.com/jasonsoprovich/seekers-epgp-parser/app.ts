@@ -75,10 +75,22 @@ export function DetectedLogs(): $CancellablePromise<$models.GameDirInfo> {
 }
 
 /**
- * EndBidRound stops the live poller (its ctx.Done branch clears the site's
- * DO round — correct, the round is over) and returns one last, frozen scan
- * for the officer to edit and submit. Idempotent-ish: with no round open
- * it just returns an empty, non-live BidRound.
+ * DiscardBidRound throws away the current round without recording it —
+ * clears it off the site's live view and drops local round state. Wired to
+ * the Bids tab's "Discard" button.
+ */
+export function DiscardBidRound(): $CancellablePromise<void> {
+    return $Call.ByID(536756724);
+}
+
+/**
+ * EndBidRound stops the live poller and returns one last, frozen scan for
+ * the officer to edit and submit. It does NOT clear the site's round — the
+ * bids stay visible on /live-bids while the officer picks a winner, and
+ * SubmitBids then flips that round to "resolved" (Phase 16). If the officer
+ * abandons the round instead, DiscardBidRound clears it, or the DO's idle
+ * sweep drops it after ~5 min. Idempotent-ish: with no round open it just
+ * returns an empty, non-live BidRound.
  */
 export function EndBidRound(): $CancellablePromise<$models.BidRound> {
     return $Call.ByID(1893240499);

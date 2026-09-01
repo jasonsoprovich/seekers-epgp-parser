@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Clipboard, Events } from "@wailsio/runtime";
-import { CaptureBids, EndBidRound, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import { CaptureBids, DiscardBidRound, EndBidRound, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
@@ -157,6 +157,13 @@ export function BidsPanel() {
     setItemName("");
     setTieWarning(null);
     setGratsCopied(false);
+  }
+
+  function onDiscard() {
+    // Best-effort clear of the site's live round too — a discarded round
+    // shouldn't linger on /live-bids.
+    void DiscardBidRound().catch(() => {});
+    resetToIdle();
   }
 
   function updateTier(index: number, tier: string) {
@@ -388,7 +395,7 @@ export function BidsPanel() {
           <button className="primary" onClick={onSubmit} disabled={submitting}>
             {submitting ? "Submitting…" : "Submit to site"}
           </button>
-          <button className="secondary" onClick={resetToIdle} disabled={submitting}>
+          <button className="secondary" onClick={onDiscard} disabled={submitting}>
             Discard
           </button>
         </div>
