@@ -598,7 +598,7 @@ func (a *App) CaptureAttendance() (AttendanceResult, error) {
 // editing/removing rows in the Attendance tab — same "submit what's on
 // screen" contract as the Copy-to-clipboard button next to it, just to the
 // site's ledger instead of the clipboard.
-func (a *App) SubmitAttendance(activity string, occurredAt string, names []string) (officerapi.AttendanceResponse, error) {
+func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string) (officerapi.AttendanceResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.AttendanceResponse{}, err
@@ -607,6 +607,7 @@ func (a *App) SubmitAttendance(activity string, occurredAt string, names []strin
 		Activity:       activity,
 		OccurredAt:     occurredAt,
 		CharacterNames: names,
+		Zone:           zone,
 	})
 }
 
@@ -802,18 +803,24 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (office
 		a.roundFloor = time.Now() // finalized — a re-drop of this item is a fresh round
 		a.liveBidsMu.Unlock()
 		a.stopLiveBidPush()
-		// Phase 16: leave the round on /live-bids, now flagged resolved with
-		// its winner(s), for a review window rather than yanking it. The
-		// finalize route (POST /api/officer/bids) no longer touches the DO
-		// at all, so this is the only signal the live view gets.
-		winners := make([]officerapi.LiveBidWinner, 0, len(entries))
+		// Phase 16: leave the round on /live-bids, now flagged resolved, for
+		// a review window rather than yanking it. The finalize route (POST
+		// /api/officer/bids) no longer touches the DO at all, so this is the
+		// only signal the live view gets. Send the WHOLE reviewed bid list,
+		// not just the winner(s), so the dimmed card keeps showing who bid
+		// what — the officer's own edits/removals in the review table are
+		// exactly what members should see as the final record.
+		resolveBids := make([]officerapi.ResolveLiveBidEntry, 0, len(entries))
 		for _, e := range entries {
-			if e.IsWinner {
-				winners = append(winners, officerapi.LiveBidWinner{CharacterName: e.CharacterName, Tier: e.Tier})
-			}
+			resolveBids = append(resolveBids, officerapi.ResolveLiveBidEntry{
+				CharacterName: e.CharacterName,
+				Tier:          e.Tier,
+				OccurredAt:    e.OccurredAt,
+				IsWinner:      e.IsWinner,
+			})
 		}
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = client.ResolveLiveBids(bg, itemName, winners)
+		_ = client.ResolveLiveBids(bg, itemName, resolveBids)
 		cancel()
 		a.applyPendingLogSwap()
 	}

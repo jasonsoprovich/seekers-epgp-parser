@@ -111,7 +111,7 @@ export function AttendancePanel() {
         return;
       }
 
-      const result = await SubmitAttendance(activity, snapshot.occurredAt, names);
+      const result = await SubmitAttendance(activity, snapshot.occurredAt, names, snapshot.zone ?? "");
       const unmatched = result.unmatched ?? [];
       const duplicates = result.duplicates ?? [];
       const unmatchedNote = unmatched.length > 0 ? ` — no match for: ${unmatched.join(", ")}` : "";

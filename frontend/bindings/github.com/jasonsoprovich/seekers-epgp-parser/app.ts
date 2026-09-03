@@ -241,8 +241,8 @@ export function SetAutoDetectBids(enabled: boolean): $CancellablePromise<void> {
  * screen" contract as the Copy-to-clipboard button next to it, just to the
  * site's ledger instead of the clipboard.
  */
-export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null): $CancellablePromise<officerapi$0.AttendanceResponse> {
-    return $Call.ByID(2782717002, activity, occurredAt, names);
+export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
+    return $Call.ByID(2782717002, activity, occurredAt, names, zone);
 }
 
 /**

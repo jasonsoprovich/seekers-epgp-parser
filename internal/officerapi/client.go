@@ -162,6 +162,11 @@ type AttendanceRequest struct {
 	OccurredAt     string   `json:"occurredAt"`
 	CharacterNames []string `json:"characterNames"`
 	Note           string   `json:"note,omitempty"`
+	// The in-game zone this `/who` was captured in, off the snapshot's own
+	// "There are N players in <Zone>" line — recorded on every ep_ledger row
+	// the award writes so the site's EP table shows what a Raid-Start/Mid/End
+	// row was for. Omitted when the parse couldn't determine a zone.
+	Zone string `json:"zone,omitempty"`
 }
 
 type AttendanceResponse struct {
@@ -258,28 +263,33 @@ func (c *Client) ClearLiveBids(ctx context.Context, itemName string) error {
 
 // --- POST /api/officer/live-bids/resolve ---
 
-// LiveBidWinner is one winning bid for ResolveLiveBids — the site resolves
-// the character's current priority itself, same as PushLiveBid.
-type LiveBidWinner struct {
+// ResolveLiveBidEntry is one row of the final, reviewed bid list sent on
+// finalize — every character who bid, winner or not, so the site's dimmed
+// "resolved" card keeps showing who bid what (and at what priority, which
+// the site resolves itself, same as PushLiveBid) instead of collapsing to
+// winner-only. IsWinner marks the row(s) that took the item.
+type ResolveLiveBidEntry struct {
 	CharacterName string `json:"characterName"`
 	Tier          string `json:"tier"`
+	OccurredAt    string `json:"occurredAt,omitempty"`
+	IsWinner      bool   `json:"isWinner"`
 }
 
 type resolveLiveBidsRequest struct {
-	ItemName string          `json:"itemName"`
-	Winners  []LiveBidWinner `json:"winners"`
+	ItemName string                `json:"itemName"`
+	Bids     []ResolveLiveBidEntry `json:"bids"`
 }
 
 // ResolveLiveBids marks this officer's round for `itemName` finalized on the
-// site's live view — the card stays visible with its winner(s) for a review
-// window (PLAN.md Phase 16) instead of vanishing the instant SubmitBids
-// succeeds. Best-effort like every other live-bids call; SubmitBids is the
-// real record regardless.
-func (c *Client) ResolveLiveBids(ctx context.Context, itemName string, winners []LiveBidWinner) error {
-	if winners == nil {
-		winners = []LiveBidWinner{}
+// site's live view — the card stays visible with its full bid list and
+// winner(s) for a review window (PLAN.md Phase 16) instead of vanishing the
+// instant SubmitBids succeeds. Best-effort like every other live-bids call;
+// SubmitBids is the real record regardless.
+func (c *Client) ResolveLiveBids(ctx context.Context, itemName string, bids []ResolveLiveBidEntry) error {
+	if bids == nil {
+		bids = []ResolveLiveBidEntry{}
 	}
-	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/resolve", resolveLiveBidsRequest{ItemName: itemName, Winners: winners}, nil)
+	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/resolve", resolveLiveBidsRequest{ItemName: itemName, Bids: bids}, nil)
 }
 
 // --- POST /api/officer/manual-entry ---
