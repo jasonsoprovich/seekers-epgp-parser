@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
 import { FetchPointValues, SubmitManualEntry } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { PointValue } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
+import { MissedAttendanceForm } from "./MissedAttendanceForm";
+import { MissedBidForm } from "./MissedBidForm";
 import { useRoster } from "./useRoster";
 
 const CUSTOM = "__custom__";
 
-// Journal-entry style: guild-bank donations, level/epic milestones, ad-hoc
-// adjustments — anything that isn't attendance or a bid. Posts straight to
-// /api/officer/manual-entry (already used by the website's own ledger
-// form) with the current time as occurredAt; there's no backdating field
-// on purpose, matching "use the current time as the timestamp."
+type Mode = "adjust" | "bid" | "attendance";
+
+// Three things live here now:
+//   - "adjust": journal-entry EP/GP (bank donations, milestones, ad-hoc
+//     corrections) — posts to /api/officer/manual-entry at the current time.
+//   - "bid": a bid round the parser never captured (MissedBidForm).
+//   - "attendance": names to add to an event the /who capture missed
+//     (MissedAttendanceForm).
+// The last two exist because a missed tell or an app that wasn't running
+// still has to be recordable, with the site's own duplicate checks in the
+// loop so nothing gets doubled.
 export function ManualEntryPanel() {
+  const [mode, setMode] = useState<Mode>("adjust");
   const [kind, setKind] = useState<"ep" | "gp">("ep");
   const [pointValues, setPointValues] = useState<PointValue[]>([]);
   const [characterId, setCharacterId] = useState<number | "">("");
@@ -83,13 +92,23 @@ export function ManualEntryPanel() {
     <div>
       <div className="panel-header">
         <h2>Manual Entry</h2>
+        <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+          <option value="adjust">EP / GP adjustment</option>
+          <option value="bid">Missed bid</option>
+          <option value="attendance">Missed attendance</option>
+        </select>
       </div>
 
-      {error && <div className="error">{error}</div>}
-      {success && <div className="success">{success}</div>}
-      {roster.error && <div className="warning">Couldn't load the roster: {roster.error}</div>}
+      {mode === "bid" && <MissedBidForm />}
+      {mode === "attendance" && <MissedAttendanceForm />}
 
-      <div className="form-card">
+      {mode === "adjust" && (
+        <>
+          {error && <div className="error">{error}</div>}
+          {success && <div className="success">{success}</div>}
+          {roster.error && <div className="warning">Couldn't load the roster: {roster.error}</div>}
+
+          <div className="form-card">
         <div className="form-row">
           <label>
             Kind
@@ -165,12 +184,14 @@ export function ManualEntryPanel() {
           </label>
         </div>
 
-        <div className="form-actions">
-          <button className="primary" onClick={onSubmit} disabled={pending}>
-            {pending ? "Recording…" : "Record entry"}
-          </button>
+          <div className="form-actions">
+            <button className="primary" onClick={onSubmit} disabled={pending}>
+              {pending ? "Recording…" : "Record entry"}
+            </button>
+          </div>
         </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

@@ -520,6 +520,32 @@ func (a *App) SubmitManualEntry(req officerapi.ManualEntryRequest) error {
 	return client.SubmitManualEntry(a.ctx, req)
 }
 
+// SubmitManualBid records a bid round the parser never captured — a tell
+// missed, or the app not running when the item dropped. It sends the same
+// payload SubmitBids does, but stamps every entry with the officer-supplied
+// occurredAt and runs none of the live-round bookkeeping
+// (roundItem/stopLiveBidPush) — there was no live round. Goes through
+// SubmitBidsChecked, so an item already recorded near this time comes back
+// as resp.Duplicate (with a message) rather than an error; the frontend
+// then offers "Record anyway", which resubmits with confirmDuplicate=true.
+func (a *App) SubmitManualBid(itemName, occurredAt, note string, entries []officerapi.BidEntry, confirmDuplicate bool) (officerapi.BidsResponse, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return officerapi.BidsResponse{}, err
+	}
+	stamped := make([]officerapi.BidEntry, len(entries))
+	for i, e := range entries {
+		e.OccurredAt = occurredAt
+		stamped[i] = e
+	}
+	return client.SubmitBidsChecked(a.ctx, officerapi.BidsRequest{
+		ItemName:         itemName,
+		Entries:          stamped,
+		Note:             note,
+		ConfirmDuplicate: confirmDuplicate,
+	})
+}
+
 // --- Browse ---
 
 // LedgerPage wraps FetchLedger's (rows, hasNext) pair into one

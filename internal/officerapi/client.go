@@ -199,6 +199,9 @@ type BidsRequest struct {
 	ItemName string     `json:"itemName"`
 	Entries  []BidEntry `json:"entries"`
 	Note     string     `json:"note,omitempty"`
+	// Set true to record even when the site flags this item as a likely
+	// duplicate of an already-recorded round (see SubmitBidsChecked).
+	ConfirmDuplicate bool `json:"confirmDuplicate,omitempty"`
 }
 
 type BidsResponse struct {
@@ -206,12 +209,65 @@ type BidsResponse struct {
 	Inserted     int      `json:"inserted"`
 	Unmatched    []string `json:"unmatched"`
 	InvalidTiers []string `json:"invalidTiers"`
+	// Set by SubmitBidsChecked when the site returned 409 "already
+	// recorded" instead of writing anything — the caller shows the message
+	// and offers a "Record anyway" that resends with ConfirmDuplicate.
+	Duplicate        bool   `json:"duplicate,omitempty"`
+	DuplicateMessage string `json:"duplicateMessage,omitempty"`
 }
 
 func (c *Client) SubmitBids(ctx context.Context, req BidsRequest) (BidsResponse, error) {
 	var out BidsResponse
 	err := c.do(ctx, http.MethodPost, "/api/officer/bids", req, &out)
 	return out, err
+}
+
+// SubmitBidsChecked is SubmitBids with the soft-duplicate path surfaced as
+// data, not an error: on a 409 it returns out.Duplicate=true and
+// out.DuplicateMessage with a nil error, so the caller can offer "Record
+// anyway" (resend with ConfirmDuplicate=true). Any other non-2xx is still
+// a normal error.
+func (c *Client) SubmitBidsChecked(ctx context.Context, req BidsRequest) (BidsResponse, error) {
+	var out BidsResponse
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		return out, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/officer/bids", bytes.NewReader(encoded))
+	if err != nil {
+		return out, err
+	}
+	httpReq.Header.Set("x-api-key", c.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return out, fmt.Errorf("couldn't reach %s — check your internet connection: %w", c.baseURL, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return out, err
+	}
+
+	if resp.StatusCode == http.StatusConflict {
+		var apiErr apiError
+		_ = json.Unmarshal(respBody, &apiErr)
+		out.Duplicate = true
+		out.DuplicateMessage = apiErr.Error
+		return out, nil
+	}
+	if resp.StatusCode >= 300 {
+		var apiErr apiError
+		if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error != "" {
+			return out, fmt.Errorf("%s", apiErr.Error)
+		}
+		return out, fmt.Errorf("server returned %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 // --- POST /api/officer/live-bids/push ---

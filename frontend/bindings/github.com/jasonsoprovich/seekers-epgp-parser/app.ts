@@ -256,6 +256,20 @@ export function SubmitBids(itemName: string, entries: officerapi$0.BidEntry[] | 
     return $Call.ByID(3424067681, itemName, entries);
 }
 
+/**
+ * SubmitManualBid records a bid round the parser never captured — a tell
+ * missed, or the app not running when the item dropped. It sends the same
+ * payload SubmitBids does, but stamps every entry with the officer-supplied
+ * occurredAt and runs none of the live-round bookkeeping
+ * (roundItem/stopLiveBidPush) — there was no live round. Goes through
+ * SubmitBidsChecked, so an item already recorded near this time comes back
+ * as resp.Duplicate (with a message) rather than an error; the frontend
+ * then offers "Record anyway", which resubmits with confirmDuplicate=true.
+ */
+export function SubmitManualBid(itemName: string, occurredAt: string, note: string, entries: officerapi$0.BidEntry[] | null, confirmDuplicate: boolean): $CancellablePromise<officerapi$0.BidsResponse> {
+    return $Call.ByID(2335504918, itemName, occurredAt, note, entries, confirmDuplicate);
+}
+
 export function SubmitManualEntry(req: officerapi$0.ManualEntryRequest): $CancellablePromise<void> {
     return $Call.ByID(1930507941, req);
 }

@@ -27,6 +27,14 @@ export interface BidsResponse {
     "inserted": number;
     "unmatched": string[] | null;
     "invalidTiers": string[] | null;
+
+    /**
+     * Set by SubmitBidsChecked when the site returned 409 "already
+     * recorded" instead of writing anything — the caller shows the message
+     * and offers a "Record anyway" that resends with ConfirmDuplicate.
+     */
+    "duplicate"?: boolean;
+    "duplicateMessage"?: string;
 }
 
 export interface Character {
