@@ -68,6 +68,50 @@ func TestParseAttendance_MismatchedCountWarns(t *testing.T) {
 	}
 }
 
+func TestParseAttendance_PrefersEnteredZoneOverWhoFooter(t *testing.T) {
+	// Officer runs `/who guild` (to catch anonymous raiders too), so the
+	// footer says "EverQuest", not the raid zone — but they zoned into Vex
+	// Thal earlier. The snapshot should report Vex Thal.
+	raw := `[Wed Aug 19 21:00:00 2026] You have entered the Nexus.
+[Wed Aug 19 21:05:00 2026] You have entered Vex Thal.
+[Wed Aug 19 21:05:01 2026] You have entered an area where levitation effects do not function.
+[Wed Aug 19 22:35:21 2026] Players on EverQuest:
+[Wed Aug 19 22:35:21 2026] ---------------------------
+[Wed Aug 19 22:35:21 2026] [60 Warlock] Kuky (Unknown) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] [ANONYMOUS] Hawthor  <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] There are 2 players in EverQuest.`
+
+	snapshots, warnings := ParseAttendance(raw)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %v", warnings)
+	}
+	if len(snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snapshots))
+	}
+	if snapshots[0].Zone != "Vex Thal" {
+		t.Errorf("zone = %q, want %q (the zone-in, not the /who footer)", snapshots[0].Zone, "Vex Thal")
+	}
+}
+
+func TestParseAttendance_FallsBackToFooterWhenNoZoneIn(t *testing.T) {
+	// No "You have entered" line in the captured range (paste starts
+	// mid-zone) — fall back to the /who footer, and ignore the levitation
+	// line so it doesn't get mistaken for a zone.
+	raw := `[Wed Aug 19 22:35:20 2026] You have entered an area where levitation effects do not function.
+[Wed Aug 19 22:35:21 2026] Players on EverQuest:
+[Wed Aug 19 22:35:21 2026] ---------------------------
+[Wed Aug 19 22:35:21 2026] [60 Warlock] Kuky (Unknown) <Seekers of Souls>
+[Wed Aug 19 22:35:21 2026] There are 1 players in Sanctus Seru.`
+
+	snapshots, _ := ParseAttendance(raw)
+	if len(snapshots) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snapshots))
+	}
+	if snapshots[0].Zone != "Sanctus Seru" {
+		t.Errorf("zone = %q, want %q (footer fallback)", snapshots[0].Zone, "Sanctus Seru")
+	}
+}
+
 func TestParseAttendance_UnclosedBlockWarnsAndSkips(t *testing.T) {
 	raw := `[Wed Aug 19 22:35:21 2026] Players on EverQuest:
 [Wed Aug 19 22:35:21 2026] ---------------------------

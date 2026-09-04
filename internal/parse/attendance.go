@@ -17,6 +17,17 @@ var (
 	// without needing level/class/race, which attendance doesn't use.
 	whoRowRe = regexp.MustCompile(`^\[(?:\d+ [^\]]+|ANONYMOUS)\]\s+(\S+)`)
 	whoEndRe = regexp.MustCompile(`^There are (\d+) players? in (.+)\.$`)
+
+	// The client prints this every time you zone in. It's the only
+	// reliable "where is the officer standing" signal — `/who guild` (which
+	// officers use to also catch anonymous raiders) closes with "There are
+	// N players in EverQuest." / "...in all zones.", not the raid zone, so
+	// the /who footer alone can't be trusted for the zone. We track the
+	// most recent real zone-in before each /who block and prefer it.
+	zoneEnteredRe = regexp.MustCompile(`^You have entered (.+)\.$`)
+	// "You have entered an area where levitation effects do not function."
+	// and friends match zoneEnteredRe but aren't zones.
+	notAZoneRe = regexp.MustCompile(`(?i)^an area\b`)
 )
 
 // AttendanceSnapshot is one "/who guild" capture — a raid-tick roster read
@@ -45,7 +56,18 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 	warnings = []string{}
 	lines := splitLogLines(raw)
 
+	// The zone the officer is standing in, from the most recent "You have
+	// entered X." seen so far. Linear scan, so at any /who block this holds
+	// the last zone-in before it. Empty until the first zone-in in the
+	// captured range (or if the paste starts mid-zone) — then we fall back
+	// to the /who footer.
+	currentZone := ""
+
 	for i := 0; i < len(lines); i++ {
+		if m := zoneEnteredRe.FindStringSubmatch(lines[i].Text); m != nil && !notAZoneRe.MatchString(m[1]) {
+			currentZone = m[1]
+			continue
+		}
 		if !whoStartRe.MatchString(lines[i].Text) {
 			continue
 		}
@@ -56,14 +78,14 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 		blockStart := lines[i].Time
 		names := []string{}
 		closed := false
-		var zone string
+		var footerZone string
 		var expected int
 
 		j := i + 2
 		for ; j < len(lines); j++ {
 			if m := whoEndRe.FindStringSubmatch(lines[j].Text); m != nil {
 				expected, _ = strconv.Atoi(m[1])
-				zone = m[2]
+				footerZone = m[2]
 				closed = true
 				break
 			}
@@ -83,6 +105,14 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 				blockStart.Format(time.RFC3339)))
 			i = j
 			continue
+		}
+
+		// Prefer the zone the officer actually zoned into; the /who footer
+		// is the fallback (accurate for a plain `/who`, generic for
+		// `/who guild`).
+		zone := currentZone
+		if zone == "" {
+			zone = footerZone
 		}
 
 		if expected != len(names) {

@@ -267,6 +267,8 @@ func emitWhoRounds(w *writer, roster []string, count int) {
 
 		fmt.Printf(">>> /who guild #%d — %d players in %s%s\n", r+1, len(names), zone,
 			map[bool]string{true: "  (this is the one Attendance should capture)"}[r == count-1])
+		// The zone-in line the parser now prefers over the /who footer.
+		w.line(fmt.Sprintf("You have entered %s.", zone))
 		w.line("Players on EverQuest:")
 		w.line("---------------------------")
 		for _, name := range names {
