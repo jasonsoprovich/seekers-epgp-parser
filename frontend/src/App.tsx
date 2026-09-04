@@ -94,12 +94,30 @@ function App() {
             {logPath ? logPath : "No log file selected — see Settings"}
           </div>
         </div>
+        {/* Every panel stays mounted; only the active one is shown. A
+            half-finished Attendance capture or an open Bids round is React
+            state inside its panel, so unmounting on tab-switch (the old
+            `tab === "x" && <Panel />`) threw that away — the officer would
+            lose an unsubmitted capture just by glancing at another tab.
+            None of the panels poll on a background interval, so keeping
+            them all mounted costs one extra startup fetch each, nothing
+            ongoing. */}
         <div className="main">
-          {tab === "attendance" && <AttendancePanel />}
-          {tab === "bids" && <BidsPanel />}
-          {tab === "manual" && <ManualEntryPanel />}
-          {tab === "browse" && <BrowsePanel />}
-          {tab === "settings" && <SettingsPanel onLogPathChange={setLogPath} />}
+          <div hidden={tab !== "attendance"}>
+            <AttendancePanel />
+          </div>
+          <div hidden={tab !== "bids"}>
+            <BidsPanel />
+          </div>
+          <div hidden={tab !== "manual"}>
+            <ManualEntryPanel />
+          </div>
+          <div hidden={tab !== "browse"}>
+            <BrowsePanel />
+          </div>
+          <div hidden={tab !== "settings"}>
+            <SettingsPanel onLogPathChange={setLogPath} />
+          </div>
         </div>
       </div>
     </div>

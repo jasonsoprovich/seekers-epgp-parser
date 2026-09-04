@@ -161,12 +161,22 @@ export function BidsPanel() {
     setGratsCopied(false);
   }
 
-  function onDiscard() {
-    // Best-effort clear of the site's live round too — a discarded round
+  // Explicit reset — a live/review round now survives a tab switch
+  // (App.tsx keeps panels mounted), so the officer needs a deliberate way
+  // to throw it away. Also clears the site's live round and any stale
+  // error/result/announcement banners.
+  function onClear() {
+    // Best-effort clear of the site's live round too — a cleared round
     // shouldn't linger on /live-bids.
     void DiscardBidRound().catch(() => {});
     resetToIdle();
+    setError(null);
+    setSubmitResult(null);
+    setPendingAnnouncement(null);
+    setAutoStarted(null);
   }
+
+  const canClear = phase !== "idle" || error !== null || submitResult !== null || pendingAnnouncement !== null;
 
   function updateTier(index: number, tier: string) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, tier, ambiguous: false } : r)));
@@ -277,6 +287,9 @@ export function BidsPanel() {
     <div>
       <div className="panel-header">
         <h2>Bids</h2>
+        <button className="secondary" onClick={onClear} disabled={submitting || pending || !canClear}>
+          Clear
+        </button>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -397,8 +410,8 @@ export function BidsPanel() {
           <button className="primary" onClick={onSubmit} disabled={submitting}>
             {submitting ? "Submitting…" : "Submit to site"}
           </button>
-          <button className="secondary" onClick={onDiscard} disabled={submitting}>
-            Discard
+          <button className="secondary" onClick={onClear} disabled={submitting}>
+            Clear
           </button>
         </div>
       )}

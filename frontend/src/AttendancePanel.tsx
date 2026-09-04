@@ -86,6 +86,17 @@ export function AttendancePanel() {
     setCopied(true);
   }
 
+  // Explicit reset — capture/rows now survive a tab switch (App.tsx keeps
+  // panels mounted), so the officer needs a way to deliberately throw a
+  // capture away. Keeps `activity` and the cached minAttendance.
+  function onClear() {
+    setSnapshot(null);
+    setRows([]);
+    setSubmitResult(null);
+    setError(null);
+    setCopied(false);
+  }
+
   async function onSubmit() {
     if (!snapshot) return;
     setSubmitting(true);
@@ -130,6 +141,9 @@ export function AttendancePanel() {
         <h2>Attendance</h2>
         <button className="primary" onClick={onCapture} disabled={pending}>
           {pending ? "Reading log…" : "Capture Attendance"}
+        </button>
+        <button className="secondary" onClick={onClear} disabled={pending || submitting || (!snapshot && rows.length === 0 && !error && !submitResult)}>
+          Clear
         </button>
       </div>
 
