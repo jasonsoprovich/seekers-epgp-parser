@@ -26,6 +26,7 @@ export function ManualEntryPanel() {
   const [activitySelect, setActivitySelect] = useState("");
   const [customActivity, setCustomActivity] = useState("");
   const [itemName, setItemName] = useState("");
+  const [zone, setZone] = useState("");
   const [points, setPoints] = useState("");
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
@@ -72,6 +73,7 @@ export function ManualEntryPanel() {
         activity: kind === "ep" ? activity : undefined,
         tier: kind === "gp" ? activity : undefined,
         itemName: kind === "gp" ? itemName.trim() : undefined,
+        zone: kind === "ep" ? zone.trim() : undefined,
         points: pointsNum,
         occurredAt: new Date().toISOString(),
         note: note.trim(),
@@ -81,6 +83,7 @@ export function ManualEntryPanel() {
       setPoints("");
       setNote("");
       setItemName("");
+      setZone("");
     } catch (err) {
       setError(String(err));
     } finally {
@@ -144,6 +147,20 @@ export function ManualEntryPanel() {
             <label>
               Item (optional)
               <input type="text" value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="e.g. Guild Bank buy" />
+            </label>
+          </div>
+        )}
+
+        {kind === "ep" && (
+          <div className="form-row">
+            <label>
+              Zone (optional)
+              <input
+                type="text"
+                value={zone}
+                onChange={(e) => setZone(e.target.value)}
+                placeholder="e.g. Vex Thal — which raid this was for"
+              />
             </label>
           </div>
         )}

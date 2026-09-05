@@ -352,13 +352,16 @@ func (c *Client) ResolveLiveBids(ctx context.Context, itemName string, bids []Re
 
 // ManualEntryRequest mirrors seekers-tracker's InsertLedgerEntryInput
 // exactly (src/lib/epgp/ledger-entry.ts) — ItemName is only meaningful
-// (and only sent) for Kind "gp".
+// (and only sent) for Kind "gp"; Zone only for Kind "ep" (e.g. a raid-lead
+// "Event Lead" award naming which raid it was for), same as the
+// Attendance tab already sends.
 type ManualEntryRequest struct {
 	Kind        string  `json:"kind"`
 	CharacterID int     `json:"characterId"`
 	Activity    string  `json:"activity,omitempty"`
 	Tier        string  `json:"tier,omitempty"`
 	ItemName    string  `json:"itemName,omitempty"`
+	Zone        string  `json:"zone,omitempty"`
 	Points      float64 `json:"points"`
 	OccurredAt  string  `json:"occurredAt"`
 	Note        string  `json:"note"`

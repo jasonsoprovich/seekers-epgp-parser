@@ -68,7 +68,9 @@ export interface LedgerRow {
 /**
  * ManualEntryRequest mirrors seekers-tracker's InsertLedgerEntryInput
  * exactly (src/lib/epgp/ledger-entry.ts) — ItemName is only meaningful
- * (and only sent) for Kind "gp".
+ * (and only sent) for Kind "gp"; Zone only for Kind "ep" (e.g. a raid-lead
+ * "Event Lead" award naming which raid it was for), same as the
+ * Attendance tab already sends.
  */
 export interface ManualEntryRequest {
     "kind": string;
@@ -76,6 +78,7 @@ export interface ManualEntryRequest {
     "activity"?: string;
     "tier"?: string;
     "itemName"?: string;
+    "zone"?: string;
     "points": number;
     "occurredAt": string;
     "note": string;
