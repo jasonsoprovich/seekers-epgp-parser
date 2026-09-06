@@ -20,8 +20,10 @@ import (
 )
 
 // defaultServerURL is the one production seekers-tracker instance — not
-// user-configurable, since there's only ever one real deployment.
-const defaultServerURL = "https://seekers.fetchinglogic.com"
+// user-configurable, since there's only ever one real deployment. The old
+// seekers.fetchinglogic.com host still resolves (it 308-redirects here), but
+// point new builds straight at the canonical domain.
+const defaultServerURL = "https://seekersofsouls.com"
 
 // ServerURL is the base URL every /api/officer/* call (and the
 // "Generate an API Key" browser link) uses. It's the production constant

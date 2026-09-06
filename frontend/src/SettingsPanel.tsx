@@ -86,7 +86,7 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
   // "Fetch at startup and re-validate at submit" (PLAN.md §4i) — every
   // number here comes from the site, never hardcoded. This screen just
   // surfaces what's currently in force; a leader tunes them at
-  // seekers.fetchinglogic.com/epgp/settings.
+  // seekersofsouls.com/epgp/settings.
   async function refreshGuildSettings() {
     setGuildSettingsError(null);
     try {
@@ -267,7 +267,7 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
         </button>
       </div>
       <p style={{ color: "#9ca3af", fontSize: 13, marginTop: -8, marginBottom: 12 }}>
-        Read-only — tuned by a leader at seekers.fetchinglogic.com/epgp/settings, never hardcoded here.
+        Read-only — tuned by a leader at seekersofsouls.com/epgp/settings, never hardcoded here.
       </p>
       {guildSettings ? (
         <div className="form-grid">
