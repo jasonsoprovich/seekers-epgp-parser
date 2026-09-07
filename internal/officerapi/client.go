@@ -51,8 +51,72 @@ func New(apiKey string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(ServerURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 15 * time.Second},
+		// 25s per attempt, not 15: the site is a Cloudflare Worker in front
+		// of D1. When the app launches it fires every panel's startup fetch
+		// at once (~7 concurrent /api/officer/* calls), and a cold Worker
+		// plus the roster query (whole characters table + standings) has
+		// been seen to take >15s — the request completes, the client just
+		// gave up first ("context deadline exceeded"). sendWithRetry also
+		// retries once on a transport error or a 502/503/504, which is what
+		// "it worked a minute later" actually was.
+		http: &http.Client{Timeout: 25 * time.Second},
 	}
+}
+
+// isRetryableStatus reports whether an HTTP status is a transient
+// server/proxy condition worth one more try — a cold Cloudflare Worker or a
+// brief D1 blip. 401/403/422 (auth, validation) and 429 (rate limit —
+// retrying just burns more of the key's budget) are deliberately excluded.
+func isRetryableStatus(code int) bool {
+	return code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout
+}
+
+// sendWithRetry issues one request, retrying it ONCE after a 2s pause on a
+// transport error (timeout, connection reset) or a retryable status.
+// bodyBytes is re-wrapped per attempt since a consumed reader can't be
+// replayed. All /api/officer/* calls are idempotent reads or
+// dedupe-guarded writes, so a retry can't double anything.
+func (c *Client) sendWithRetry(ctx context.Context, method, fullURL string, bodyBytes []byte, contentType string) (*http.Response, []byte, error) {
+	const maxAttempts = 2
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var reqBody io.Reader
+		if bodyBytes != nil {
+			reqBody = bytes.NewReader(bodyBytes)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, fullURL, reqBody)
+		if err != nil {
+			return nil, nil, err
+		}
+		req.Header.Set("x-api-key", c.apiKey)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+		} else {
+			respBody, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				lastErr = readErr
+			} else if isRetryableStatus(resp.StatusCode) && attempt < maxAttempts {
+				lastErr = fmt.Errorf("server returned %d", resp.StatusCode)
+			} else {
+				return resp, respBody, nil
+			}
+		}
+
+		if attempt < maxAttempts {
+			select {
+			case <-time.After(2 * time.Second):
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
+		}
+	}
+	return nil, nil, fmt.Errorf("couldn't reach %s — check your internet connection: %w", c.baseURL, lastErr)
 }
 
 // apiError is the {"error": "..."} shape every /api/officer/* route
@@ -61,42 +125,62 @@ type apiError struct {
 	Error string `json:"error"`
 }
 
+// APIError is a non-2xx response from an /api/officer/* route with the HTTP
+// status kept alongside the server's message. seekers-tracker phrases a bad
+// key (401), a key whose owner is no longer an officer (403), and a
+// rate-limited key (429) with very similar wording, so the bare message
+// alone can't tell them apart — the status can. `Error()` still leads with
+// the human message so the app's existing `String(err)` display stays
+// readable; the "(HTTP N from /path)" suffix is what makes a bug report
+// actionable. Callers that want to branch on the code can `errors.As` this.
+type APIError struct {
+	Status  int
+	Method  string
+	Path    string
+	Message string
+}
+
+func (e *APIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("%s (HTTP %d from %s)", e.Message, e.Status, e.Path)
+	}
+	return fmt.Sprintf("request failed: HTTP %d from %s", e.Status, e.Path)
+}
+
+// newAPIError builds an APIError from a response, pulling the {"error": ...}
+// message out of the body when there is one. `path` may carry a query
+// string (FetchLedger); keep only the path for a tidy message.
+func newAPIError(method, path string, status int, body []byte) *APIError {
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	e := &APIError{Status: status, Method: method, Path: path}
+	var parsed apiError
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		e.Message = parsed.Error
+	}
+	return e
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
-	var reqBody io.Reader
+	var bodyBytes []byte
+	contentType := ""
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		reqBody = bytes.NewReader(encoded)
+		bodyBytes = encoded
+		contentType = "application/json"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("x-api-key", c.apiKey)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("couldn't reach %s — check your internet connection: %w", c.baseURL, err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
+	resp, respBody, err := c.sendWithRetry(ctx, method, c.baseURL+path, bodyBytes, contentType)
 	if err != nil {
 		return err
 	}
 
 	if resp.StatusCode >= 300 {
-		var apiErr apiError
-		if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error != "" {
-			return fmt.Errorf("%s", apiErr.Error)
-		}
-		return fmt.Errorf("server returned %d", resp.StatusCode)
+		return newAPIError(method, path, resp.StatusCode, respBody)
 	}
 
 	if out != nil {
@@ -235,19 +319,8 @@ func (c *Client) SubmitBidsChecked(ctx context.Context, req BidsRequest) (BidsRe
 	if err != nil {
 		return out, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/officer/bids", bytes.NewReader(encoded))
-	if err != nil {
-		return out, err
-	}
-	httpReq.Header.Set("x-api-key", c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return out, fmt.Errorf("couldn't reach %s — check your internet connection: %w", c.baseURL, err)
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
+	resp, respBody, err := c.sendWithRetry(ctx, http.MethodPost, c.baseURL+"/api/officer/bids", encoded, "application/json")
 	if err != nil {
 		return out, err
 	}
@@ -260,11 +333,7 @@ func (c *Client) SubmitBidsChecked(ctx context.Context, req BidsRequest) (BidsRe
 		return out, nil
 	}
 	if resp.StatusCode >= 300 {
-		var apiErr apiError
-		if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error != "" {
-			return out, fmt.Errorf("%s", apiErr.Error)
-		}
-		return out, fmt.Errorf("server returned %d", resp.StatusCode)
+		return out, newAPIError(http.MethodPost, "/api/officer/bids", resp.StatusCode, respBody)
 	}
 	if err := json.Unmarshal(respBody, &out); err != nil {
 		return out, err
