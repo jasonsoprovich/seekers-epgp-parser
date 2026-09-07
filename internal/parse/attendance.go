@@ -10,12 +10,16 @@ import (
 var (
 	whoStartRe = regexp.MustCompile(`^Players on EverQuest:$`)
 	whoDashRe  = regexp.MustCompile(`^-+$`)
-	// Matches both a normal row ("[60 Warlock] Kuky (Unknown) <Seekers of
-	// Souls>") and an anonymous row ("[ANONYMOUS] Hawthor  <Seekers of
-	// Souls>") — the character name is always the first token right after
-	// the closing bracket in either shape, so one pattern covers both
-	// without needing level/class/race, which attendance doesn't use.
-	whoRowRe = regexp.MustCompile(`^\[(?:\d+ [^\]]+|ANONYMOUS)\]\s+(\S+)`)
+	// Matches a /who roster row. Handles:
+	//   [60 Warlock] Kuky (Unknown) <Seekers of Souls>
+	//   [ANONYMOUS] Hawthor  <Seekers of Souls>
+	//    AFK [60 Cleric] Osui <Seekers of Souls>        (AFK prefix, leading space)
+	//    <LINKDEAD>[60 Cleric] Osui <Seekers of Souls>  (linkdead prefix)
+	//   [ 5 Enchanter] Lowbie <...>                     (space-padded 1-digit level)
+	// The AFK prefix is why an officer running /who while AFK doing raid
+	// admin was dropped from their own capture. The character name is the
+	// first token after the closing bracket regardless.
+	whoRowRe = regexp.MustCompile(`^\s*(?:AFK\s+|<LINKDEAD>\s*)?\[\s*(?:\d+ [^\]]+|ANONYMOUS)\]\s+(\S+)`)
 	// Closes a /who block. "There is 1 player in EverQuest." (a name lookup
 	// that found one person) is just as much a closing line as "There are N
 	// players…" — the old `are`-only pattern left every single-result /who
