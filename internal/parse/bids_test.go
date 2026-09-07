@@ -157,6 +157,12 @@ func TestExtractItemName(t *testing.T) {
 		{"Blade of the Black Dragon Eye send tells please", "Blade of the Black Dragon Eye"},
 		{"send tells: Torch of Judgment", "Torch of Judgment"},
 		{"item Cloak of Flames send tells", "Cloak of Flames"},
+		// "last call" and friends, in the shapes officers actually type
+		{"Cloak of Flames send tells last call", "Cloak of Flames"},
+		{"Cloak of Flames send tells FINAL CALL", "Cloak of Flames"},
+		{"Cloak of Flames send tells - last calls", "Cloak of Flames"},
+		{"send tells Cloak of Flames last call please", "Cloak of Flames"},
+		{"Cloak of Flames send tells lc", "Cloak of Flames"},
 		{"no trigger phrase here", "no trigger phrase here"}, // caller checks for "send tells" separately
 	}
 	for _, c := range cases {

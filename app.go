@@ -1065,18 +1065,21 @@ func (a *App) startAnnouncementWatch() {
 			a.annLastSeen = at
 			a.annMu.Unlock()
 
-			// A "<same item> send tells - last call" reminder shortly after
-			// the round opened is not a new item — swallow it (annLastSeen is
-			// still advanced above so it won't re-fire). But a same-item
-			// announcement well after the round started is a genuine
-			// re-announce (a re-drop, or a botched round the officer is
-			// restarting, or just re-running cmd/simlog) — let it through so
-			// the frontend can offer Switch, which stops the stale poller.
+			// A "<same item> send tells - last call" reminder while that
+			// round is still open is NOT a new round — officers ping the
+			// item two or three times over a 5-8 minute collection, and
+			// "last call" often lands well after the opening call. As long
+			// as roundItem is still set (the officer hasn't clicked End
+			// Round / Submit / Clear), any same-item announcement is part of
+			// the same round — swallow it, no time limit. annLastSeen was
+			// advanced above so it won't re-fire. Once the round is closed
+			// roundItem is "" and a fresh drop of the same item comes
+			// through normally; a *different* item mid-round still raises the
+			// Switch banner.
 			a.liveBidsMu.Lock()
-			current, curStart := a.roundItem, a.roundStart
+			current := a.roundItem
 			a.liveBidsMu.Unlock()
-			sameItem := current != "" && strings.EqualFold(strings.TrimSpace(current), strings.TrimSpace(item))
-			if sameItem && at.Sub(curStart) < 2*time.Minute {
+			if isSameRoundItem(current, item) {
 				continue
 			}
 
@@ -1086,6 +1089,22 @@ func (a *App) startAnnouncementWatch() {
 			})
 		}
 	}()
+}
+
+// isSameRoundItem reports whether a freshly-detected announcement is for
+// the round that's already open. Exact match, or one name is a prefix of
+// the other after normalising — so "<item> send tells last call" that
+// `extractItemName` didn't fully clean still counts as the same round, not
+// a new one. Empty `current` (no open round) is never a match.
+func isSameRoundItem(current, detected string) bool {
+	norm := func(s string) string {
+		return strings.ToLower(strings.Join(strings.Fields(s), " "))
+	}
+	c, d := norm(current), norm(detected)
+	if c == "" || d == "" {
+		return false
+	}
+	return c == d || strings.HasPrefix(d, c+" ") || strings.HasPrefix(c, d+" ")
 }
 
 // stopAnnouncementWatch cancels the announcement watcher. Safe to call when

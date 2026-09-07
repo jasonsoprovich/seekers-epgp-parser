@@ -52,10 +52,28 @@ func extractItemName(msg string) string {
 			lower = strings.ToLower(cand)
 		}
 	}
-	for _, trail := range []string{" - last call", " last call", " reminder", " now", " asap", " please", " pls", " thanks", " ty"} {
-		if strings.HasSuffix(lower, trail) {
-			cand = cand[:len(cand)-len(trail)]
-			lower = strings.ToLower(cand)
+	// Strip trailing "last call" / "final call" / politeness noise. Looped
+	// until stable so "…last call please" reduces past both, and covers the
+	// hyphen/no-hyphen and singular/plural variants officers actually type.
+	trailers := []string{
+		"last call", "final call", "last calls", "lastcall", "last-call", "final-call",
+		"lc", "reminder", "now", "asap", "please", "pls", "plz", "thanks", "thx", "ty",
+	}
+	for {
+		stripped := false
+		for _, trail := range trailers {
+			if lower == trail || strings.HasSuffix(lower, " "+trail) || strings.HasSuffix(lower, "-"+trail) {
+				cut := len(cand) - len(trail)
+				if cut > 0 {
+					cut-- // drop the separating space/hyphen too
+				}
+				cand = strings.Trim(cand[:cut], trimSet)
+				lower = strings.ToLower(cand)
+				stripped = true
+			}
+		}
+		if !stripped || cand == "" {
+			break
 		}
 	}
 	cand = strings.Trim(cand, trimSet)
