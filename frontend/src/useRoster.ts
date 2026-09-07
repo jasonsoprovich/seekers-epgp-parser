@@ -26,6 +26,13 @@ function buildIndex(roster: Character[]): Map<string, Character> {
   return new Map(roster.map((c) => [c.name.toLowerCase(), c]));
 }
 
+function resolveWith(index: Map<string, Character>, name: string): ResolvedCharacter {
+  const c = index.get(name.trim().toLowerCase());
+  if (!c) return { mainCharacterName: null, priorityRating: null, matched: false };
+  const mainCharacterName = c.charType === "alt" && c.mainCharacterName ? c.mainCharacterName : c.name;
+  return { mainCharacterName, priorityRating: c.priorityRating ?? null, matched: true };
+}
+
 // Fetched once per app session (cached — see rosterCache above) and
 // resolved client-side per row, so fixing a typo'd name in an editable
 // table updates its Main/Priority columns immediately without another
@@ -75,11 +82,24 @@ export function useRoster() {
   }, [gen]);
 
   function resolve(name: string): ResolvedCharacter {
-    const c = byLowerName.get(name.trim().toLowerCase());
-    if (!c) return { mainCharacterName: null, priorityRating: null, matched: false };
-    const mainCharacterName = c.charType === "alt" && c.mainCharacterName ? c.mainCharacterName : c.name;
-    return { mainCharacterName, priorityRating: c.priorityRating ?? null, matched: true };
+    return resolveWith(byLowerName, name);
   }
+
+  // Fetch the roster fresh (bypassing the session cache) and return a
+  // resolver bound to that data. The Bids tab calls this right before
+  // Determine Winner so priority is post-any-GP-charge from an item another
+  // officer just finalized — otherwise a high-priority main could be handed
+  // a second item off a stale (pre-charge) number before EPGP catches up.
+  // Also updates the shared cache + this hook's state for subsequent reads.
+  const refetch = useCallback(async (): Promise<(name: string) => ResolvedCharacter> => {
+    const fresh = await FetchRoster().then((r) => r ?? []);
+    rosterCache = fresh;
+    const idx = buildIndex(fresh);
+    setCharacters(fresh);
+    setByLowerName(idx);
+    setError(null);
+    return (name: string) => resolveWith(idx, name);
+  }, []);
 
   const mains = useMemo(() => characters.filter((c) => c.charType === "main"), [characters]);
 
@@ -104,7 +124,7 @@ export function useRoster() {
     return created;
   }
 
-  return { resolve, characters, mains, createCharacter, error, loading, reload, loaded: byLowerName.size > 0 };
+  return { resolve, refetch, characters, mains, createCharacter, error, loading, reload, loaded: byLowerName.size > 0 };
 }
 
 // Called by SettingsPanel after SaveSettings — the key every /api/officer/*

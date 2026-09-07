@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Clipboard, Events } from "@wailsio/runtime";
 import { CaptureBids, DiscardBidRound, EndBidRound, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
-const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot"];
+const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot", "Rot (No-Drop)"];
 
 // Bid resolution: tier always wins first (a High Bid beats any Medium/
 // Low/Alt Loot bid regardless of priority), then priority breaks ties
@@ -13,7 +13,10 @@ const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot"];
 // cost 10 GP today — matches the guild's own documented tier ordering
 // (docs/guild-website-feasibility.md §10: "...Low Bid > Epic Drop (Alt) >
 // Alt Loot").
-const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low Bid": 2, "Alt Loot": 1 };
+// Rot (No-Drop) ranks below Alt Loot — it's a no-one-wanted-it cleanup
+// claim, never competing for a real drop. All three of Low/Alt/Rot cost 10
+// GP; the ordering only matters for Determine Winner tie-breaks.
+const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low Bid": 2, "Alt Loot": 1, "Rot (No-Drop)": 0 };
 
 // `characterName` is the resolution/submission identity — it's what gets
 // looked up against the roster and sent to the site. `displayName` is
@@ -41,6 +44,44 @@ function toReviewRows(round: BidRound | null): BidRow[] {
   return (round?.rows ?? []).map((r) => ({ ...r, winner: false, displayName: r.characterName }));
 }
 
+// Which rows are superseded by a later bid from the same person — recomputed
+// from the current table every render rather than trusting the Go
+// `superseded` flag alone, so adding or *removing* a manually added row
+// re-decides who the active bid is (remove the newer row and the older one
+// comes back). Identity is the resolved main when known (an alt's bid and
+// the main's bid are one person), else the typed name; a blank manual row
+// isn't comparable yet. Within a group the newest bid by timestamp wins,
+// ties broken by table order (a manual row is appended last, so it's
+// newest). Only the active bid per person feeds Determine Winner and the
+// submit payload — the guild rule is "a later tell means changed my mind".
+function supersededRowIndices(rows: BidRow[], resolve: (name: string) => { matched: boolean; mainCharacterName: string | null }): Set<number> {
+  const groups = new Map<string, number[]>();
+  rows.forEach((r, i) => {
+    const name = r.characterName.trim();
+    if (!name) return;
+    const res = resolve(name);
+    const key = (res.matched && res.mainCharacterName ? res.mainCharacterName : name).toLowerCase();
+    const arr = groups.get(key);
+    if (arr) arr.push(i);
+    else groups.set(key, [i]);
+  });
+
+  const superseded = new Set<number>();
+  const score = (i: number) => {
+    const t = Date.parse(rows[i].occurredAt);
+    return Number.isNaN(t) ? -Infinity : t;
+  };
+  for (const idxs of groups.values()) {
+    if (idxs.length < 2) continue;
+    let winner = idxs[0];
+    for (const i of idxs) {
+      if (score(i) > score(winner) || (score(i) === score(winner) && i > winner)) winner = i;
+    }
+    for (const i of idxs) if (i !== winner) superseded.add(i);
+  }
+  return superseded;
+}
+
 export function BidsPanel() {
   const [itemName, setItemName] = useState("");
   const [knownItems, setKnownItems] = useState<string[]>([]);
@@ -62,6 +103,14 @@ export function BidsPanel() {
   // Toast shown briefly when a round auto-starts from a detected announcement.
   const [autoStarted, setAutoStarted] = useState<string | null>(null);
   const roster = useRoster();
+
+  // Recomputed on every row/roster change — see supersededRowIndices. Used
+  // by Determine Winner, Submit, and the row styling so a superseded bid is
+  // shown (dimmed) but never wins or gets sent to the site.
+  const supersededSet = useMemo(
+    () => supersededRowIndices(rows, (name) => roster.resolve(name)),
+    [rows, roster.characters], // roster.resolve closes over the same index roster.characters drives
+  );
 
   // Best-effort — Settings might not be configured yet, and a missing
   // autocomplete list shouldn't block capturing bids at all.
@@ -197,11 +246,14 @@ export function BidsPanel() {
     setRows((prev) => prev.filter((_, i) => i !== index));
   }
 
-  // Add a blank row for a bid the capture missed. Stamped with the round's
-  // start time (the site's bids route range-checks every entry's
-  // occurredAt), tier defaulting to High Bid, name left for the officer to
-  // type — the Main column then resolves it against the roster (and offers
-  // NoMatchSelect for an unknown name) exactly like a captured row.
+  // Add a blank row for a bid the capture missed. Stamped with the current
+  // time (not the round start) so it counts as this person's newest bid —
+  // if they already have a captured tell, this manual entry supersedes it
+  // (supersededRowIndices), matching "a later bid means changed my mind".
+  // Still inside the raid-night window the site's bids route accepts. Tier
+  // defaults to High Bid; the name is a combobox over the roster (pick an
+  // alt and the Main column fills itself) that also takes a free-typed
+  // name, resolved exactly like a captured row.
   function addManualRow() {
     setTieWarning(null);
     setGratsCopied(false);
@@ -211,10 +263,11 @@ export function BidsPanel() {
         characterName: "",
         displayName: "",
         tier: "High Bid",
-        occurredAt: roundStartedAt || new Date().toISOString(),
+        occurredAt: new Date().toISOString(),
         ambiguous: false,
         rawMessage: "(added manually)",
         superseded: false,
+        cancelRequested: false,
         winner: false,
         manual: true,
       },
@@ -237,15 +290,36 @@ export function BidsPanel() {
   // bid is an exact tie on both tier and priority, nothing is
   // auto-selected — that's a real ambiguity the officer has to resolve by
   // hand (checking the boxes directly), not something to guess at.
-  function determineWinner() {
+  const [determining, setDetermining] = useState(false);
+
+  async function determineWinner() {
     setTieWarning(null);
     setGratsCopied(false);
+    // Pull a fresh roster first: if another officer finalized an item
+    // seconds ago, the winner's GP is already charged and their priority
+    // has dropped. Using the app-startup roster cache here would let a
+    // high-priority main sweep a second item off a stale number. Falls
+    // back to the cached resolver if the refetch fails.
+    let resolvePriority = roster.resolve;
+    setDetermining(true);
+    try {
+      resolvePriority = await roster.refetch();
+    } catch {
+      // stale-cache fallback — better than blocking the officer entirely
+    } finally {
+      setDetermining(false);
+    }
+
     const eligible = rows
-      .map((r, i) => ({ i, r, priority: roster.resolve(r.characterName).priorityRating, rank: TIER_RANK[r.tier] }))
-      .filter((e): e is { i: number; r: BidRow; priority: number; rank: number } => e.rank !== undefined && e.priority !== null);
+      .map((r, i) => ({ i, r, priority: resolvePriority(r.characterName).priorityRating, rank: TIER_RANK[r.tier] }))
+      .filter((e): e is { i: number; r: BidRow; priority: number; rank: number } =>
+        // A bid the bidder asked to cancel isn't auto-picked — the officer
+        // decides whether it stands (and can still check its box by hand).
+        !supersededSet.has(e.i) && !e.r.cancelRequested && e.rank !== undefined && e.priority !== null,
+      );
 
     if (eligible.length === 0) {
-      setTieWarning("No row has both a resolved tier and a known priority to compare — pick a tier for each row and check the roster loaded.");
+      setTieWarning("No active row has both a resolved tier and a known priority to compare — pick a tier for each row and check the roster loaded.");
       setRows((prev) => prev.map((r) => ({ ...r, winner: false })));
       return;
     }
@@ -274,7 +348,6 @@ export function BidsPanel() {
   }
 
   async function onCopyGrats() {
-    const winners = rows.filter((r) => r.winner);
     if (winners.length === 0) return;
     await Clipboard.SetText(gratsMessage(winners));
     setGratsCopied(true);
@@ -282,16 +355,20 @@ export function BidsPanel() {
 
   async function onSubmit() {
     if (rows.length === 0) return;
-    const invalid = rows.filter((r) => !TIERS.includes(r.tier));
+    // A bid superseded by a later one from the same person is never sent —
+    // only the person's active bid is recorded (guild rule: last tell wins).
+    const activeRows = rows.filter((_, i) => !supersededSet.has(i));
+    const invalid = activeRows.filter((r) => !TIERS.includes(r.tier));
     if (invalid.length > 0) {
-      setError(`Pick a tier for: ${invalid.map((r) => r.characterName).join(", ")} before submitting.`);
+      setError(`Pick a tier for: ${invalid.map((r) => r.characterName || "(unnamed row)").join(", ")} before submitting.`);
       return;
     }
-    if (rows.filter((r) => r.winner).length === 0) {
+    const activeWinners = activeRows.filter((r) => r.winner);
+    if (activeWinners.length === 0) {
       setError("Mark at least one row as the winner before submitting — click Determine Winner or check one manually.");
       return;
     }
-    const blankManual = rows.filter((r) => !r.characterName.trim());
+    const blankManual = activeRows.filter((r) => !r.characterName.trim());
     if (blankManual.length > 0) {
       setError("Fill in the character name for every manually added row, or remove it.");
       return;
@@ -300,16 +377,18 @@ export function BidsPanel() {
     setSubmitResult(null);
     setError(null);
     try {
-      const entries = rows.map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt, isWinner: r.winner }));
+      const entries = activeRows.map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt, isWinner: r.winner }));
       const result = await SubmitBids(capturedItem, entries);
       const notes: string[] = [];
       const unmatched = result.unmatched ?? [];
       const invalidTiers = result.invalidTiers ?? [];
       if (unmatched.length > 0) notes.push(`no character match: ${unmatched.join(", ")}`);
       if (invalidTiers.length > 0) notes.push(`invalid tier: ${invalidTiers.join(", ")}`);
-      const lostCount = result.inserted - winners.length;
+      const supersededCount = rows.length - activeRows.length;
+      if (supersededCount > 0) notes.push(`${supersededCount} superseded bid(s) not sent`);
+      const lostCount = result.inserted - activeWinners.length;
       setSubmitResult(
-        `Recorded ${result.inserted} bid(s) on ${capturedItem} — ${winners.length} won (GP charged), ${lostCount} lost (no GP charge).${notes.length > 0 ? " — " + notes.join("; ") : ""}`,
+        `Recorded ${result.inserted} bid(s) on ${capturedItem} — ${activeWinners.length} won (GP charged), ${lostCount} lost (no GP charge).${notes.length > 0 ? " — " + notes.join("; ") : ""}`,
       );
       if (result.inserted > 0) setKnownItems((prev) => (prev.includes(capturedItem) ? prev : [...prev, capturedItem].sort()));
       resetToIdle();
@@ -320,7 +399,7 @@ export function BidsPanel() {
     }
   }
 
-  const winners = rows.filter((r) => r.winner);
+  const winners = rows.filter((r, i) => r.winner && !supersededSet.has(i));
   const startedLabel = roundStartedAt ? new Date(roundStartedAt).toLocaleTimeString() : "";
 
   return (
@@ -451,13 +530,18 @@ export function BidsPanel() {
               title="How many winners to pick — more than 1 for a duplicate drop"
             />
           </label>
-          <button className="secondary" onClick={determineWinner}>
-            Determine Winner{winnerCount > 1 ? "s" : ""}
+          <button className="secondary" onClick={() => void determineWinner()} disabled={determining}>
+            {determining ? "Checking priority…" : `Determine Winner${winnerCount > 1 ? "s" : ""}`}
           </button>
           <button className="secondary" onClick={addManualRow} title="Add a bid the capture missed — before you Submit">
             + Add bid manually
           </button>
-          <button className="primary" onClick={onSubmit} disabled={submitting}>
+          <button
+            className="primary"
+            onClick={onSubmit}
+            disabled={submitting || winners.length === 0}
+            title={winners.length === 0 ? "Pick a winner first — Determine Winner, or click a row" : undefined}
+          >
             {submitting ? "Submitting…" : "Submit to site"}
           </button>
           <button className="secondary" onClick={onClear} disabled={submitting}>
@@ -476,6 +560,12 @@ export function BidsPanel() {
           </button>
         </div>
       )}
+
+      <datalist id="bid-known-characters">
+        {roster.characters.map((c) => (
+          <option key={c.id} value={c.name} />
+        ))}
+      </datalist>
 
       {(phase === "live" || phase === "review") && rows.length > 0 && (
         <table className="col-fixed">
@@ -503,20 +593,39 @@ export function BidsPanel() {
             {rows.map((r, i) => {
               const resolved = roster.resolve(r.characterName);
               const live = phase === "live";
+              const isSuperseded = supersededSet.has(i);
+              const cancelReq = !!r.cancelRequested && !isSuperseded;
+              const rowClickable = !live && !isSuperseded;
               return (
                 <tr
                   key={i}
-                  className={[r.ambiguous ? "ambiguous" : "", r.superseded ? "superseded" : "", r.winner ? "winner" : ""].join(" ").trim()}
-                  onClick={live ? undefined : () => toggleWinner(i)}
-                  style={{ cursor: live ? "default" : "pointer" }}
-                  title={live ? undefined : "Click the row to mark/unmark this bid as a winner"}
+                  className={[
+                    r.ambiguous || cancelReq ? "ambiguous" : "",
+                    isSuperseded ? "superseded" : "",
+                    r.winner && !isSuperseded ? "winner" : "",
+                  ]
+                    .join(" ")
+                    .trim()}
+                  onClick={rowClickable ? () => toggleWinner(i) : undefined}
+                  style={{ cursor: rowClickable ? "pointer" : "default" }}
+                  title={
+                    live
+                      ? undefined
+                      : isSuperseded
+                        ? "Superseded by a later bid from the same person — remove the newer row to bring this one back"
+                        : cancelReq
+                          ? "This bidder said “cancel my bid” — decide whether to Remove it or keep it, then pick the winner"
+                          : "Click the row to mark/unmark this bid as a winner"
+                  }
                 >
                   <td onClick={r.manual && !live ? (e) => e.stopPropagation() : undefined}>
                     {r.manual && !live ? (
                       <input
                         type="text"
+                        className="cell-input"
+                        list="bid-known-characters"
                         value={r.displayName}
-                        placeholder="character name"
+                        placeholder="pick or type a character"
                         onChange={(e) => setManualName(i, e.target.value)}
                       />
                     ) : (
@@ -557,7 +666,8 @@ export function BidsPanel() {
                       </select>
                     )}
                     {r.ambiguous && <span className="badge ambiguous" style={{ marginLeft: 6 }}>needs review</span>}
-                    {r.superseded && <span className="badge superseded" style={{ marginLeft: 6 }}>superseded</span>}
+                    {cancelReq && <span className="badge ambiguous" style={{ marginLeft: 6 }}>cancel requested</span>}
+                    {isSuperseded && <span className="badge superseded" style={{ marginLeft: 6 }}>superseded</span>}
                   </td>
                   <td style={{ color: "#6b7280" }}>{r.rawMessage}</td>
                   <td onClick={(e) => e.stopPropagation()}>

@@ -224,7 +224,7 @@ export function ManualAttendanceForm() {
       </div>
 
       <div className="form-actions">
-        <button className="primary" onClick={submit} disabled={pending}>
+        <button className="primary" onClick={submit} disabled={pending || names.length === 0 || short}>
           {pending ? "Recording…" : "Record attendance"}
         </button>
       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FetchLedger, FetchTotals } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { Character, LedgerRow, TotalsRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
+import { invalidateOfficerData, useOfficerDataGeneration } from "./officerData";
 import { useRoster } from "./useRoster";
 
 type SubTab = "ep" | "gp" | "totals" | "characters";
@@ -103,6 +104,7 @@ function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const gen = useOfficerDataGeneration();
   const sort = useSort<LedgerRow>({
     date: (r) => r.occurredAt,
     character: (r) => r.characterName,
@@ -126,7 +128,9 @@ function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
-  }, [kind, query, page]);
+    // `gen` bumps when a key is saved or Retry is clicked — a cold-Worker
+    // timeout on the first load otherwise stuck until kind/query/page moved.
+  }, [kind, query, page, gen]);
 
   return (
     <div>
@@ -145,7 +149,14 @@ function LedgerBrowser({ kind }: { kind: "ep" | "gp" }) {
         />
         {loading && <span style={{ color: "#6b7280", fontSize: 13 }}>Loading…</span>}
       </div>
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error">
+          {error}{" "}
+          <button className="secondary" style={{ marginLeft: 8 }} onClick={() => invalidateOfficerData()} disabled={loading}>
+            {loading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       <table>
         <thead>
           <tr>
@@ -195,6 +206,7 @@ function TotalsBrowser() {
   const [rows, setRows] = useState<TotalsRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const gen = useOfficerDataGeneration();
   const sort = useSort<TotalsRow>({
     character: (r) => r.name,
     main: (r) => r.mainCharacterName,
@@ -211,7 +223,7 @@ function TotalsBrowser() {
       .then((rows) => setRows(rows ?? []))
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
-  }, [query]);
+  }, [query, gen]);
 
   return (
     <div>
@@ -227,7 +239,14 @@ function TotalsBrowser() {
         />
         {loading && <span style={{ color: "#6b7280", fontSize: 13 }}>Loading…</span>}
       </div>
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error">
+          {error}{" "}
+          <button className="secondary" style={{ marginLeft: 8 }} onClick={() => invalidateOfficerData()} disabled={loading}>
+            {loading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       <table>
         <thead>
           <tr>

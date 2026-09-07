@@ -48,6 +48,13 @@ export interface BidRow {
      * an earlier bid from the same character, kept visible but not the default winner
      */
     "superseded": boolean;
+
+    /**
+     * The bidder sent "cancel my bid" at or after placing this bid. The row
+     * is kept and flagged, not dropped — the officer decides whether to
+     * remove it (they meant it) or keep it (they re-bid, or were joking).
+     */
+    "cancelRequested": boolean;
 }
 
 /**
