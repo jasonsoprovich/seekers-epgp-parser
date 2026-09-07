@@ -267,9 +267,16 @@ export function SubmitAttendance(activity: string, occurredAt: string, names: st
  * exactly one entry must have IsWinner set, which the frontend's
  * "Determine Winner" (tier first, then priority) picks by default but the
  * officer can override before calling this.
+ * 
+ * The site rejects a same-item finalize within 12h of an existing one as a
+ * likely double-click (409). When confirmDuplicate is false that comes
+ * back as resp.Duplicate=true + resp.DuplicateMessage with a nil error, so
+ * the Bids tab can show "Record anyway"; calling again with
+ * confirmDuplicate=true records it regardless (a boss really did drop the
+ * same item twice in one night).
  */
-export function SubmitBids(itemName: string, entries: officerapi$0.BidEntry[] | null): $CancellablePromise<officerapi$0.BidsResponse> {
-    return $Call.ByID(3424067681, itemName, entries);
+export function SubmitBids(itemName: string, entries: officerapi$0.BidEntry[] | null, confirmDuplicate: boolean): $CancellablePromise<officerapi$0.BidsResponse> {
+    return $Call.ByID(3424067681, itemName, entries, confirmDuplicate);
 }
 
 /**

@@ -910,16 +910,24 @@ func (a *App) DiscardBidRound() {
 // exactly one entry must have IsWinner set, which the frontend's
 // "Determine Winner" (tier first, then priority) picks by default but the
 // officer can override before calling this.
-func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry) (officerapi.BidsResponse, error) {
+//
+// The site rejects a same-item finalize within 12h of an existing one as a
+// likely double-click (409). When confirmDuplicate is false that comes
+// back as resp.Duplicate=true + resp.DuplicateMessage with a nil error, so
+// the Bids tab can show "Record anyway"; calling again with
+// confirmDuplicate=true records it regardless (a boss really did drop the
+// same item twice in one night).
+func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry, confirmDuplicate bool) (officerapi.BidsResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.BidsResponse{}, err
 	}
-	resp, err := client.SubmitBids(a.ctx, officerapi.BidsRequest{
-		ItemName: itemName,
-		Entries:  entries,
+	resp, err := client.SubmitBidsChecked(a.ctx, officerapi.BidsRequest{
+		ItemName:         itemName,
+		Entries:          entries,
+		ConfirmDuplicate: confirmDuplicate,
 	})
-	if err == nil {
+	if err == nil && !resp.Duplicate {
 		a.liveBidsMu.Lock()
 		a.roundItem = ""
 		a.roundResolved = true

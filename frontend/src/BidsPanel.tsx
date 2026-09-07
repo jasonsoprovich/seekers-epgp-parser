@@ -102,6 +102,13 @@ export function BidsPanel() {
   const [pendingAnnouncement, setPendingAnnouncement] = useState<{ item: string; announcedAt: string } | null>(null);
   // Toast shown briefly when a round auto-starts from a detected announcement.
   const [autoStarted, setAutoStarted] = useState<string | null>(null);
+  // A round the officer is entering by hand (auto capture didn't run) —
+  // same review table + Determine Winner + Submit, but the item name is
+  // typed here and every bidder row is added manually.
+  const [manualRound, setManualRound] = useState(false);
+  // Set when Submit came back as a soft duplicate (409) — drives the
+  // "Record anyway" prompt.
+  const [dupPrompt, setDupPrompt] = useState<string | null>(null);
   const roster = useRoster();
 
   // Recomputed on every row/roster change — see supersededRowIndices. Used
@@ -189,6 +196,37 @@ export function BidsPanel() {
     void captureFor(itemName);
   }
 
+  // Backup path when the auto parser didn't catch a round (no "send tells",
+  // log not written, app opened late): jump straight to the review table
+  // with one empty bidder row. The item name carries over from the idle
+  // input if it was typed, and stays editable in the round header.
+  function onStartManualRound() {
+    setError(null);
+    setSubmitResult(null);
+    setDupPrompt(null);
+    setTieWarning(null);
+    setGratsCopied(false);
+    setPendingAnnouncement(null);
+    setCapturedItem(itemName.trim());
+    setRoundStartedAt("");
+    setManualRound(true);
+    setRows([
+      {
+        characterName: "",
+        displayName: "",
+        tier: "High Bid",
+        occurredAt: new Date().toISOString(),
+        ambiguous: false,
+        rawMessage: "(manual round)",
+        superseded: false,
+        cancelRequested: false,
+        winner: false,
+        manual: true,
+      },
+    ]);
+    setPhase("review");
+  }
+
   async function onEndRound() {
     setPending(true);
     setError(null);
@@ -215,6 +253,8 @@ export function BidsPanel() {
     setItemName("");
     setTieWarning(null);
     setGratsCopied(false);
+    setManualRound(false);
+    setDupPrompt(null);
   }
 
   // Explicit reset — a live/review round now survives a tab switch
@@ -232,7 +272,7 @@ export function BidsPanel() {
     setAutoStarted(null);
   }
 
-  const canClear = phase !== "idle" || error !== null || submitResult !== null || pendingAnnouncement !== null;
+  const canClear = phase !== "idle" || error !== null || submitResult !== null || pendingAnnouncement !== null || dupPrompt !== null;
 
   function updateTier(index: number, tier: string) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, tier, ambiguous: false } : r)));
@@ -353,8 +393,12 @@ export function BidsPanel() {
     setGratsCopied(true);
   }
 
-  async function onSubmit() {
+  async function onSubmit(confirmDuplicate = false) {
     if (rows.length === 0) return;
+    if (!capturedItem.trim()) {
+      setError("Name the item this round is for before submitting.");
+      return;
+    }
     // A bid superseded by a later one from the same person is never sent —
     // only the person's active bid is recorded (guild rule: last tell wins).
     const activeRows = rows.filter((_, i) => !supersededSet.has(i));
@@ -376,9 +420,17 @@ export function BidsPanel() {
     setSubmitting(true);
     setSubmitResult(null);
     setError(null);
+    if (!confirmDuplicate) setDupPrompt(null);
     try {
       const entries = activeRows.map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt, isWinner: r.winner }));
-      const result = await SubmitBids(capturedItem, entries);
+      const result = await SubmitBids(capturedItem, entries, confirmDuplicate);
+      // Site rejected it as a likely double-click of a same-item finalize
+      // within 12h. Not an error — offer "Record anyway" (a boss really can
+      // drop the same item twice a night).
+      if (result.duplicate) {
+        setDupPrompt(result.duplicateMessage || `"${capturedItem}" was already recorded recently.`);
+        return;
+      }
       const notes: string[] = [];
       const unmatched = result.unmatched ?? [];
       const invalidTiers = result.invalidTiers ?? [];
@@ -414,6 +466,19 @@ export function BidsPanel() {
       {error && <div className="error">{error}</div>}
       {tieWarning && <div className="warning">{tieWarning}</div>}
       {submitResult && <div className="success">{submitResult}</div>}
+      {dupPrompt && (
+        <div className="warning" style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
+          <span>{dupPrompt} If this item genuinely dropped again, record it anyway.</span>
+          <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button className="primary" onClick={() => void onSubmit(true)} disabled={submitting}>
+              {submitting ? "Recording…" : "Record anyway"}
+            </button>
+            <button className="secondary" onClick={() => setDupPrompt(null)}>
+              Cancel
+            </button>
+          </span>
+        </div>
+      )}
       {roster.error && (
         <div className="warning">
           Couldn't load the roster for Main/Priority lookup: {roster.error}{" "}
@@ -434,6 +499,12 @@ export function BidsPanel() {
         </div>
       )}
 
+      <datalist id="known-items">
+        {knownItems.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+
       {phase === "idle" && (
         <>
           <div className="toolbar">
@@ -445,19 +516,18 @@ export function BidsPanel() {
               onChange={(e) => setItemName(e.target.value)}
               style={{ minWidth: 320 }}
             />
-            <datalist id="known-items">
-              {knownItems.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
             <button className="primary" onClick={onCapture} disabled={pending || !itemName.trim()}>
               {pending ? "Starting…" : "Capture Bids"}
+            </button>
+            <button className="secondary" onClick={onStartManualRound} disabled={pending} title="Enter a round by hand — backup for when the log capture doesn't fire">
+              Start manual round
             </button>
           </div>
 
           <div className="warning">
             Say "&lt;item&gt; send tells" in guild chat — the app starts tracking that round automatically and pushes bids to the site live.
-            No need to type the item or click Capture (that button is here for when you announced before opening the app).
+            No need to type the item or click Capture (that button is for when you announced before opening the app). <strong>Start manual
+            round</strong> is the fallback: type the item and each bidder's name yourself, then Determine Winner and Submit as normal.
           </div>
         </>
       )}
@@ -500,11 +570,22 @@ export function BidsPanel() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span className={phase === "live" ? "live-pill" : "live-pill idle"}>
               <span className="live-dot" />
-              {phase === "live" ? "LIVE" : "REVIEW"}
+              {phase === "live" ? "LIVE" : manualRound ? "MANUAL" : "REVIEW"}
             </span>
-            <strong style={{ fontSize: 15 }}>{capturedItem || "—"}</strong>
+            {manualRound ? (
+              <input
+                type="text"
+                list="known-items"
+                placeholder="Item name"
+                value={capturedItem}
+                onChange={(e) => setCapturedItem(e.target.value)}
+                style={{ minWidth: 280, fontSize: 15 }}
+              />
+            ) : (
+              <strong style={{ fontSize: 15 }}>{capturedItem || "—"}</strong>
+            )}
             <span style={{ color: "#9ca3af", fontSize: 13 }}>
-              {startedLabel && `started ${startedLabel} · `}
+              {!manualRound && startedLabel && `started ${startedLabel} · `}
               {rows.length} bid{rows.length === 1 ? "" : "s"}
               {phase === "live" && " · watching…"}
             </span>
@@ -533,12 +614,12 @@ export function BidsPanel() {
           <button className="secondary" onClick={() => void determineWinner()} disabled={determining}>
             {determining ? "Checking priority…" : `Determine Winner${winnerCount > 1 ? "s" : ""}`}
           </button>
-          <button className="secondary" onClick={addManualRow} title="Add a bid the capture missed — before you Submit">
-            + Add bid manually
+          <button className="secondary" onClick={addManualRow} title={manualRound ? "Add another bidder" : "Add a bid the capture missed — before you Submit"}>
+            {manualRound ? "+ Add bidder" : "+ Add bid manually"}
           </button>
           <button
             className="primary"
-            onClick={onSubmit}
+            onClick={() => void onSubmit()}
             disabled={submitting || winners.length === 0}
             title={winners.length === 0 ? "Pick a winner first — Determine Winner, or click a row" : undefined}
           >
@@ -553,7 +634,7 @@ export function BidsPanel() {
       {phase === "review" && rows.length === 0 && (
         <div className="toolbar">
           <button className="secondary" onClick={addManualRow}>
-            + Add bid manually
+            {manualRound ? "+ Add bidder" : "+ Add bid manually"}
           </button>
           <button className="secondary" onClick={onClear} disabled={submitting}>
             Clear
