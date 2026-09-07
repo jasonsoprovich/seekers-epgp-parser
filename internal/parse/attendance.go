@@ -38,8 +38,15 @@ type AttendanceSnapshot struct {
 	Zone       string
 	Names      []string
 	// ExpectedCount is the log's own "There are N players in <Zone>" count
-	// — compare against len(Names) as an integrity check; see Warnings.
+	// — compare against len(Names) as an integrity check; see Warnings. 0
+	// when the block had no closing line (Unclosed).
 	ExpectedCount int
+	// Unclosed is true when the block's roster lines were read but no
+	// "There are N players" footer followed (some client builds / a
+	// truncated `/who`, or a stray line ending the block early). The names
+	// are still returned — the officer verifies the list — but a caller
+	// choosing "the latest capture" should prefer a closed one.
+	Unclosed bool
 }
 
 // ParseAttendance finds every "/who guild" block in raw log text.
@@ -81,6 +88,14 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 		var footerZone string
 		var expected int
 
+		// Read roster lines until the "There are N players" footer. A stray
+		// line in the middle (a tell, an emote, a zone message that landed
+		// mid-flush) no longer ends the block — skip up to `maxStray` of
+		// them so one interruption doesn't drop everyone after it. A run
+		// longer than that, or the next `/who` block starting, means this
+		// block's footer isn't coming.
+		const maxStray = 8
+		stray := 0
 		j := i + 2
 		for ; j < len(lines); j++ {
 			if m := whoEndRe.FindStringSubmatch(lines[j].Text); m != nil {
@@ -89,19 +104,26 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 				closed = true
 				break
 			}
-			m := whoRowRe.FindStringSubmatch(lines[j].Text)
-			if m == nil {
-				// Something else interrupted the block (chat, combat spam)
-				// before it closed — stop reading this block rather than
-				// guessing where it actually ends.
+			if m := whoRowRe.FindStringSubmatch(lines[j].Text); m != nil {
+				names = append(names, m[1])
+				stray = 0
+				continue
+			}
+			if whoDashRe.MatchString(lines[j].Text) {
+				continue // a second rule line, harmless
+			}
+			if whoStartRe.MatchString(lines[j].Text) {
+				j-- // let the outer loop pick this up as the next block
 				break
 			}
-			names = append(names, m[1])
+			if stray++; stray > maxStray {
+				break
+			}
 		}
 
-		if !closed {
+		if len(names) == 0 {
 			warnings = append(warnings, fmt.Sprintf(
-				"attendance block starting %s never closed with a \"There are N players\" line — skipped",
+				"attendance block starting %s had no readable roster lines — skipped",
 				blockStart.Format(time.RFC3339)))
 			i = j
 			continue
@@ -115,7 +137,16 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 			zone = footerZone
 		}
 
-		if expected != len(names) {
+		if !closed {
+			// Some client builds don't print the footer on `/who guild`, or
+			// the `/who` was truncated. The names are still usable — the
+			// officer reviews the list before submitting — so emit the
+			// snapshot flagged rather than dropping the whole capture. The
+			// caller prefers a closed snapshot when one exists.
+			warnings = append(warnings, fmt.Sprintf(
+				"attendance block at %s: no closing \"There are N players\" line — parsed %d name(s); double-check the list",
+				blockStart.Format(time.RFC3339), len(names)))
+		} else if expected != len(names) {
 			warnings = append(warnings, fmt.Sprintf(
 				"attendance block at %s (%s): parsed %d name(s) but the log reports %d players — check for a cut-off paste",
 				blockStart.Format(time.RFC3339), zone, len(names), expected))
@@ -126,6 +157,7 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 			Zone:          zone,
 			Names:         names,
 			ExpectedCount: expected,
+			Unclosed:      !closed,
 		})
 		i = j
 	}
