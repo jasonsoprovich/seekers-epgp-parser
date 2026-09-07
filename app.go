@@ -715,6 +715,10 @@ type BidRow struct {
 	Ambiguous     bool   `json:"ambiguous"`
 	RawMessage    string `json:"rawMessage"`
 	Superseded    bool   `json:"superseded"` // an earlier bid from the same character, kept visible but not the default winner
+	// The bidder sent "cancel my bid" at or after placing this bid. The row
+	// is kept and flagged, not dropped — the officer decides whether to
+	// remove it (they meant it) or keep it (they re-bid, or were joking).
+	CancelRequested bool `json:"cancelRequested"`
 }
 
 // BidRound is the state of one bid round the Bids tab renders. While Live
@@ -737,19 +741,44 @@ type BidRound struct {
 // EndBidRound so all three produce byte-identical rows for the same log.
 func buildRows(raw string, startAt, stopAt time.Time) []BidRow {
 	candidates := parse.CaptureBids(raw, startAt, stopAt)
-	latest := parse.ResolveLatestPerCharacter(candidates)
 
-	rows := make([]BidRow, 0, len(candidates))
+	// "cancel my bid" tells don't get their own row — pull them out and use
+	// them to flag the bidder's most recent bid instead.
+	bidCands := make([]parse.BidCandidate, 0, len(candidates))
+	latestCancel := map[string]time.Time{}
 	for _, c := range candidates {
-		best, ok := latest[strings.ToLower(c.CharacterName)]
+		if c.Cancel && c.Tier == "" {
+			k := strings.ToLower(c.CharacterName)
+			if t, ok := latestCancel[k]; !ok || c.OccurredAt.After(t) {
+				latestCancel[k] = c.OccurredAt
+			}
+			continue
+		}
+		bidCands = append(bidCands, c)
+	}
+
+	latest := parse.ResolveLatestPerCharacter(bidCands)
+
+	rows := make([]BidRow, 0, len(bidCands))
+	for _, c := range bidCands {
+		k := strings.ToLower(c.CharacterName)
+		best, ok := latest[k]
 		superseded := ok && !best.OccurredAt.Equal(c.OccurredAt)
+		// Flag only the character's active (latest) bid, and only if the
+		// cancel came at or after they placed it — a cancel before a later
+		// re-bid is stale.
+		cancelRequested := false
+		if ct, has := latestCancel[k]; has && !superseded && !ct.Before(c.OccurredAt) {
+			cancelRequested = true
+		}
 		rows = append(rows, BidRow{
-			CharacterName: c.CharacterName,
-			OccurredAt:    c.OccurredAt.Format(time.RFC3339),
-			Tier:          c.Tier,
-			Ambiguous:     c.Ambiguous,
-			RawMessage:    c.RawMessage,
-			Superseded:    superseded,
+			CharacterName:   c.CharacterName,
+			OccurredAt:      c.OccurredAt.Format(time.RFC3339),
+			Tier:            c.Tier,
+			Ambiguous:       c.Ambiguous,
+			RawMessage:      c.RawMessage,
+			Superseded:      superseded,
+			CancelRequested: cancelRequested,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].OccurredAt < rows[j].OccurredAt })

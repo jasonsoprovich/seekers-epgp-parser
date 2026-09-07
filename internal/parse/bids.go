@@ -156,6 +156,9 @@ type BidCandidate struct {
 	Tier          string
 	Ambiguous     bool
 	RawMessage    string
+	// The tell was "cancel my bid" (no tier). buildRows uses it to flag the
+	// bidder's earlier row for review rather than emitting a row of its own.
+	Cancel bool
 }
 
 // CaptureBids scans raw log text for tells addressed to the log's owner
@@ -182,7 +185,7 @@ func CaptureBids(raw string, startAt, stopAt time.Time) []BidCandidate {
 			continue
 		}
 		signal := DetectBidSignal(m[2])
-		if signal.Tier == "" {
+		if signal.Tier == "" && !signal.Cancel {
 			continue
 		}
 		out = append(out, BidCandidate{
@@ -191,6 +194,7 @@ func CaptureBids(raw string, startAt, stopAt time.Time) []BidCandidate {
 			Tier:          signal.Tier,
 			Ambiguous:     signal.Ambiguous,
 			RawMessage:    m[2],
+			Cancel:        signal.Cancel,
 		})
 	}
 	return out

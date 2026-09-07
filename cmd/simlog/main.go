@@ -54,9 +54,12 @@ var bidTemplates = []string{
 	"HIGH",
 	"Hi",
 	"Major",
+	"%s major",
 	"%s 100",
 	"50",
 	"medium",
+	"slight",
+	"slight %s",
 	"%s HIGH",
 	"high for %s",
 }
