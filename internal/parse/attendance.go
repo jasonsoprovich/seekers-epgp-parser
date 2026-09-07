@@ -96,17 +96,22 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 		var footerZone string
 		var expected int
 
-		// Read roster lines until the "There are N players" footer. A stray
-		// line in the middle (a tell, an emote, a zone message that landed
-		// mid-flush) no longer ends the block — skip up to `maxStray` of
-		// them so one interruption doesn't drop everyone after it. A run
-		// longer than that, or the next `/who` block starting, means this
-		// block's footer isn't coming.
-		const maxStray = 8
-		stray := 0
+		// Read roster lines until the "There are N players" footer. A `/who`
+		// prints within a second or two even for a big guild, but on a busy
+		// raid pull the client interleaves combat / spell / chat lines
+		// between the roster rows — those are skipped, not treated as the
+		// end of the block. The scan stops only at the footer, the next
+		// `/who`, a line well past the print window (`whoBlockWindow` — the
+		// `/who` is clearly over), or a hard line cap. (This replaces a
+		// raw "8 stray lines and we bail" cap that intermittently dropped
+		// the tail of a `/who` split across frames — the "sometimes 18,
+		// sometimes 20" under-count.)
+		const whoBlockWindow = 45 * time.Second
+		const whoBlockLineCap = 5000
 		empty := false
 		j := i + 2
-		for ; j < len(lines); j++ {
+		scanned := 0
+		for ; j < len(lines) && scanned < whoBlockLineCap; j, scanned = j+1, scanned+1 {
 			if m := whoEndRe.FindStringSubmatch(lines[j].Text); m != nil {
 				expected, _ = strconv.Atoi(m[1])
 				footerZone = m[2]
@@ -120,7 +125,6 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 			}
 			if m := whoRowRe.FindStringSubmatch(lines[j].Text); m != nil {
 				names = append(names, m[1])
-				stray = 0
 				continue
 			}
 			if whoDashRe.MatchString(lines[j].Text) {
@@ -130,7 +134,11 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 				j-- // let the outer loop pick this up as the next block
 				break
 			}
-			if stray++; stray > maxStray {
+			// An unrelated line whose timestamp is well past the block start
+			// (a real event after the /who finished). A zero/unparseable
+			// timestamp yields a large negative delta — treat that as "still
+			// in the block", i.e. just skip the line.
+			if !lines[j].Time.IsZero() && lines[j].Time.Sub(blockStart) > whoBlockWindow {
 				break
 			}
 		}
@@ -166,9 +174,21 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 				"attendance block at %s: no closing \"There are N players\" line — parsed %d name(s); double-check the list",
 				blockStart.Format(time.RFC3339), len(names)))
 		} else if expected != len(names) {
+			// A 1-3 gap is almost always someone zoning right as the /who
+			// printed (the footer count and the roster snapshot are a moment
+			// apart) — a nudge, not an alarm. A big gap means rows really
+			// were missed or a paste got cut.
+			gap := expected - len(names)
+			if gap < 0 {
+				gap = -gap
+			}
+			how := "usually someone zoning as the /who printed — verify the list below"
+			if gap > 3 {
+				how = "rows were missed, or a paste got cut off — check the list carefully"
+			}
 			warnings = append(warnings, fmt.Sprintf(
-				"attendance block at %s (%s): parsed %d name(s) but the log reports %d players — check for a cut-off paste",
-				blockStart.Format(time.RFC3339), zone, len(names), expected))
+				"attendance block at %s (%s): read %d name(s), the /who footer says %d — %s",
+				blockStart.Format(time.RFC3339), zone, len(names), expected, how))
 		}
 
 		snapshots = append(snapshots, AttendanceSnapshot{
