@@ -625,11 +625,25 @@ func (a *App) CaptureAttendance() (AttendanceResult, error) {
 	}
 
 	latest := latestPreferClosed(snapshots)
+
+	// The followed log holds months of history — every `/who <name>` the
+	// officer ever ran is a "block". CaptureAttendance only ever returns the
+	// single latest snapshot, so a warning about some unrelated block from
+	// June is pure noise. Keep only warnings for the block we're actually
+	// handing back (they're all prefixed with its RFC3339 timestamp).
+	sel := latest.OccurredAt.Format(time.RFC3339)
+	relevant := make([]string, 0, 1)
+	for _, w := range warnings {
+		if strings.Contains(w, sel) {
+			relevant = append(relevant, w)
+		}
+	}
+
 	return AttendanceResult{
 		OccurredAt: latest.OccurredAt.Format(time.RFC3339),
 		Zone:       latest.Zone,
 		Names:      latest.Names,
-		Warnings:   warnings,
+		Warnings:   relevant,
 	}, nil
 }
 

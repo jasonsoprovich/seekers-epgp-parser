@@ -16,7 +16,15 @@ var (
 	// the closing bracket in either shape, so one pattern covers both
 	// without needing level/class/race, which attendance doesn't use.
 	whoRowRe = regexp.MustCompile(`^\[(?:\d+ [^\]]+|ANONYMOUS)\]\s+(\S+)`)
-	whoEndRe = regexp.MustCompile(`^There are (\d+) players? in (.+)\.$`)
+	// Closes a /who block. "There is 1 player in EverQuest." (a name lookup
+	// that found one person) is just as much a closing line as "There are N
+	// players…" — the old `are`-only pattern left every single-result /who
+	// the officer ever ran looking Unclosed, spraying hundreds of warnings
+	// across a months-old log.
+	whoEndRe = regexp.MustCompile(`^There (?:is|are) (\d+) players? in (.+)\.$`)
+	// "There are no players in EverQuest." — an empty /who result. Ends the
+	// block with zero names; not an error, just nobody matched.
+	whoEmptyRe = regexp.MustCompile(`^There (?:is|are) no (?:players?|one) `)
 
 	// The client prints this every time you zone in. It's the only
 	// reliable "where is the officer standing" signal — `/who guild` (which
@@ -96,11 +104,17 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 		// block's footer isn't coming.
 		const maxStray = 8
 		stray := 0
+		empty := false
 		j := i + 2
 		for ; j < len(lines); j++ {
 			if m := whoEndRe.FindStringSubmatch(lines[j].Text); m != nil {
 				expected, _ = strconv.Atoi(m[1])
 				footerZone = m[2]
+				closed = true
+				break
+			}
+			if whoEmptyRe.MatchString(lines[j].Text) {
+				empty = true
 				closed = true
 				break
 			}
@@ -122,9 +136,14 @@ func ParseAttendance(raw string) (snapshots []AttendanceSnapshot, warnings []str
 		}
 
 		if len(names) == 0 {
-			warnings = append(warnings, fmt.Sprintf(
-				"attendance block starting %s had no readable roster lines — skipped",
-				blockStart.Format(time.RFC3339)))
+			// A `/who` that matched nobody ("There are no players…") is
+			// routine, not a problem — skip it silently. Only warn when a
+			// block had a roster we couldn't read (a real parse failure).
+			if !empty {
+				warnings = append(warnings, fmt.Sprintf(
+					"attendance block starting %s had no readable roster lines — skipped",
+					blockStart.Format(time.RFC3339)))
+			}
 			i = j
 			continue
 		}
