@@ -149,7 +149,14 @@ export function AttendancePanel() {
 
       {error && <div className="error">{error}</div>}
       {submitResult && <div className="success">{submitResult}</div>}
-      {roster.error && <div className="warning">Couldn't load the roster for Main/Priority lookup: {roster.error}</div>}
+      {roster.error && (
+        <div className="warning">
+          Couldn't load the roster for Main/Priority lookup: {roster.error}{" "}
+          <button className="secondary" style={{ marginLeft: 8 }} onClick={roster.reload} disabled={roster.loading}>
+            {roster.loading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       {snapshot?.warnings?.map((w, i) => (
         <div className="warning" key={i}>
           {w}

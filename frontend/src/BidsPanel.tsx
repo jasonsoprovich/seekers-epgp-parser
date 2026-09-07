@@ -21,7 +21,14 @@ const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low
 // resolving an unmatched row (e.g. linking "Leighi" as a new alt of main
 // "Tiliki") doesn't overwrite the captured name the officer recognizes —
 // the Main column is where the resolved main shows up instead.
-type BidRow = CapturedBidRow & { winner: boolean; displayName: string };
+// `manual` marks a row the officer added by hand in the review step — a
+// bid the parser never caught (a tell it missed, or one called out on
+// voice). It's editable the same as a captured row but its Character cell
+// is a free text input rather than frozen capture text. This is the only
+// place a "missed bid" is entered now: after End Round & Review, before
+// Submit — a bid recorded after the item's already been awarded is useless
+// because the item can't be traded anymore.
+type BidRow = CapturedBidRow & { winner: boolean; displayName: string; manual?: boolean };
 
 // idle: nothing running, the manual "name it + Capture" escape hatch is shown.
 // live: a round is tracking; the table refreshes itself from "bids:round"
@@ -190,6 +197,34 @@ export function BidsPanel() {
     setRows((prev) => prev.filter((_, i) => i !== index));
   }
 
+  // Add a blank row for a bid the capture missed. Stamped with the round's
+  // start time (the site's bids route range-checks every entry's
+  // occurredAt), tier defaulting to High Bid, name left for the officer to
+  // type — the Main column then resolves it against the roster (and offers
+  // NoMatchSelect for an unknown name) exactly like a captured row.
+  function addManualRow() {
+    setTieWarning(null);
+    setGratsCopied(false);
+    setRows((prev) => [
+      ...prev,
+      {
+        characterName: "",
+        displayName: "",
+        tier: "High Bid",
+        occurredAt: roundStartedAt || new Date().toISOString(),
+        ambiguous: false,
+        rawMessage: "(added manually)",
+        superseded: false,
+        winner: false,
+        manual: true,
+      },
+    ]);
+  }
+
+  function setManualName(index: number, name: string) {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, characterName: name, displayName: name } : r)));
+  }
+
   function toggleWinner(index: number) {
     setTieWarning(null);
     setGratsCopied(false);
@@ -256,6 +291,11 @@ export function BidsPanel() {
       setError("Mark at least one row as the winner before submitting — click Determine Winner or check one manually.");
       return;
     }
+    const blankManual = rows.filter((r) => !r.characterName.trim());
+    if (blankManual.length > 0) {
+      setError("Fill in the character name for every manually added row, or remove it.");
+      return;
+    }
     setSubmitting(true);
     setSubmitResult(null);
     setError(null);
@@ -295,7 +335,14 @@ export function BidsPanel() {
       {error && <div className="error">{error}</div>}
       {tieWarning && <div className="warning">{tieWarning}</div>}
       {submitResult && <div className="success">{submitResult}</div>}
-      {roster.error && <div className="warning">Couldn't load the roster for Main/Priority lookup: {roster.error}</div>}
+      {roster.error && (
+        <div className="warning">
+          Couldn't load the roster for Main/Priority lookup: {roster.error}{" "}
+          <button className="secondary" style={{ marginLeft: 8 }} onClick={roster.reload} disabled={roster.loading}>
+            {roster.loading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
 
       {phase === "review" && winners.length > 0 && (
         <div className="winner-summary">
@@ -407,8 +454,22 @@ export function BidsPanel() {
           <button className="secondary" onClick={determineWinner}>
             Determine Winner{winnerCount > 1 ? "s" : ""}
           </button>
+          <button className="secondary" onClick={addManualRow} title="Add a bid the capture missed — before you Submit">
+            + Add bid manually
+          </button>
           <button className="primary" onClick={onSubmit} disabled={submitting}>
             {submitting ? "Submitting…" : "Submit to site"}
+          </button>
+          <button className="secondary" onClick={onClear} disabled={submitting}>
+            Clear
+          </button>
+        </div>
+      )}
+
+      {phase === "review" && rows.length === 0 && (
+        <div className="toolbar">
+          <button className="secondary" onClick={addManualRow}>
+            + Add bid manually
           </button>
           <button className="secondary" onClick={onClear} disabled={submitting}>
             Clear
@@ -450,7 +511,18 @@ export function BidsPanel() {
                   style={{ cursor: live ? "default" : "pointer" }}
                   title={live ? undefined : "Click the row to mark/unmark this bid as a winner"}
                 >
-                  <td>{r.displayName}</td>
+                  <td onClick={r.manual && !live ? (e) => e.stopPropagation() : undefined}>
+                    {r.manual && !live ? (
+                      <input
+                        type="text"
+                        value={r.displayName}
+                        placeholder="character name"
+                        onChange={(e) => setManualName(i, e.target.value)}
+                      />
+                    ) : (
+                      r.displayName
+                    )}
+                  </td>
                   <td onClick={(e) => e.stopPropagation()} style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
                     {resolved.matched ? (
                       resolved.mainCharacterName

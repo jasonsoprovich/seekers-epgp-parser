@@ -206,6 +206,22 @@ export function OpenReleasePage(url: string): $CancellablePromise<void> {
     return $Call.ByID(815420409, url);
 }
 
+/**
+ * ParseAttendanceText is CaptureAttendance for text the officer pastes in
+ * rather than the followed log file — the Manual Attendance form's "paste a
+ * chunk of logs" path (a player-run quest's attendance reaches an officer
+ * as a copied log snippet, not a /who the app was running for). Same
+ * parser, same AttendanceResult shape. Unlike CaptureAttendance it merges
+ * the names from EVERY "/who" block in the paste (deduped, first spelling
+ * kept) rather than taking only the latest — a pasted snippet may hold two
+ * or three checks and the officer wants everyone who was present — while
+ * still reporting the latest block's time and zone. Every name stays
+ * editable in the form before submit.
+ */
+export function ParseAttendanceText(raw: string): $CancellablePromise<$models.AttendanceResult> {
+    return $Call.ByID(2891183248, raw);
+}
+
 export function SaveSettings(apiKey: string): $CancellablePromise<void> {
     return $Call.ByID(1949631069, apiKey);
 }

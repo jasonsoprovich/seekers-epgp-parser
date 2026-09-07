@@ -14,6 +14,7 @@ import {
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { GameDirInfo } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import type { Settings as GuildSettings } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
+import { invalidateRoster } from "./useRoster";
 
 export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: string) => void }) {
   const [apiKey, setApiKey] = useState("");
@@ -103,6 +104,10 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
     setSaved(false);
     try {
       await SaveSettings(apiKey.trim());
+      // The key backing every /api/officer/* call just changed — drop the
+      // session roster cache so panels that fetched it under the old (or no)
+      // key refetch instead of staying stuck on a stale auth error.
+      invalidateRoster();
       setSaved(true);
     } finally {
       setPending(false);
@@ -115,6 +120,7 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
     setTestError(null);
     try {
       await SaveSettings(apiKey.trim());
+      invalidateRoster();
       const count = await TestConnection();
       setTestResult(`Connected — pulled ${count} character${count === 1 ? "" : "s"} from the roster.`);
       await refreshGuildSettings();

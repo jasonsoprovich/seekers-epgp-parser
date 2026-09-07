@@ -594,6 +594,19 @@ type AttendanceResult struct {
 	Warnings   []string `json:"warnings"`
 }
 
+// latestPreferClosed returns the most recent snapshot, preferring one that
+// closed with a "There are N players" footer — an unclosed block's name
+// list is still usable but less trustworthy, so it's only chosen when
+// every snapshot is unclosed. `snaps` must be non-empty.
+func latestPreferClosed(snaps []parse.AttendanceSnapshot) parse.AttendanceSnapshot {
+	for i := len(snaps) - 1; i >= 0; i-- {
+		if !snaps[i].Unclosed {
+			return snaps[i]
+		}
+	}
+	return snaps[len(snaps)-1]
+}
+
 // CaptureAttendance re-reads the log file and returns the MOST RECENT
 // "/who" or "/who guild" snapshot (both produce the same "Players on
 // EverQuest:" block parse.ParseAttendance reads) — a raid night can have
@@ -611,11 +624,66 @@ func (a *App) CaptureAttendance() (AttendanceResult, error) {
 		return AttendanceResult{Warnings: warnings}, errors.New("no \"/who\" or \"/who guild\" snapshot found in the log — run one of those in-game first")
 	}
 
-	latest := snapshots[len(snapshots)-1]
+	latest := latestPreferClosed(snapshots)
 	return AttendanceResult{
 		OccurredAt: latest.OccurredAt.Format(time.RFC3339),
 		Zone:       latest.Zone,
 		Names:      latest.Names,
+		Warnings:   warnings,
+	}, nil
+}
+
+// ParseAttendanceText is CaptureAttendance for text the officer pastes in
+// rather than the followed log file — the Manual Attendance form's "paste a
+// chunk of logs" path (a player-run quest's attendance reaches an officer
+// as a copied log snippet, not a /who the app was running for). Same
+// parser, same AttendanceResult shape. Unlike CaptureAttendance it merges
+// the names from EVERY "/who" block in the paste (deduped, first spelling
+// kept) rather than taking only the latest — a pasted snippet may hold two
+// or three checks and the officer wants everyone who was present — while
+// still reporting the latest block's time and zone. Every name stays
+// editable in the form before submit.
+func (a *App) ParseAttendanceText(raw string) (AttendanceResult, error) {
+	snapshots, warnings := parse.ParseAttendance(raw)
+	if warnings == nil {
+		warnings = []string{}
+	}
+	if len(snapshots) == 0 {
+		return AttendanceResult{Warnings: warnings}, errors.New("no \"/who\" or \"/who guild\" block found in the pasted text — paste the output of a /who the officer ran in-game")
+	}
+
+	// If any block closed cleanly, merge only the closed ones — a stray
+	// unclosed fragment in the paste shouldn't add phantom names. If every
+	// block is unclosed, merge them all (that's all the officer has).
+	anyClosed := false
+	for _, s := range snapshots {
+		if !s.Unclosed {
+			anyClosed = true
+			break
+		}
+	}
+
+	seen := map[string]bool{}
+	names := []string{}
+	for _, s := range snapshots {
+		if anyClosed && s.Unclosed {
+			continue
+		}
+		for _, n := range s.Names {
+			key := strings.ToLower(strings.TrimSpace(n))
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			names = append(names, n)
+		}
+	}
+
+	latest := latestPreferClosed(snapshots)
+	return AttendanceResult{
+		OccurredAt: latest.OccurredAt.Format(time.RFC3339),
+		Zone:       latest.Zone,
+		Names:      names,
 		Warnings:   warnings,
 	}, nil
 }

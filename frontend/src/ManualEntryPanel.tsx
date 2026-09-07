@@ -1,23 +1,22 @@
 import { useEffect, useState } from "react";
 import { FetchPointValues, SubmitManualEntry } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { PointValue } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
-import { MissedAttendanceForm } from "./MissedAttendanceForm";
-import { MissedBidForm } from "./MissedBidForm";
+import { ManualAttendanceForm } from "./ManualAttendanceForm";
+import { useOfficerDataGeneration } from "./officerData";
 import { useRoster } from "./useRoster";
 
 const CUSTOM = "__custom__";
 
-type Mode = "adjust" | "bid" | "attendance";
+type Mode = "adjust" | "attendance";
 
-// Three things live here now:
+// Two things live here:
 //   - "adjust": journal-entry EP/GP (bank donations, milestones, ad-hoc
 //     corrections) — posts to /api/officer/manual-entry at the current time.
-//   - "bid": a bid round the parser never captured (MissedBidForm).
-//   - "attendance": names to add to an event the /who capture missed
-//     (MissedAttendanceForm).
-// The last two exist because a missed tell or an app that wasn't running
-// still has to be recordable, with the site's own duplicate checks in the
-// loop so nothing gets doubled.
+//   - "attendance": names to add to an event the /who capture missed, or a
+//     player-run quest recorded from a pasted log (ManualAttendanceForm).
+// A missed *bid* is not entered here anymore — it's added to the live round
+// on the Bids tab, before the winner is finalized, because a bid recorded
+// after the item's been awarded can't be acted on.
 export function ManualEntryPanel() {
   const [mode, setMode] = useState<Mode>("adjust");
   const [kind, setKind] = useState<"ep" | "gp">("ep");
@@ -31,14 +30,29 @@ export function ManualEntryPanel() {
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pointValuesError, setPointValuesError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const roster = useRoster();
+  // Re-run the point-values fetch when the key is saved or Retry is clicked
+  // — same reason useRoster subscribes: this effect's failure was otherwise
+  // frozen for the whole session (see officerData.ts).
+  const dataGen = useOfficerDataGeneration();
 
   useEffect(() => {
+    let cancelled = false;
     FetchPointValues()
-      .then((pv) => setPointValues((kind === "ep" ? pv.ep : pv.gp) ?? []))
-      .catch((err) => setError(String(err)));
-  }, [kind]);
+      .then((pv) => {
+        if (cancelled) return;
+        setPointValues((kind === "ep" ? pv.ep : pv.gp) ?? []);
+        setPointValuesError(null);
+      })
+      .catch((err) => {
+        if (!cancelled) setPointValuesError(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, dataGen]);
 
   function onSelectActivity(value: string) {
     setActivitySelect(value);
@@ -97,19 +111,25 @@ export function ManualEntryPanel() {
         <h2>Manual Entry</h2>
         <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
           <option value="adjust">EP / GP adjustment</option>
-          <option value="bid">Missed bid</option>
-          <option value="attendance">Missed attendance</option>
+          <option value="attendance">Manual attendance</option>
         </select>
       </div>
 
-      {mode === "bid" && <MissedBidForm />}
-      {mode === "attendance" && <MissedAttendanceForm />}
+      {mode === "attendance" && <ManualAttendanceForm />}
 
       {mode === "adjust" && (
         <>
           {error && <div className="error">{error}</div>}
           {success && <div className="success">{success}</div>}
-          {roster.error && <div className="warning">Couldn't load the roster: {roster.error}</div>}
+          {(pointValuesError || roster.error) && (
+            <div className="warning">
+              {pointValuesError && <div>Couldn't load activities/points: {pointValuesError}</div>}
+              {roster.error && <div>Couldn't load the roster: {roster.error}</div>}
+              <button className="secondary" style={{ marginTop: 6 }} onClick={roster.reload} disabled={roster.loading}>
+                {roster.loading ? "Retrying…" : "Retry"}
+              </button>
+            </div>
+          )}
 
           <div className="form-card">
         <div className="form-row">

@@ -280,7 +280,14 @@ function CharactersBrowser() {
       <div className="toolbar">
         <input type="text" placeholder="Character name…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 280 }} />
       </div>
-      {roster.error && <div className="error">{roster.error}</div>}
+      {roster.error && (
+        <div className="error">
+          {roster.error}{" "}
+          <button className="secondary" style={{ marginLeft: 8 }} onClick={roster.reload} disabled={roster.loading}>
+            {roster.loading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       <table>
         <thead>
           <tr>
