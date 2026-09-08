@@ -266,7 +266,7 @@ function TotalsBrowser() {
               <td style={{ color: "#9ca3af" }}>{r.status}</td>
               <td>{r.ep != null ? r.ep.toFixed(1) : "—"}</td>
               <td>{r.gp != null ? r.gp.toFixed(1) : "—"}</td>
-              <td>{r.priorityRating != null ? r.priorityRating.toFixed(2) : "—"}</td>
+              <td>{r.priorityRating != null ? r.priorityRating.toFixed(4) : "—"}</td>
             </tr>
           ))}
           {rows.length === 0 && !loading && (
@@ -324,7 +324,7 @@ function CharactersBrowser() {
               <td style={{ color: "#9ca3af" }}>{c.charType}</td>
               <td style={{ color: "#9ca3af" }}>{c.mainCharacterName || "—"}</td>
               <td style={{ color: "#9ca3af" }}>{c.status}</td>
-              <td>{c.priorityRating != null ? c.priorityRating.toFixed(2) : "—"}</td>
+              <td>{c.priorityRating != null ? c.priorityRating.toFixed(4) : "—"}</td>
             </tr>
           ))}
           {filtered.length === 0 && (

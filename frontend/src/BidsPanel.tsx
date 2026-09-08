@@ -727,7 +727,8 @@ export function BidsPanel() {
                       />
                     )}
                   </td>
-                  <td style={{ color: "#9ca3af" }}>{resolved.priorityRating !== null ? resolved.priorityRating.toFixed(2) : "—"}</td>
+                  {/* 4 dp to match the website's roster/ledger (post-live-test-1 LT-16) */}
+                  <td style={{ color: "#9ca3af" }}>{resolved.priorityRating !== null ? resolved.priorityRating.toFixed(4) : "—"}</td>
                   <td>{new Date(r.occurredAt).toLocaleTimeString()}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {live ? (
