@@ -27,6 +27,10 @@ import * as officerapi$0 from "./internal/officerapi/models.js";
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function AllowQuit(): $CancellablePromise<boolean> {
+    return $Call.ByID(2877184241);
+}
+
 /**
  * CaptureAttendance re-reads the log file and returns the MOST RECENT
  * "/who" or "/who guild" snapshot (both produce the same "Players on
@@ -161,6 +165,10 @@ export function GetSettings(): $CancellablePromise<config$0.Settings> {
     return $Call.ByID(2554697378);
 }
 
+export function HasUnsavedWork(): $CancellablePromise<boolean> {
+    return $Call.ByID(2769043346);
+}
+
 /**
  * InstallUpdate downloads and verifies the release CheckForUpdate already
  * found (DownloadAndInstall — digest checked before anything is staged,
@@ -183,6 +191,19 @@ export function InstallUpdate(): $CancellablePromise<void> {
  */
 export function LinkCharacter(name: string, mainCharacterID: number | null): $CancellablePromise<officerapi$0.Character> {
     return $Call.ByID(3439719684, name, mainCharacterID);
+}
+
+/**
+ * ListAttendanceSnapshots returns every "/who" / "/who guild" block in the
+ * followed log from the last attendanceLookback, newest first, each as its
+ * own AttendanceResult. This backs the Attendance tab's multi-capture
+ * workflow (post-live-test-1 LT-21/LT-22): an officer captures at the
+ * start, middle, and end of a raid, keeps them all on screen, then assigns
+ * and submits the ones they want after the raid instead of mid-fight.
+ * Deduped by occurredAt; per-block warnings attached to their block.
+ */
+export function ListAttendanceSnapshots(): $CancellablePromise<$models.AttendanceResult[] | null> {
+    return $Call.ByID(3633388835);
 }
 
 /**
@@ -242,6 +263,19 @@ export function SelectLogFile(): $CancellablePromise<string> {
     return $Call.ByID(597912695);
 }
 
+export function SetAllowQuit(v: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1491183787, v);
+}
+
+/**
+ * SetAttendanceUnsaved / SetBidsUnsaved are called by their panels whenever
+ * their unsent-work state changes. HasUnsavedWork / AllowQuit / SetAllowQuit
+ * are read/set by main.go's close hook.
+ */
+export function SetAttendanceUnsaved(v: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1253126802, v);
+}
+
 /**
  * SetAutoDetectBids toggles the Bids-tab log watcher that auto-starts a
  * round when the officer announces "<item> send tells" in chat. Persisted,
@@ -249,6 +283,10 @@ export function SelectLogFile(): $CancellablePromise<string> {
  */
 export function SetAutoDetectBids(enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(737290635, enabled);
+}
+
+export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3851909227, v);
 }
 
 /**

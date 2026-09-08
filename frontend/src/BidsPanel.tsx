@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Clipboard, Events } from "@wailsio/runtime";
-import { CaptureBids, DiscardBidRound, EndBidRound, FetchKnownItems, SubmitBids } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import {
+  CaptureBids,
+  DiscardBidRound,
+  EndBidRound,
+  FetchKnownItems,
+  SetBidsUnsaved,
+  SubmitBids,
+} from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
@@ -133,6 +140,13 @@ export function BidsPanel() {
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+
+  // Feed the close-confirmation guard (LT-24): a round that's live or in
+  // review is work that hasn't hit the site yet.
+  useEffect(() => {
+    SetBidsUnsaved(phase !== "idle").catch(() => {});
+  }, [phase]);
+  useEffect(() => () => void SetBidsUnsaved(false).catch(() => {}), []);
 
   // PLAN.md §15 — the app watches the log for the officer's own
   // "<item> send tells" and fires this so a round auto-starts without them

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -90,7 +91,26 @@ type App struct {
 	// that never succeeded) just means the structural check stands alone.
 	knownItemsMu sync.RWMutex
 	knownItems   []string
+
+	// Close-confirmation guard (post-live-test-1 LT-24). The Attendance and
+	// Bids panels each report whether they hold work that hasn't been
+	// submitted to the site (captured /who snapshots, a live/in-review bid
+	// round); main.go's WindowClosing hook checks HasUnsavedWork and asks
+	// before quitting. allowQuit is latched true once the officer confirms
+	// "discard & quit" so the second close attempt goes straight through.
+	attendanceUnsaved atomic.Bool
+	bidsUnsaved       atomic.Bool
+	allowQuit         atomic.Bool
 }
+
+// SetAttendanceUnsaved / SetBidsUnsaved are called by their panels whenever
+// their unsent-work state changes. HasUnsavedWork / AllowQuit / SetAllowQuit
+// are read/set by main.go's close hook.
+func (a *App) SetAttendanceUnsaved(v bool) { a.attendanceUnsaved.Store(v) }
+func (a *App) SetBidsUnsaved(v bool)       { a.bidsUnsaved.Store(v) }
+func (a *App) HasUnsavedWork() bool        { return a.attendanceUnsaved.Load() || a.bidsUnsaved.Load() }
+func (a *App) AllowQuit() bool             { return a.allowQuit.Load() }
+func (a *App) SetAllowQuit(v bool)         { a.allowQuit.Store(v) }
 
 func (a *App) snapshotKnownItems() []string {
 	a.knownItemsMu.RLock()
@@ -678,6 +698,58 @@ func (a *App) CaptureAttendance() (AttendanceResult, error) {
 		Names:      latest.Names,
 		Warnings:   relevant,
 	}, nil
+}
+
+// attendanceLookback bounds ListAttendanceSnapshots to the current raid
+// night — the followed log holds months of "/who" blocks and the officer
+// only cares about tonight's.
+const attendanceLookback = 12 * time.Hour
+
+// ListAttendanceSnapshots returns every "/who" / "/who guild" block in the
+// followed log from the last attendanceLookback, newest first, each as its
+// own AttendanceResult. This backs the Attendance tab's multi-capture
+// workflow (post-live-test-1 LT-21/LT-22): an officer captures at the
+// start, middle, and end of a raid, keeps them all on screen, then assigns
+// and submits the ones they want after the raid instead of mid-fight.
+// Deduped by occurredAt; per-block warnings attached to their block.
+func (a *App) ListAttendanceSnapshots() ([]AttendanceResult, error) {
+	raw, err := a.readLog()
+	if err != nil {
+		return nil, err
+	}
+	snapshots, warnings := parse.ParseAttendance(raw)
+	if len(snapshots) == 0 {
+		return []AttendanceResult{}, errors.New("no \"/who\" or \"/who guild\" snapshot found in the log — run one of those in-game first")
+	}
+
+	cutoff := time.Now().Add(-attendanceLookback)
+	out := make([]AttendanceResult, 0, 8)
+	seen := map[string]bool{}
+	for i := len(snapshots) - 1; i >= 0; i-- {
+		s := snapshots[i]
+		if s.OccurredAt.Before(cutoff) {
+			break
+		}
+		sel := s.OccurredAt.Format(time.RFC3339)
+		if seen[sel] {
+			continue
+		}
+		seen[sel] = true
+
+		relevant := make([]string, 0)
+		for _, w := range warnings {
+			if strings.Contains(w, sel) {
+				relevant = append(relevant, w)
+			}
+		}
+		out = append(out, AttendanceResult{
+			OccurredAt: sel,
+			Zone:       s.Zone,
+			Names:      s.Names,
+			Warnings:   relevant,
+		})
+	}
+	return out, nil
 }
 
 // ParseAttendanceText is CaptureAttendance for text the officer pastes in
