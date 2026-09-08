@@ -81,6 +81,39 @@ type App struct {
 	annMu       sync.Mutex
 	annCancel   context.CancelFunc
 	annLastSeen time.Time
+
+	// A cache of the site's distinct gp_ledger.item_name list, refreshed by
+	// the announcement watcher. parse.DetectAnnouncement uses it to tell a
+	// real "<item> send tells" from a "send tells" typed mid-sentence — an
+	// exact match here accepts a name outright; everything else falls back
+	// to the structural looks-like-an-item check. Best-effort: nil (a fetch
+	// that never succeeded) just means the structural check stands alone.
+	knownItemsMu sync.RWMutex
+	knownItems   []string
+}
+
+func (a *App) snapshotKnownItems() []string {
+	a.knownItemsMu.RLock()
+	defer a.knownItemsMu.RUnlock()
+	return a.knownItems
+}
+
+// refreshKnownItems pulls the site's item-name list into the cache.
+// Best-effort — a failure leaves the previous snapshot in place.
+func (a *App) refreshKnownItems() {
+	client, err := a.officerClient()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	items, err := client.FetchItems(ctx)
+	if err != nil || len(items) == 0 {
+		return
+	}
+	a.knownItemsMu.Lock()
+	a.knownItems = items
+	a.knownItemsMu.Unlock()
 }
 
 type announcementEvent struct {
@@ -1033,13 +1066,22 @@ func (a *App) startAnnouncementWatch() {
 	a.annMu.Unlock()
 
 	go func() {
+		// Prime the item-name cache once up front, then keep it fresh so a
+		// newly-looted item becomes recognisable within a few minutes.
+		go a.refreshKnownItems()
+
 		ticker := time.NewTicker(4 * time.Second)
 		defer ticker.Stop()
+		const refreshEveryNTicks = 45 // ~3 min
+		tick := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+			}
+			if tick++; tick%refreshEveryNTicks == 0 {
+				go a.refreshKnownItems()
 			}
 
 			raw, err := a.readLog()
@@ -1051,7 +1093,7 @@ func (a *App) startAnnouncementWatch() {
 			since := a.annLastSeen
 			a.annMu.Unlock()
 
-			item, at, ok := parse.DetectAnnouncement(raw, since, time.Now())
+			item, at, ok := parse.DetectAnnouncement(raw, since, time.Now(), a.snapshotKnownItems())
 			if !ok {
 				continue
 			}

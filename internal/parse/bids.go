@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var tellRe = regexp.MustCompile(`^(\S+) tells you, '(.*)'$`)
@@ -14,10 +15,103 @@ var tellRe = regexp.MustCompile(`^(\S+) tells you, '(.*)'$`)
 // announcing a different item. See FindAnnouncementStart.
 var ownChatRe = regexp.MustCompile(`^You .*, '(.*)'$`)
 
-// Splits an announcement message on "send tells" so extractItemName can
-// take whichever side holds the item name. Tolerates extra whitespace and
-// any case ("Send Tells", "send  tells").
-var sendTellsSplitRe = regexp.MustCompile(`(?i)\bsend\s+tells\b`)
+// announceTriggerRe matches the phrases officers actually use to open a bid
+// round, tolerant of whitespace, hyphens, and case. Real variants seen in
+// the field: "<item> send tells", "<item> - send tells", "send tells <item>",
+// "<item> start bids", "<item> starting bids", "bids open <item>". Splitting
+// a message on this lets extractItemName take whichever side holds the name.
+var announceTriggerRe = regexp.MustCompile(`(?i)\b(?:sends?[\s-]+tells?|start(?:ing)?[\s-]+bids?|bids?[\s-]+open|open[\s-]+bids?)\b`)
+
+// itemLinkRe matches an EQ client item link: the visible name wrapped in
+// DC2 (0x12) control bytes with a run of fixed-width numeric header fields
+// in front of it. stripItemLinks pulls the name back out — officers often
+// paste the clickable link into a "last call", and the raw header digits
+// would otherwise wreck the item-name match.
+var itemLinkRe = regexp.MustCompile("\x12([^\x12]*)\x12")
+
+// stripItemLinks replaces every 0x12-delimited item link in msg with just
+// its visible name. The emu link header is fixed-width decimal fields, so
+// the name is the payload's trailing stretch containing no digits.
+func stripItemLinks(msg string) string {
+	if !strings.ContainsRune(msg, '\x12') {
+		return msg
+	}
+	return itemLinkRe.ReplaceAllStringFunc(msg, func(m string) string {
+		inner := strings.Trim(m, "\x12")
+		last := -1
+		for i, r := range inner {
+			if r >= '0' && r <= '9' {
+				last = i
+			}
+		}
+		if last >= 0 && last+1 < len(inner) {
+			inner = inner[last+1:]
+		}
+		return strings.TrimSpace(inner)
+	})
+}
+
+// itemNameConnectors are the only lowercase words allowed to appear
+// mid-name — EQ item names are otherwise a run of Capitalized words
+// ("Cloak of Flames", "Robe of the Kedge Knight", "Soul Essence of Aten Ha
+// Ra"). Anything else lowercase means it's prose, not an item.
+var itemNameConnectors = map[string]bool{
+	"of": true, "the": true, "a": true, "an": true, "and": true, "to": true, "with": true, "de": true,
+}
+
+// looksLikeItemName is a deterministic sanity check on a candidate pulled
+// out of free chat. It rejects the failure mode from the first live test
+// (an officer typing "send tells" inside a sentence — "last call, it reset
+// the bids on mine cause it saw send tells" — which extractItemName would
+// otherwise hand back as an "item name" and auto-start a junk round,
+// wiping the real one). A real name is a short run of Capitalized words
+// plus connectors; prose has lowercase non-connector words and/or
+// sentence punctuation.
+func looksLikeItemName(cand string) bool {
+	cand = strings.TrimSpace(cand)
+	if len(cand) < 3 || len(cand) > 64 {
+		return false
+	}
+	if strings.ContainsAny(cand, ",;:!?\"") {
+		return false
+	}
+	fields := strings.Fields(cand)
+	if len(fields) == 0 || len(fields) > 8 {
+		return false
+	}
+	for _, w := range fields {
+		if itemNameConnectors[strings.ToLower(w)] {
+			continue
+		}
+		r := []rune(w)
+		// Capitalized ("Cloak"), a bare number or roman-ish token ("Type 3",
+		// "Mark II"), or an all-caps abbreviation — all fine. A lowercase
+		// word that isn't a connector is prose.
+		if unicode.IsUpper(r[0]) || unicode.IsDigit(r[0]) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// isPlausibleItem gates a candidate from DetectAnnouncement: accept it if
+// it exactly matches (case-insensitively) an item the guild has looted
+// before, or if it structurally looks like an EQ item name. `known` is the
+// site's distinct gp_ledger.item_name list (may be nil — the structural
+// check still applies).
+func isPlausibleItem(name string, known []string) bool {
+	if name == "" {
+		return false
+	}
+	n := strings.ToLower(strings.TrimSpace(name))
+	for _, k := range known {
+		if strings.ToLower(strings.TrimSpace(k)) == n {
+			return true
+		}
+	}
+	return looksLikeItemName(name)
+}
 
 // extractItemName pulls a probable item name out of an officer's own
 // "send tells" announcement. Officers phrase it a few ways —
@@ -34,7 +128,7 @@ var sendTellsSplitRe = regexp.MustCompile(`(?i)\bsend\s+tells\b`)
 // best-effort: the app shows the result in an editable field and the
 // officer corrects it if it came out wrong.
 func extractItemName(msg string) string {
-	parts := sendTellsSplitRe.Split(msg, 2)
+	parts := announceTriggerRe.Split(stripItemLinks(msg), 2)
 	cand := strings.TrimSpace(parts[0])
 	if len(parts) == 2 {
 		after := strings.TrimSpace(parts[1])
@@ -81,17 +175,23 @@ func extractItemName(msg string) string {
 }
 
 // DetectAnnouncement returns the item name and timestamp of the log
-// owner's OWN most recent "send tells" announcement strictly after `since`
-// and at or before `cutoff` — a "You ..., '<msg>'" line whose message
-// contains "send tells" (same own-chat / same phrase test
-// FindAnnouncementStart uses). ok is false if there's no such new line.
+// owner's OWN most recent bid-round announcement strictly after `since` and
+// at or before `cutoff` — a "You ..., '<msg>'" line whose message carries a
+// trigger phrase (announceTriggerRe: "send tells", "start bids", …) AND
+// whose extracted name passes isPlausibleItem. ok is false if there's no
+// such new line.
 //
-// This is what lets the app auto-start a bid round the instant the officer
-// announces one, without them typing the item name first. It only ever
-// looks at the officer's own outgoing chat (ownChatRe), so a *different*
-// officer announcing a *different* item in the same channel never triggers
-// it — same guarantee CaptureBids relies on.
-func DetectAnnouncement(raw string, since, cutoff time.Time) (itemName string, at time.Time, ok bool) {
+// The isPlausibleItem gate is what stops a "send tells" typed inside an
+// ordinary sentence from auto-starting a junk round (first live test: a
+// prose line wiped a live round because extractItemName returned the
+// surrounding words as an "item name"). `known` is the site's distinct
+// gp_ledger.item_name list — pass nil and only the structural check
+// applies.
+//
+// It only ever looks at the officer's own outgoing chat (ownChatRe), so a
+// *different* officer announcing a *different* item in the same channel
+// never triggers it — same guarantee CaptureBids relies on.
+func DetectAnnouncement(raw string, since, cutoff time.Time, known []string) (itemName string, at time.Time, ok bool) {
 	for _, l := range splitLogLines(raw) {
 		if !l.Time.After(since) || l.Time.After(cutoff) {
 			continue
@@ -100,11 +200,11 @@ func DetectAnnouncement(raw string, since, cutoff time.Time) (itemName string, a
 		if m == nil {
 			continue
 		}
-		if !strings.Contains(strings.ToLower(m[1]), "send tells") {
+		if !announceTriggerRe.MatchString(m[1]) {
 			continue
 		}
 		name := extractItemName(m[1])
-		if name == "" {
+		if !isPlausibleItem(name, known) {
 			continue
 		}
 		// Keep scanning — the newest matching line wins, not the first.
@@ -146,8 +246,8 @@ func FindAnnouncementStart(raw string, itemName string, cutoff time.Time) (found
 		if m == nil {
 			continue
 		}
-		msg := strings.ToLower(m[1])
-		if strings.Contains(msg, "send tells") && strings.Contains(msg, item) {
+		msg := stripItemLinks(m[1])
+		if announceTriggerRe.MatchString(msg) && strings.Contains(strings.ToLower(msg), item) {
 			times = append(times, l.Time)
 		}
 	}

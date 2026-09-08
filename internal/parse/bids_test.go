@@ -178,7 +178,7 @@ func TestDetectAnnouncement_RealSample(t *testing.T) {
 
 	// The newest of the log owner's own "send tells" lines wins (there are
 	// two — the opening call and the "- last call" repeat).
-	item, at, ok := DetectAnnouncement(bidsSample, before, after)
+	item, at, ok := DetectAnnouncement(bidsSample, before, after, nil)
 	if !ok {
 		t.Fatal("expected to detect the officer's own announcement")
 	}
@@ -198,7 +198,72 @@ func TestDetectAnnouncement_RealSample(t *testing.T) {
 	}
 
 	// Nothing new after the last own announcement.
-	if _, _, ok := DetectAnnouncement(bidsSample, wantAt, after); ok {
+	if _, _, ok := DetectAnnouncement(bidsSample, wantAt, after, nil); ok {
 		t.Error("expected no detection after the last own announcement")
+	}
+}
+
+// --- post-live-test-1: trigger grammar + item validation (LT-03 / LT-04) ---
+
+func TestLooksLikeItemName(t *testing.T) {
+	ok := []string{
+		"Cloak of Flames", "Soul Essence of Aten Ha Ra", "Robe of the Kedge Knight",
+		"Journeyman's Boots", "Mask of Piety", "Type 3 Armor Pattern",
+	}
+	for _, s := range ok {
+		if !looksLikeItemName(s) {
+			t.Errorf("looksLikeItemName(%q) = false, want true", s)
+		}
+	}
+	bad := []string{
+		"last call it reset the bids on mine cause it saw send",
+		"last call, send tells", "final call on this one guys",
+		"send tells now please", "ok that's it for tonight", "",
+	}
+	for _, s := range bad {
+		if looksLikeItemName(s) {
+			t.Errorf("looksLikeItemName(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestDetectAnnouncement_RejectsProseTrigger(t *testing.T) {
+	// The first live test's actual failure: "send tells" typed inside a
+	// sentence. Must NOT be detected as an announcement (it was auto-starting
+	// a junk round named after the prose and wiping the live one).
+	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, 'last call, it reset the bids on mine cause it saw send tells'\n"
+	if item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil); ok {
+		t.Errorf("detected a prose line as an announcement: %q", item)
+	}
+}
+
+func TestDetectAnnouncement_StartBidsTrigger(t *testing.T) {
+	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, 'Mask of Piety start bids'\n"
+	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil)
+	if !ok || item != "Mask of Piety" {
+		t.Errorf("DetectAnnouncement = (%q, %v), want (%q, true)", item, ok, "Mask of Piety")
+	}
+}
+
+func TestDetectAnnouncement_KnownItemAcceptsLowercase(t *testing.T) {
+	// A brand-new-looking lowercase name wouldn't pass the structural check,
+	// but an exact match against the site's item list rescues it.
+	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, 'cloak of flames send tells'\n"
+	if _, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil); ok {
+		t.Fatal("expected lowercase prose-ish name to be rejected without a known-items hit")
+	}
+	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), []string{"Cloak of Flames"})
+	if !ok || item != "cloak of flames" {
+		t.Errorf("with known items: DetectAnnouncement = (%q, %v), want (%q, true)", item, ok, "cloak of flames")
+	}
+}
+
+func TestDetectAnnouncement_ItemLink(t *testing.T) {
+	// Officer pastes the clickable item link into the call. stripItemLinks
+	// pulls the visible name back out of the 0x12-delimited markup.
+	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, '\x12000042000000000000000000000000000000000000000000000000Cloak of Flames\x12 send tells last call'\n"
+	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil)
+	if !ok || item != "Cloak of Flames" {
+		t.Errorf("DetectAnnouncement = (%q, %v), want (%q, true)", item, ok, "Cloak of Flames")
 	}
 }
