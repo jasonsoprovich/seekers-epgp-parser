@@ -131,6 +131,17 @@ func Active(logs []CharacterLog) (CharacterLog, bool) {
 	return best, true
 }
 
+// CharacterFromPath returns the character name encoded in an
+// eqlog_<Character>_<server>.txt path (any directory), or "" when the base
+// name isn't a recognisable EQ client log.
+func CharacterFromPath(path string) string {
+	c, _, ok := parseLogName(filepath.Base(path))
+	if !ok {
+		return ""
+	}
+	return c
+}
+
 // parseLogName splits "eqlog_<Character>_<server>.txt" into its character
 // and server parts. The server shortname itself contains dots and can
 // contain underscores ("pq.proj", and the guild's real files are

@@ -998,7 +998,7 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry, confirm
 			})
 		}
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = client.ResolveLiveBids(bg, itemName, resolveBids)
+		_ = client.ResolveLiveBids(bg, itemName, eqlogs.CharacterFromPath(a.logPath), resolveBids)
 		cancel()
 		a.applyPendingLogSwap()
 	}
@@ -1328,6 +1328,11 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 	a.liveBidsCancel = cancel
 	a.liveBidsMu.Unlock()
 
+	// Which of the officer's characters is capturing this round — the site
+	// shows it as "collected by" (LT-07). Fixed for the round's lifetime: a
+	// character swap is deferred while a round is live (startActiveLogWatch).
+	capturedBy := eqlogs.CharacterFromPath(a.logPath)
+
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
@@ -1395,10 +1400,11 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 			idleTicks = 0
 			for _, c := range candidates[pushed:] {
 				_ = client.PushLiveBid(ctx, officerapi.LiveBidPushRequest{
-					ItemName:      itemName,
-					CharacterName: c.CharacterName,
-					Tier:          c.Tier,
-					OccurredAt:    c.OccurredAt.Format(time.RFC3339),
+					ItemName:            itemName,
+					CharacterName:       c.CharacterName,
+					Tier:                c.Tier,
+					OccurredAt:          c.OccurredAt.Format(time.RFC3339),
+					CapturedByCharacter: capturedBy,
 				})
 			}
 			pushed = len(candidates)

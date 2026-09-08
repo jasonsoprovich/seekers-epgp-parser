@@ -352,6 +352,11 @@ type LiveBidPushRequest struct {
 	CharacterName string `json:"characterName"`
 	Tier          string `json:"tier"`
 	OccurredAt    string `json:"occurredAt"`
+	// The officer's own character whose log produced this capture — the
+	// site shows it as "collected by" (post-live-test-1 LT-07). Omitted
+	// when the log filename isn't a recognisable eqlog_<char>_<server>.txt;
+	// the site then falls back to the officer's main / username.
+	CapturedByCharacter string `json:"capturedByCharacter,omitempty"`
 }
 
 func (c *Client) PushLiveBid(ctx context.Context, req LiveBidPushRequest) error {
@@ -403,8 +408,9 @@ type ResolveLiveBidEntry struct {
 }
 
 type resolveLiveBidsRequest struct {
-	ItemName string                `json:"itemName"`
-	Bids     []ResolveLiveBidEntry `json:"bids"`
+	ItemName            string                `json:"itemName"`
+	Bids                []ResolveLiveBidEntry `json:"bids"`
+	CapturedByCharacter string                `json:"capturedByCharacter,omitempty"`
 }
 
 // ResolveLiveBids marks this officer's round for `itemName` finalized on the
@@ -412,11 +418,15 @@ type resolveLiveBidsRequest struct {
 // winner(s) for a review window (PLAN.md Phase 16) instead of vanishing the
 // instant SubmitBids succeeds. Best-effort like every other live-bids call;
 // SubmitBids is the real record regardless.
-func (c *Client) ResolveLiveBids(ctx context.Context, itemName string, bids []ResolveLiveBidEntry) error {
+func (c *Client) ResolveLiveBids(ctx context.Context, itemName, capturedByCharacter string, bids []ResolveLiveBidEntry) error {
 	if bids == nil {
 		bids = []ResolveLiveBidEntry{}
 	}
-	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/resolve", resolveLiveBidsRequest{ItemName: itemName, Bids: bids}, nil)
+	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/resolve", resolveLiveBidsRequest{
+		ItemName:            itemName,
+		Bids:                bids,
+		CapturedByCharacter: capturedByCharacter,
+	}, nil)
 }
 
 // --- POST /api/officer/manual-entry ---
