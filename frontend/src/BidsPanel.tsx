@@ -10,7 +10,7 @@ import {
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { NoMatchSelect } from "./NoMatchSelect";
+import { MainResolveCombobox } from "./MainResolveCombobox";
 import { useRoster } from "./useRoster";
 
 const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot", "Rot (No-Drop)"];
@@ -331,11 +331,16 @@ export function BidsPanel() {
   // defaults to High Bid; the name is a combobox over the roster (pick an
   // alt and the Main column fills itself) that also takes a free-typed
   // name, resolved exactly like a captured row.
+  //
+  // Prepended, not appended (2026-09-09 sim feedback) — a just-added row
+  // the officer needs to fill in belongs at the top where it's visible,
+  // not scrolled off the bottom of a 15-row table. The `now` timestamp
+  // still makes it supersede any earlier tell from the same person
+  // regardless of table position.
   function addManualRow() {
     setTieWarning(null);
     setGratsCopied(false);
     setRows((prev) => [
-      ...prev,
       {
         characterName: "",
         displayName: "",
@@ -348,6 +353,7 @@ export function BidsPanel() {
         winner: false,
         manual: true,
       },
+      ...prev,
     ]);
   }
 
@@ -800,12 +806,14 @@ export function BidsPanel() {
                   </td>
                   <td onClick={(e) => e.stopPropagation()} style={{ color: resolved.matched ? "#9ca3af" : "#f87171" }}>
                     {resolved.matched ? (
+                      // Auto-filled from the roster once field 1 resolves —
+                      // shown as plain text, nothing to do here.
                       resolved.mainCharacterName
                     ) : live ? (
                       <span style={{ color: "#f87171" }}>no match</span>
                     ) : (
-                      <NoMatchSelect
-                        name={r.displayName}
+                      <MainResolveCombobox
+                        playedName={r.characterName}
                         roster={roster}
                         onResolved={(canonicalName) => resolveIdentity(i, canonicalName)}
                         onError={setError}
