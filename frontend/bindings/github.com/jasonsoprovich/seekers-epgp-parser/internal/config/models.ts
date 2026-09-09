@@ -34,4 +34,12 @@ export interface Settings {
      * the Settings toggle stays off. Read it through AutoDetectBidsEnabled.
      */
     "autoDetectBids"?: boolean | null;
+
+    /**
+     * SetupComplete is set once the officer has been through (or dismissed)
+     * the first-run setup wizard. The wizard shows on launch while this is
+     * false; Settings has a "Run setup again" button that reopens it
+     * regardless.
+     */
+    "setupComplete"?: boolean;
 }

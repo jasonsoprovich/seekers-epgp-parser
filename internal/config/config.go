@@ -36,6 +36,11 @@ type Settings struct {
 	// file" (nil) reads as ON — the default — while an explicit false from
 	// the Settings toggle stays off. Read it through AutoDetectBidsEnabled.
 	AutoDetectBids *bool `json:"autoDetectBids,omitempty"`
+	// SetupComplete is set once the officer has been through (or dismissed)
+	// the first-run setup wizard. The wizard shows on launch while this is
+	// false; Settings has a "Run setup again" button that reopens it
+	// regardless.
+	SetupComplete bool `json:"setupComplete,omitempty"`
 }
 
 // AutoDetectBidsEnabled defaults to true when the setting has never been

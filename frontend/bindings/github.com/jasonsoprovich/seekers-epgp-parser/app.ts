@@ -67,6 +67,22 @@ export function CaptureBids(itemName: string, announcedAt: string): $Cancellable
 }
 
 /**
+ * SubmitAttendance sends exactly the names the officer is left with after
+ * editing/removing rows in the Attendance tab — same "submit what's on
+ * screen" contract as the Copy-to-clipboard button next to it, just to the
+ * site's ledger instead of the clipboard.
+ * CheckAttendanceRecorded probes whether an (activity, occurredAt) capture
+ * is already on the ledger, so the Attendance tab's submit-confirmation can
+ * flag "already recorded — this would be a no-op" before the officer
+ * commits (sim feedback 2026-09-09). Best-effort at the call site: a
+ * failure here (older site without the GET route, offline) just means no
+ * pre-warning, not a blocked submit.
+ */
+export function CheckAttendanceRecorded(activity: string, occurredAt: string): $CancellablePromise<officerapi$0.AttendanceCheck> {
+    return $Call.ByID(1251765916, activity, occurredAt);
+}
+
+/**
  * CheckForUpdate compares this build's embedded Version against the
  * repo's latest GitHub release, for the startup "you're on an old build"
  * banner. Errors here (no network, GitHub unreachable) are non-fatal to
@@ -291,11 +307,15 @@ export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
 }
 
 /**
- * SubmitAttendance sends exactly the names the officer is left with after
- * editing/removing rows in the Attendance tab — same "submit what's on
- * screen" contract as the Copy-to-clipboard button next to it, just to the
- * site's ledger instead of the clipboard.
+ * SetSetupComplete records that the officer has finished (or dismissed)
+ * the first-run setup wizard, so it stops showing on launch. `false`
+ * re-arms it (Settings' "Run setup again" doesn't need this — it opens the
+ * wizard directly — but this keeps the flag honest if a caller wants to).
  */
+export function SetSetupComplete(done: boolean): $CancellablePromise<void> {
+    return $Call.ByID(353136387, done);
+}
+
 export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
     return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName);
 }

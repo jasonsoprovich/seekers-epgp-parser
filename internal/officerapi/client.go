@@ -277,6 +277,24 @@ func (c *Client) SubmitAttendance(ctx context.Context, req AttendanceRequest) (A
 	return out, err
 }
 
+// AttendanceCheck is the result of the pre-submit "is this capture already
+// in the ledger?" probe — GET /api/officer/attendance?activity=&occurredAt=.
+// Count is the number of matching `source='parse'` ep_ledger rows; Exists
+// is Count > 0. A capture whose (activity, occurredAt) already has rows
+// would submit to zero inserts (the POST route dedupes on exactly that
+// key), so the app warns before the officer commits.
+type AttendanceCheck struct {
+	Exists bool `json:"exists"`
+	Count  int  `json:"count"`
+}
+
+func (c *Client) CheckAttendance(ctx context.Context, activity, occurredAt string) (AttendanceCheck, error) {
+	params := url.Values{"activity": {activity}, "occurredAt": {occurredAt}}
+	var out AttendanceCheck
+	err := c.do(ctx, http.MethodGet, "/api/officer/attendance?"+params.Encode(), nil, &out)
+	return out, err
+}
+
 // --- POST /api/officer/bids ---
 
 type BidEntry struct {

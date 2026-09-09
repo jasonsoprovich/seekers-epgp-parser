@@ -364,6 +364,19 @@ func (a *App) SaveSettings(apiKey string) error {
 	return config.Save(s)
 }
 
+// SetSetupComplete records that the officer has finished (or dismissed)
+// the first-run setup wizard, so it stops showing on launch. `false`
+// re-arms it (Settings' "Run setup again" doesn't need this — it opens the
+// wizard directly — but this keeps the flag honest if a caller wants to).
+func (a *App) SetSetupComplete(done bool) error {
+	s, err := config.Load()
+	if err != nil {
+		s = config.Settings{}
+	}
+	s.SetupComplete = done
+	return config.Save(s)
+}
+
 // SetAutoDetectBids toggles the Bids-tab log watcher that auto-starts a
 // round when the officer announces "<item> send tells" in chat. Persisted,
 // and applied immediately (starts/stops the watcher this session too).
@@ -823,6 +836,20 @@ func (a *App) ParseAttendanceText(raw string) (AttendanceResult, error) {
 // editing/removing rows in the Attendance tab — same "submit what's on
 // screen" contract as the Copy-to-clipboard button next to it, just to the
 // site's ledger instead of the clipboard.
+// CheckAttendanceRecorded probes whether an (activity, occurredAt) capture
+// is already on the ledger, so the Attendance tab's submit-confirmation can
+// flag "already recorded — this would be a no-op" before the officer
+// commits (sim feedback 2026-09-09). Best-effort at the call site: a
+// failure here (older site without the GET route, offline) just means no
+// pre-warning, not a blocked submit.
+func (a *App) CheckAttendanceRecorded(activity string, occurredAt string) (officerapi.AttendanceCheck, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return officerapi.AttendanceCheck{}, err
+	}
+	return client.CheckAttendance(a.ctx, activity, occurredAt)
+}
+
 func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string) (officerapi.AttendanceResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
