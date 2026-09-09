@@ -238,6 +238,13 @@ func (a *App) GetLogPath() string {
 	return a.logPath
 }
 
+// AppVersion is the running build's version string — "vX.Y.Z" for a
+// tagged release (ldflags -X main.Version), "dev" for a local build.
+// Shown at the foot of the Settings screen.
+func (a *App) AppVersion() string {
+	return Version
+}
+
 // GameDirInfo is what the Settings screen renders after the officer picks
 // their EverQuest folder: the folder itself, every character log found
 // under it, and which one the app is now following (the most recently

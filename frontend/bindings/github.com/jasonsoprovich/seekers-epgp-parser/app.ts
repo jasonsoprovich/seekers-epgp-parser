@@ -32,6 +32,15 @@ export function AllowQuit(): $CancellablePromise<boolean> {
 }
 
 /**
+ * AppVersion is the running build's version string — "vX.Y.Z" for a
+ * tagged release (ldflags -X main.Version), "dev" for a local build.
+ * Shown at the foot of the Settings screen.
+ */
+export function AppVersion(): $CancellablePromise<string> {
+    return $Call.ByID(1970741496);
+}
+
+/**
  * CaptureAttendance re-reads the log file and returns the MOST RECENT
  * "/who" or "/who guild" snapshot (both produce the same "Players on
  * EverQuest:" block parse.ParseAttendance reads) — a raid night can have

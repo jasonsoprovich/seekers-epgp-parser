@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Events } from "@wailsio/runtime";
 import {
+  AppVersion,
   DetectedLogs,
   FetchGuildSettings,
   GetLogPath,
@@ -37,6 +38,7 @@ export function SettingsPanel({
   const [pending, setPending] = useState(false);
   const [guildSettings, setGuildSettings] = useState<GuildSettings | null>(null);
   const [guildSettingsError, setGuildSettingsError] = useState<string | null>(null);
+  const [version, setVersion] = useState("");
 
   useEffect(() => {
     GetSettings().then((s) => {
@@ -46,6 +48,7 @@ export function SettingsPanel({
       setAutoDetectBidsState(s.autoDetectBids ?? true);
     });
     GetLogPath().then(setLogPath);
+    AppVersion().then(setVersion).catch(() => {});
     refreshDetectedLogs();
     refreshGuildSettings();
   }, []);
@@ -321,6 +324,8 @@ export function SettingsPanel({
           guildSettingsError && <div className="error">Couldn&apos;t load guild settings: {guildSettingsError}</div>
         )}
       </section>
+
+      <p className="app-version">seekers-epgp-parser {version || "—"}</p>
     </div>
   );
 }
