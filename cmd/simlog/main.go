@@ -15,8 +15,23 @@
 //	go run ./cmd/simlog --log ~/Downloads/testlogs.txt   # append to an existing file instead
 //	go run ./cmd/simlog --switch-to Ammaru      # after the round, make the alt's log newest
 //
+// Multi-item run (post-live-test-1 LT-33 sim — several live cards in one
+// session, paced so the officer can End Round & Submit each before the
+// next auto-detect fires):
+//
+//	go run ./cmd/simlog --items "Sword of Skyfire,Cloak of Flames,Ring of the Ancients" \
+//	    --item-gap 90s --who 1 --who-tail 1 --bids 12
+//
+// Each item is a distinct name, so each "send tells" auto-starts a NEW
+// round (isSameRoundItem only merges the SAME name). --item-gap is the
+// pause after a round's last bid before the next item announces —
+// size it to how long you need to End Round → Determine Winner → Submit.
+// --who-tail emits more /who blocks after the last item, so a start /
+// mid / end attendance set spans the whole run.
+//
 // Point the app at --game-dir first (Settings → Select EverQuest Folder),
-// with SEEKERS_TRACKER_URL set to a local wrangler dev instance.
+// with SEEKERS_TRACKER_URL set to a local wrangler dev instance (omit it
+// to run against the live site).
 package main
 
 import (
@@ -88,12 +103,15 @@ func main() {
 		server       = flag.String("server", "pq.proj", "server shortname in the log filename")
 		altCharacter = flag.String("alt-character", "Ammaru", "a second character to seed an older log for, so auto-detect has a choice")
 		switchTo     = flag.String("switch-to", "", "after the round, write chatter to this character's log so it becomes the newest (tests the post-round swap)")
-		item         = flag.String("item", "Soul Essence of Aten Ha Ra", "item being bid on")
-		nBids        = flag.Int("bids", 15, "how many member bids to send")
+		item         = flag.String("item", "Soul Essence of Aten Ha Ra", "item being bid on (single-item run)")
+		itemsCSV     = flag.String("items", "", "comma-separated item names — runs one bid round per item in sequence, --item-gap apart. Overrides --item.")
+		itemGap      = flag.Duration("item-gap", 90*time.Second, "pause after a round's last bid before the next --items entry announces (size it to how long you need to End Round & Submit)")
+		nBids        = flag.Int("bids", 15, "how many member bids to send per item")
 		interval     = flag.Duration("interval", 3*time.Second, "average gap between bids (jittered ±1s)")
-		warmup       = flag.Duration("warmup", 20*time.Second, "idle chatter before the announcement, so the watcher is armed")
+		warmup       = flag.Duration("warmup", 20*time.Second, "idle chatter before the first announcement, so the watcher is armed")
 		withDecoys   = flag.Bool("decoys", true, "interleave off-topic tells that must be ignored")
-		whoCount     = flag.Int("who", 0, "emit this many /who guild snapshots first (each in a different zone with a slightly different roster) — for testing that Attendance captures only the latest. Use with --bids 0 for an attendance-only run.")
+		whoCount     = flag.Int("who", 0, "emit this many /who guild snapshots BEFORE the bid rounds (each a different zone / growing roster) — tests Attendance's 'capture only the latest' + the no-new-/who dedupe. Use with --bids 0 for an attendance-only run.")
+		whoTail      = flag.Int("who-tail", 0, "emit this many more /who snapshots AFTER the last bid round — so a start/mid/end attendance set spans the whole session")
 		namesCSV     = flag.String("names", "", "comma-separated bidder names (default: baked-in real roster)")
 		appendMode   = flag.Bool("append", false, "keep the existing log contents (default: truncate it first, so each run is a clean raid — re-running without this used to make the parser re-ingest the previous run's announcement + bids)")
 		dryRun       = flag.Bool("dry-run", false, "print lines instead of writing them")
@@ -149,7 +167,13 @@ func main() {
 		mode = "dry-run"
 	}
 	w := &writer{path: target, dryRun: *dryRun}
-	fmt.Printf("log file : %s  (%s)\ncharacter: %s\nitem     : %q\nbidders  : %d\n\n", target, mode, *character, *item, *nBids)
+
+	// Resolve the item list. --items (CSV) wins; otherwise the single --item.
+	items := splitTrim(*itemsCSV)
+	if len(items) == 0 {
+		items = []string{*item}
+	}
+	fmt.Printf("log file : %s  (%s)\ncharacter: %s\nitems    : %v\nbids/item: %d\n\n", target, mode, *character, items, *nBids)
 
 	if *whoCount > 0 {
 		emitWhoRounds(w, bidders, *whoCount)
@@ -157,12 +181,13 @@ func main() {
 	}
 
 	if *nBids <= 0 {
-		fmt.Println("\n>>> --bids 0 — attendance only. Capture it on the Attendance tab (it takes the LAST /who).")
+		fmt.Println("\n>>> --bids 0 — attendance only. Capture it on the Attendance tab.")
+		fmt.Println(">>> Re-capture with NO new /who → the app should say \"No new /who snapshots\" (dedupe by timestamp).")
 		return
 	}
 
 	// Warm-up: prove non-bid lines don't trigger a round, and give the
-	// officer time to have the Bids tab open.
+	// officer time to have the Bids tab open. Once, before the first item.
 	fmt.Printf("warming up for %s (idle chatter)…\n", *warmup)
 	warmDeadline := time.Now().Add(*warmup)
 	for i := 0; time.Now().Before(warmDeadline); i++ {
@@ -170,48 +195,20 @@ func main() {
 		time.Sleep(4 * time.Second)
 	}
 
-	// The announcement — this is what auto-starts the round.
-	fmt.Println("\n>>> announcing — the app's Bids tab should flip to LIVE now")
-	w.line(fmt.Sprintf("You say to your guild, '%s send tells'", *item))
-	time.Sleep(2 * time.Second)
-
-	// The bids.
-	supersedeAt := 0                // first bidder re-bids near the end
-	ambiguousAt := min(7, *nBids-1) // one bare "10"
-	lastCallAt := *nBids / 2
-
-	for i := 0; i < *nBids; i++ {
-		if i == lastCallAt {
-			w.line(fmt.Sprintf("You say to your guild, '%s send tells - last call'", *item))
-			time.Sleep(sleepJitter(*interval))
+	for n, it := range items {
+		fmt.Printf("\n========== item %d/%d: %q ==========\n", n+1, len(items), it)
+		runBidRound(w, it, bidders, *nBids, *interval, *withDecoys)
+		fmt.Println(">>> bids done — End Round & Review → Determine Winner → Submit.")
+		if n < len(items)-1 {
+			fmt.Printf(">>> next item announces in %s — finish this one first.\n", *itemGap)
+			time.Sleep(*itemGap)
 		}
-
-		who := bidders[i%len(bidders)]
-		var msg string
-		switch i {
-		case ambiguousAt:
-			msg = "10" // Low Bid / Alt Loot — must land as "needs review"
-		default:
-			t := bidTemplates[i%len(bidTemplates)]
-			if strings.Contains(t, "%s") {
-				msg = fmt.Sprintf(t, *item)
-			} else {
-				msg = t
-			}
-		}
-		w.line(fmt.Sprintf("%s tells you, '%s'", who, msg))
-
-		if *withDecoys && i > 0 && i%4 == 0 {
-			d := decoys[(i/4-1)%len(decoys)]
-			w.line(fmt.Sprintf("%s tells you, '%s'", d.who, d.msg))
-		}
-		time.Sleep(sleepJitter(*interval))
 	}
 
-	// The first bidder changes their mind — should show a "superseded" badge.
-	w.line(fmt.Sprintf("%s tells you, '%s actually low'", bidders[supersedeAt], *item))
-
-	fmt.Println("\n>>> bids done — click End Round & Review in the app, then Determine Winner → Submit")
+	if *whoTail > 0 {
+		fmt.Println("\n>>> tail /who snapshots (end-of-raid attendance)")
+		emitWhoRounds(w, bidders, *whoTail)
+	}
 
 	if *switchTo != "" && *logFile == "" {
 		time.Sleep(3 * time.Second)
@@ -224,6 +221,53 @@ func main() {
 		}
 		fmt.Printf("\n>>> wrote to %s — it's now the newest log; after End Round the app should follow it to %s\n", altPath, *switchTo)
 	}
+}
+
+// runBidRound plays one item: the officer's own "<item> send tells"
+// announcement (auto-starts a round), nBids member tells paced `interval`
+// apart with a mid-round "- last call", one ambiguous bare "10" (lands as
+// "needs review"), optional decoy tells, and a trailing "changed my mind"
+// re-bid (shows a superseded badge). Same shape as the original
+// single-item body — just callable per item.
+func runBidRound(w *writer, item string, bidders []string, nBids int, interval time.Duration, withDecoys bool) {
+	fmt.Println(">>> announcing — the app's Bids tab should flip to LIVE, a new /live-bids card should appear")
+	w.line(fmt.Sprintf("You say to your guild, '%s send tells'", item))
+	time.Sleep(2 * time.Second)
+
+	supersedeAt := 0               // first bidder re-bids near the end
+	ambiguousAt := min(7, nBids-1) // one bare "10"
+	lastCallAt := nBids / 2
+
+	for i := 0; i < nBids; i++ {
+		if i == lastCallAt {
+			w.line(fmt.Sprintf("You say to your guild, '%s send tells - last call'", item))
+			time.Sleep(sleepJitter(interval))
+		}
+
+		who := bidders[i%len(bidders)]
+		var msg string
+		switch i {
+		case ambiguousAt:
+			msg = "10" // Low Bid / Alt Loot — must land as "needs review"
+		default:
+			t := bidTemplates[i%len(bidTemplates)]
+			if strings.Contains(t, "%s") {
+				msg = fmt.Sprintf(t, item)
+			} else {
+				msg = t
+			}
+		}
+		w.line(fmt.Sprintf("%s tells you, '%s'", who, msg))
+
+		if withDecoys && i > 0 && i%4 == 0 {
+			d := decoys[(i/4-1)%len(decoys)]
+			w.line(fmt.Sprintf("%s tells you, '%s'", d.who, d.msg))
+		}
+		time.Sleep(sleepJitter(interval))
+	}
+
+	// The first bidder changes their mind — should show a "superseded" badge.
+	w.line(fmt.Sprintf("%s tells you, '%s actually low'", bidders[supersedeAt], item))
 }
 
 type writer struct {
