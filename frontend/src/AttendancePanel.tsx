@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Clipboard } from "@wailsio/runtime";
 import {
+  CheckAttendanceRecorded,
   FetchGuildSettings,
   ListAttendanceSnapshots,
   SetAttendanceUnsaved,
@@ -111,6 +112,10 @@ export function AttendancePanel() {
   const [lookbackHours, setLookbackHours] = useState<number>(loadLookback);
   const [raidName, setRaidName] = useState<string>(() => window.localStorage.getItem(RAIDNAME_KEY) ?? "");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Pre-submit "already in the ledger?" results, keyed by capture id.
+  // "checking" while the probe is in flight; absent = not checked / probe
+  // failed (no warning shown, submit still allowed).
+  const [dupChecks, setDupChecks] = useState<Record<string, { count: number } | "checking">>({});
   const roster = useRoster();
 
   useEffect(() => saveCaptures(captures), [captures]);
@@ -246,12 +251,36 @@ export function AttendancePanel() {
   }
 
   const toSubmit = captures.filter((c) => c.assignment !== "" && !c.submitted);
+  // Captures that would actually write something — not-yet-checked and
+  // still-checking count as "new" so the button label isn't alarmist mid-probe.
+  const dupNewCount = toSubmit.filter((c) => {
+    const ch = dupChecks[c.id];
+    return !ch || ch === "checking" || ch.count === 0;
+  }).length;
 
-  function onSubmitClick() {
+  async function onSubmitClick() {
     if (toSubmit.length === 0) return;
     setError(null);
     setSubmitSummary(null);
+    // Probe each assigned capture against the ledger so the dialog can flag
+    // "already recorded — this would be a no-op" before the officer
+    // commits. Best-effort: a failed probe just shows no warning.
+    setDupChecks(Object.fromEntries(toSubmit.map((c) => [c.id, "checking" as const])));
     setConfirmOpen(true);
+    await Promise.all(
+      toSubmit.map(async (c) => {
+        try {
+          const res = await CheckAttendanceRecorded(c.assignment, c.occurredAt);
+          setDupChecks((prev) => ({ ...prev, [c.id]: { count: res.count } }));
+        } catch {
+          setDupChecks((prev) => {
+            const next = { ...prev };
+            delete next[c.id];
+            return next;
+          });
+        }
+      }),
+    );
   }
 
   async function doSubmit() {
@@ -305,6 +334,7 @@ export function AttendancePanel() {
     } finally {
       setSubmitting(false);
       setConfirmOpen(false);
+      setDupChecks({});
     }
   }
 
@@ -393,8 +423,12 @@ export function AttendancePanel() {
                     {short && <span style={{ color: "#f87171" }}> · {names.length} of {minAttendance} required</span>}
                   </span>
                   {c.submitted ? (
-                    <span className="success" style={{ marginLeft: "auto", padding: "2px 8px" }}>
-                      ✓ Recorded as {c.submitted.activity} ({c.submitted.inserted}){c.submitted.note ? ` —${c.submitted.note}` : ""}
+                    <span
+                      className={c.submitted.inserted === 0 ? "warning" : "success"}
+                      style={{ marginLeft: "auto", padding: "2px 8px" }}
+                    >
+                      {c.submitted.inserted === 0 ? "⚠ Nothing new" : "✓ Recorded"} — {c.submitted.activity} (
+                      {c.submitted.inserted} new){c.submitted.note ? ` —${c.submitted.note}` : ""}
                     </span>
                   ) : (
                     <select
@@ -504,9 +538,16 @@ export function AttendancePanel() {
       <ConfirmDialog
         open={confirmOpen}
         title="Submit attendance to the site?"
-        confirmLabel={`Submit ${toSubmit.length} capture(s)`}
+        confirmLabel={
+          dupNewCount === 0 && Object.keys(dupChecks).length > 0
+            ? "Submit anyway"
+            : `Submit ${dupNewCount || toSubmit.length} capture(s)`
+        }
         busy={submitting}
-        onCancel={() => setConfirmOpen(false)}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setDupChecks({});
+        }}
         onConfirm={() => void doSubmit()}
         body={
           <>
@@ -514,15 +555,27 @@ export function AttendancePanel() {
             <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
               {toSubmit.map((c) => {
                 const n = c.rows.map((r) => r.name.trim()).filter(Boolean).length;
+                const check = dupChecks[c.id];
                 return (
                   <li key={c.id}>
                     <strong>{c.assignment}</strong> — {fmtTime(c.occurredAt)}
                     {c.zone ? ` · ${c.zone}` : ""} · {n} name(s)
                     {n < effectiveMin ? <span style={{ color: "#fbbf24" }}> · under {effectiveMin}</span> : null}
+                    {check === "checking" && <span style={{ color: "#9ca3af" }}> · checking…</span>}
+                    {check && check !== "checking" && check.count > 0 && (
+                      <span style={{ color: "#fbbf24" }}> · ⚠ already recorded ({check.count} rows) — this would be a no-op</span>
+                    )}
+                    {check && check !== "checking" && check.count === 0 && <span style={{ color: "#10b981" }}> · new</span>}
                   </li>
                 );
               })}
             </ul>
+            {dupNewCount === 0 && Object.keys(dupChecks).length > 0 && (
+              <p style={{ margin: "0 0 8px", color: "#fbbf24" }}>
+                Every capture here is already in the database. Submitting again writes nothing (the site dedupes by
+                player + activity + time). Only do this if you deliberately reversed the raid first.
+              </p>
+            )}
             {raidName.trim() ? (
               <p style={{ margin: 0 }}>
                 Raid name: <strong>{raidName.trim()}</strong> (only applied if the night isn't named yet).
