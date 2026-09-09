@@ -1,32 +1,40 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoster } from "./useRoster";
 
-// Type-to-filter replacement for NoMatchSelect's raw <select>, used in the
-// Bids review table's "Main" column (2026-09-09 sim feedback: the officer
-// wanted both name fields to behave like text inputs). The played
-// character (`playedName`) is typed in the row's first field; this field
-// resolves who the GP actually goes to:
-//   - the officer typed the toon slightly wrong -> pick the real character
-//     (link as-is, no DB write)
-//   - it's a genuinely new alt -> attach it under a main (creates the row)
-//   - it's a new main -> add it as one (creates the row)
-// Same three outcomes as NoMatchSelect; only the control changed.
+// Type-to-filter character picker used in the Bids review table, in two
+// spots:
+//   - a manual row's "Character" field (2026-09-09 feedback: this should
+//     be a pick-from-roster control like the Attendance manual add, not a
+//     free-text box) — omit `playedName`, the typed text drives the
+//     "+ add as new" options and the picked name becomes the bid's
+//     character.
+//   - the "Main" field of a row whose captured tell doesn't match the
+//     roster — pass the captured `playedName`; picking resolves who the
+//     GP goes to.
+// Either way the three outcomes are the same: link to an existing
+// character (no DB write), attach a new alt under a main, or add a new
+// main.
 export function MainResolveCombobox({
-  playedName,
+  playedName = "",
+  value,
   roster,
   onResolved,
   onError,
 }: {
-  playedName: string;
+  playedName?: string;
+  value?: string;
   roster: ReturnType<typeof useRoster>;
   onResolved: (canonicalName: string) => void;
   onError: (message: string) => void;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => value ?? "");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const trimmedPlayed = playedName.trim();
+
+  // The name a "+ add as new alt/main" option would create: the captured
+  // tell when this is a Main-column picker, otherwise whatever's typed.
+  const nameForNew = (playedName.trim() || query.trim()).trim();
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -42,30 +50,34 @@ export function MainResolveCombobox({
     const match = (s: string) => q === "" || s.toLowerCase().includes(q);
     const out: Option[] = [];
     for (const c of roster.characters) {
-      if (match(c.name)) out.push({ key: `e${c.id}`, label: `${c.name} — this is the character (fix typo)`, value: `existing:${c.name}` });
+      if (match(c.name)) out.push({ key: `e${c.id}`, label: c.name, value: `existing:${c.name}` });
     }
-    if (trimmedPlayed) {
+    if (nameForNew) {
       for (const m of roster.mains) {
-        if (match(m.name)) out.push({ key: `a${m.id}`, label: `+ attach "${trimmedPlayed}" as a new alt of ${m.name}`, value: `alt:${m.id}` });
+        if (match(m.name)) out.push({ key: `a${m.id}`, label: `+ "${nameForNew}" as a new alt of ${m.name}`, value: `alt:${m.id}` });
       }
-      if (match(trimmedPlayed)) out.push({ key: "nm", label: `+ add "${trimmedPlayed}" as a new main`, value: "new-main" });
+      out.push({ key: "nm", label: `+ "${nameForNew}" as a new main`, value: "new-main" });
     }
     return out.slice(0, 40);
-  }, [query, roster.characters, roster.mains, trimmedPlayed]);
+  }, [query, roster.characters, roster.mains, nameForNew]);
 
   async function choose(value: string) {
     setOpen(false);
     if (value.startsWith("existing:")) {
-      onResolved(value.slice("existing:".length));
+      const name = value.slice("existing:".length);
+      setQuery(name);
+      onResolved(name);
       return;
     }
     setBusy(true);
     try {
       if (value === "new-main") {
-        const created = await roster.createCharacter(trimmedPlayed, null);
+        const created = await roster.createCharacter(nameForNew, null);
+        setQuery(created.name);
         onResolved(created.name);
       } else if (value.startsWith("alt:")) {
-        const created = await roster.createCharacter(trimmedPlayed, Number(value.slice("alt:".length)));
+        const created = await roster.createCharacter(nameForNew, Number(value.slice("alt:".length)));
+        setQuery(created.name);
         onResolved(created.name);
       }
     } catch (err) {
@@ -82,7 +94,7 @@ export function MainResolveCombobox({
         className="cell-input"
         value={query}
         disabled={busy}
-        placeholder={busy ? "Saving…" : trimmedPlayed ? "assign a main…" : "enter the character first"}
+        placeholder={busy ? "Saving…" : "pick a character…"}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -90,7 +102,7 @@ export function MainResolveCombobox({
         }}
         style={{ color: "#f87171", width: "100%" }}
       />
-      {open && trimmedPlayed && options.length > 0 && (
+      {open && options.length > 0 && (
         <ul
           style={{
             position: "absolute",

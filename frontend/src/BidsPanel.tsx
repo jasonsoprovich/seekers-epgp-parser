@@ -105,6 +105,7 @@ export function BidsPanel() {
   const [winnerCount, setWinnerCount] = useState(1);
   const [gratsCopied, setGratsCopied] = useState(false);
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   // A "send tells" the watcher detected while a round is already under
   // way — shown as a switch/dismiss banner rather than clobbering the
   // in-progress round. Null when there's nothing pending.
@@ -307,6 +308,19 @@ export function BidsPanel() {
     setSubmitResult(null);
     setPendingAnnouncement(null);
     setAutoStarted(null);
+    setClearConfirmOpen(false);
+  }
+
+  // Clear throws away an in-progress round with no undo (2026-09-09
+  // feedback). Confirm first when there's actually a round to lose;
+  // when it's just dismissing stale banners (phase idle), skip straight
+  // through.
+  function onClearClick() {
+    if (phase === "idle") {
+      onClear();
+      return;
+    }
+    setClearConfirmOpen(true);
   }
 
   const canClear = phase !== "idle" || error !== null || submitResult !== null || pendingAnnouncement !== null || dupPrompt !== null;
@@ -539,7 +553,7 @@ export function BidsPanel() {
     <div>
       <div className="panel-header">
         <h2>Bids</h2>
-        <button className="secondary" onClick={onClear} disabled={submitting || pending || !canClear}>
+        <button className="secondary" onClick={onClearClick} disabled={submitting || pending || !canClear}>
           Clear
         </button>
       </div>
@@ -716,7 +730,7 @@ export function BidsPanel() {
           >
             {submitting ? "Submitting…" : "Submit to site"}
           </button>
-          <button className="secondary" onClick={onClear} disabled={submitting}>
+          <button className="secondary" onClick={onClearClick} disabled={submitting}>
             Clear
           </button>
         </div>
@@ -727,17 +741,11 @@ export function BidsPanel() {
           <button className="secondary" onClick={addManualRow}>
             {manualRound ? "+ Add bidder" : "+ Add bid manually"}
           </button>
-          <button className="secondary" onClick={onClear} disabled={submitting}>
+          <button className="secondary" onClick={onClearClick} disabled={submitting}>
             Clear
           </button>
         </div>
       )}
-
-      <datalist id="bid-known-characters">
-        {roster.characters.map((c) => (
-          <option key={c.id} value={c.name} />
-        ))}
-      </datalist>
 
       {(phase === "live" || phase === "review") && rows.length > 0 && (
         <table className="col-fixed">
@@ -792,13 +800,16 @@ export function BidsPanel() {
                 >
                   <td onClick={r.manual && !live ? (e) => e.stopPropagation() : undefined}>
                     {r.manual && !live ? (
-                      <input
-                        type="text"
-                        className="cell-input"
-                        list="bid-known-characters"
-                        value={r.displayName}
-                        placeholder="pick or type a character"
-                        onChange={(e) => setManualName(i, e.target.value)}
+                      // Pick-from-roster combobox (2026-09-09 feedback:
+                      // match the Attendance manual add). Picking an
+                      // existing character sets the bid's character and the
+                      // Main column auto-fills; a typed name that isn't in
+                      // the roster offers "+ as a new alt/main".
+                      <MainResolveCombobox
+                        value={r.characterName}
+                        roster={roster}
+                        onResolved={(name) => setManualName(i, name)}
+                        onError={setError}
                       />
                     ) : (
                       r.displayName
@@ -886,6 +897,27 @@ export function BidsPanel() {
             <p style={{ margin: 0, color: "#9ca3af" }}>
               This updates the live-bids board, writes the ledger rows, and copies the grats line to your clipboard.
             </p>
+          </>
+        }
+      />
+
+      <ConfirmDialog
+        open={clearConfirmOpen}
+        title="Discard this round?"
+        confirmLabel="Discard round"
+        onCancel={() => setClearConfirmOpen(false)}
+        onConfirm={onClear}
+        body={
+          <>
+            <p style={{ margin: "0 0 8px" }}>
+              This throws away{" "}
+              <strong>
+                {capturedItem ? `the "${capturedItem}" round` : "the current round"}
+                {rows.length > 0 ? ` (${rows.length} bid${rows.length === 1 ? "" : "s"})` : ""}
+              </strong>{" "}
+              and clears it from the live-bids board.
+            </p>
+            <p style={{ margin: 0, color: "#fbbf24" }}>There is no undo — captured bids can&apos;t be recovered.</p>
           </>
         }
       />

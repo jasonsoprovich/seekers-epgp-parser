@@ -234,7 +234,10 @@ export function AttendancePanel() {
     patch(id, (c) => ({ ...c, rows: c.rows.filter((_, i) => i !== index) }));
   }
   function addRow(id: string) {
-    patch(id, (c) => ({ ...c, rows: [...c.rows, { name: "", displayName: "" }] }));
+    // Prepended, not appended — a just-added blank row belongs at the top
+    // where it's visible, not below a 20-name roster (2026-09-09 feedback,
+    // same call as the Bids manual row).
+    patch(id, (c) => ({ ...c, rows: [{ name: "", displayName: "" }, ...c.rows] }));
   }
   function removeCapture(id: string) {
     setCaptures((prev) => prev.filter((c) => c.id !== id));
