@@ -9,6 +9,7 @@ import {
   SubmitBids,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
@@ -103,6 +104,7 @@ export function BidsPanel() {
   const [tieWarning, setTieWarning] = useState<string | null>(null);
   const [winnerCount, setWinnerCount] = useState(1);
   const [gratsCopied, setGratsCopied] = useState(false);
+  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
   // A "send tells" the watcher detected while a round is already under
   // way — shown as a switch/dismiss banner rather than clobbering the
   // in-progress round. Null when there's nothing pending.
@@ -140,6 +142,27 @@ export function BidsPanel() {
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+
+  // Streamline (2026-09-09): entering review auto-runs Determine Winner so
+  // the common case is End Round & Review -> glance -> Submit, with no
+  // separate click. The officer can still re-run it (after a manual edit)
+  // or check boxes by hand; a tie/ambiguity leaves nothing picked and
+  // shows the same warning as before. Skipped for manual rounds — their
+  // rows start blank. Ref-guarded so it fires once per review, not on
+  // every row edit within review.
+  const autoPickedRef = useRef(false);
+  useEffect(() => {
+    if (phase !== "review") {
+      autoPickedRef.current = false;
+      return;
+    }
+    if (manualRound || autoPickedRef.current || rows.length === 0) return;
+    autoPickedRef.current = true;
+    void determineWinner();
+    // determineWinner is a stable hoisted declaration; rows are read fresh
+    // when it runs (after this render commits).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, manualRound, rows.length]);
 
   // Feed the close-confirmation guard (LT-24): a round that's live or in
   // review is work that hasn't hit the site yet.
@@ -407,6 +430,30 @@ export function BidsPanel() {
     setGratsCopied(true);
   }
 
+  // Same client-side checks onSubmit runs, pulled out so "Submit to site"
+  // can validate before popping the confirm dialog rather than after.
+  function validateForSubmit(): string | null {
+    if (rows.length === 0) return "No bids to submit.";
+    if (!capturedItem.trim()) return "Name the item this round is for before submitting.";
+    const activeRows = rows.filter((_, i) => !supersededSet.has(i));
+    const invalid = activeRows.filter((r) => !TIERS.includes(r.tier));
+    if (invalid.length > 0) return `Pick a tier for: ${invalid.map((r) => r.characterName || "(unnamed row)").join(", ")} before submitting.`;
+    if (activeRows.filter((r) => r.winner).length === 0)
+      return "Mark at least one row as the winner before submitting — click Determine Winner or check one manually.";
+    if (activeRows.some((r) => !r.characterName.trim())) return "Fill in the character name for every manually added row, or remove it.";
+    return null;
+  }
+
+  function onSubmitClick() {
+    const err = validateForSubmit();
+    if (err) {
+      setError(err);
+      return;
+    }
+    setError(null);
+    setSubmitConfirmOpen(true);
+  }
+
   async function onSubmit(confirmDuplicate = false) {
     if (rows.length === 0) return;
     if (!capturedItem.trim()) {
@@ -440,10 +487,23 @@ export function BidsPanel() {
       const result = await SubmitBids(capturedItem, entries, confirmDuplicate);
       // Site rejected it as a likely double-click of a same-item finalize
       // within 12h. Not an error — offer "Record anyway" (a boss really can
-      // drop the same item twice a night).
+      // drop the same item twice a night). Close the confirm dialog so the
+      // "Record anyway" banner is what's on screen.
       if (result.duplicate) {
+        setSubmitConfirmOpen(false);
         setDupPrompt(result.duplicateMessage || `"${capturedItem}" was already recorded recently.`);
         return;
+      }
+      // Streamline (2026-09-09): copy the grats line automatically on a
+      // successful submit — it used to be a separate button the officer had
+      // to remember. Compute it before resetToIdle() clears capturedItem.
+      const grats = gratsMessage(activeWinners);
+      let gratsNote = "";
+      try {
+        await Clipboard.SetText(grats);
+        gratsNote = ` — "${grats}" copied to clipboard.`;
+      } catch {
+        gratsNote = ` — couldn't copy the grats line; it's: ${grats}`;
       }
       const notes: string[] = [];
       const unmatched = result.unmatched ?? [];
@@ -454,7 +514,7 @@ export function BidsPanel() {
       if (supersededCount > 0) notes.push(`${supersededCount} superseded bid(s) not sent`);
       const lostCount = result.inserted - activeWinners.length;
       setSubmitResult(
-        `Recorded ${result.inserted} bid(s) on ${capturedItem} — ${activeWinners.length} won (GP charged), ${lostCount} lost (no GP charge).${notes.length > 0 ? " — " + notes.join("; ") : ""}`,
+        `Recorded ${result.inserted} bid(s) on ${capturedItem} — ${activeWinners.length} won (GP charged), ${lostCount} lost (no GP charge).${notes.length > 0 ? " — " + notes.join("; ") : ""}${gratsNote}`,
       );
       if (result.inserted > 0) setKnownItems((prev) => (prev.includes(capturedItem) ? prev : [...prev, capturedItem].sort()));
       resetToIdle();
@@ -462,6 +522,7 @@ export function BidsPanel() {
       setError(String(err));
     } finally {
       setSubmitting(false);
+      setSubmitConfirmOpen(false);
     }
   }
 
@@ -507,9 +568,14 @@ export function BidsPanel() {
           <div>
             <strong>Winner{winners.length > 1 ? "s" : ""}:</strong> {gratsMessage(winners)}
           </div>
-          <button className="secondary" onClick={onCopyGrats}>
-            {gratsCopied ? "Copied" : "Copy Grats Message"}
-          </button>
+          <span style={{ color: "#9ca3af", fontSize: 12, flexShrink: 0 }}>
+            {gratsCopied ? "Copied ✓" : "Copies to clipboard on Submit"}
+            {!gratsCopied && (
+              <button className="secondary" style={{ marginLeft: 8 }} onClick={onCopyGrats}>
+                Copy now
+              </button>
+            )}
+          </span>
         </div>
       )}
 
@@ -625,17 +691,22 @@ export function BidsPanel() {
               title="How many winners to pick — more than 1 for a duplicate drop"
             />
           </label>
-          <button className="secondary" onClick={() => void determineWinner()} disabled={determining}>
-            {determining ? "Checking priority…" : `Determine Winner${winnerCount > 1 ? "s" : ""}`}
+          <button
+            className="secondary"
+            onClick={() => void determineWinner()}
+            disabled={determining}
+            title="Auto-picks the winner by tier then priority. Runs once automatically when you End Round & Review — click again after any manual edit."
+          >
+            {determining ? "Checking priority…" : `Re-check Winner${winnerCount > 1 ? "s" : ""}`}
           </button>
           <button className="secondary" onClick={addManualRow} title={manualRound ? "Add another bidder" : "Add a bid the capture missed — before you Submit"}>
             {manualRound ? "+ Add bidder" : "+ Add bid manually"}
           </button>
           <button
             className="primary"
-            onClick={() => void onSubmit()}
+            onClick={onSubmitClick}
             disabled={submitting || winners.length === 0}
-            title={winners.length === 0 ? "Pick a winner first — Determine Winner, or click a row" : undefined}
+            title={winners.length === 0 ? "Pick a winner first — Re-check Winner, or click a row" : undefined}
           >
             {submitting ? "Submitting…" : "Submit to site"}
           </button>
@@ -787,6 +858,29 @@ export function BidsPanel() {
       {phase === "idle" && !error && !autoStarted && (
         <div className="empty">Name the item and click Capture Bids, or just announce "&lt;item&gt; send tells" in game.</div>
       )}
+
+      <ConfirmDialog
+        open={submitConfirmOpen}
+        title="Submit this round to the site?"
+        confirmLabel="Submit & charge GP"
+        busy={submitting}
+        onCancel={() => setSubmitConfirmOpen(false)}
+        onConfirm={() => void onSubmit()}
+        body={
+          <>
+            <p style={{ margin: "0 0 8px" }}>
+              <strong>{capturedItem || "(unnamed item)"}</strong> — recording {rows.filter((_, i) => !supersededSet.has(i)).length} bid(s).
+            </p>
+            <p style={{ margin: "0 0 8px" }}>
+              Winner{winners.length > 1 ? "s" : ""} (GP charged):{" "}
+              <strong>{winners.map((r) => r.characterName).join(", ") || "—"}</strong>
+            </p>
+            <p style={{ margin: 0, color: "#9ca3af" }}>
+              This updates the live-bids board, writes the ledger rows, and copies the grats line to your clipboard.
+            </p>
+          </>
+        }
+      />
     </div>
   );
 }
