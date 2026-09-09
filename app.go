@@ -700,19 +700,25 @@ func (a *App) CaptureAttendance() (AttendanceResult, error) {
 	}, nil
 }
 
-// attendanceLookback bounds ListAttendanceSnapshots to the current raid
-// night — the followed log holds months of "/who" blocks and the officer
-// only cares about tonight's.
-const attendanceLookback = 12 * time.Hour
+// defaultAttendanceLookbackHours bounds ListAttendanceSnapshots when the
+// caller doesn't pass a window — the followed log holds months of "/who"
+// blocks and the officer usually only cares about tonight's. The frontend
+// lets them widen it (doing attendance the next day, a weekend quest
+// timestamp) up to maxAttendanceLookbackHours.
+const (
+	defaultAttendanceLookbackHours = 12
+	maxAttendanceLookbackHours     = 72
+)
 
 // ListAttendanceSnapshots returns every "/who" / "/who guild" block in the
-// followed log from the last attendanceLookback, newest first, each as its
-// own AttendanceResult. This backs the Attendance tab's multi-capture
-// workflow (post-live-test-1 LT-21/LT-22): an officer captures at the
-// start, middle, and end of a raid, keeps them all on screen, then assigns
-// and submits the ones they want after the raid instead of mid-fight.
-// Deduped by occurredAt; per-block warnings attached to their block.
-func (a *App) ListAttendanceSnapshots() ([]AttendanceResult, error) {
+// followed log from the last `lookbackHours` (0 -> default 12h, clamped to
+// [1, 72]), newest first, each as its own AttendanceResult. This backs the
+// Attendance tab's multi-capture workflow (post-live-test-1 LT-21/LT-22):
+// an officer captures at the start, middle, and end of a raid, keeps them
+// all on screen, then assigns and submits the ones they want after the
+// raid instead of mid-fight. Deduped by occurredAt; per-block warnings
+// attached to their block.
+func (a *App) ListAttendanceSnapshots(lookbackHours int) ([]AttendanceResult, error) {
 	raw, err := a.readLog()
 	if err != nil {
 		return nil, err
@@ -722,7 +728,13 @@ func (a *App) ListAttendanceSnapshots() ([]AttendanceResult, error) {
 		return []AttendanceResult{}, errors.New("no \"/who\" or \"/who guild\" snapshot found in the log — run one of those in-game first")
 	}
 
-	cutoff := time.Now().Add(-attendanceLookback)
+	if lookbackHours <= 0 {
+		lookbackHours = defaultAttendanceLookbackHours
+	}
+	if lookbackHours > maxAttendanceLookbackHours {
+		lookbackHours = maxAttendanceLookbackHours
+	}
+	cutoff := time.Now().Add(-time.Duration(lookbackHours) * time.Hour)
 	out := make([]AttendanceResult, 0, 8)
 	seen := map[string]bool{}
 	for i := len(snapshots) - 1; i >= 0; i-- {
@@ -811,7 +823,7 @@ func (a *App) ParseAttendanceText(raw string) (AttendanceResult, error) {
 // editing/removing rows in the Attendance tab — same "submit what's on
 // screen" contract as the Copy-to-clipboard button next to it, just to the
 // site's ledger instead of the clipboard.
-func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string) (officerapi.AttendanceResponse, error) {
+func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string) (officerapi.AttendanceResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.AttendanceResponse{}, err
@@ -821,6 +833,7 @@ func (a *App) SubmitAttendance(activity string, occurredAt string, names []strin
 		OccurredAt:     occurredAt,
 		CharacterNames: names,
 		Zone:           zone,
+		RaidName:       raidName,
 	})
 }
 

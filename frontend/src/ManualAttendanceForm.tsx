@@ -133,7 +133,9 @@ export function ManualAttendanceForm() {
 
     setPending(true);
     try {
-      const resp = await SubmitAttendance(activity, iso, names, zone.trim());
+      // Raid naming is a raid-night concern — the Missed Attendance form is
+      // for one-off player-quest timestamps, so it never names a raid.
+      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "");
       const unmatched = resp.unmatched ?? [];
       const duplicates = resp.duplicates ?? [];
       const notes: string[] = [];

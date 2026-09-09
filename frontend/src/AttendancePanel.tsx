@@ -6,8 +6,27 @@ import {
   SetAttendanceUnsaved,
   SubmitAttendance,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
+
+// How far back to scan the log for "/who" blocks. 12h covers "did
+// attendance right after the raid"; the wider windows are for doing it the
+// next day, or a weekend player-quest timestamp. Server-side clamps to 72h.
+const LOOKBACK_OPTIONS = [6, 12, 24, 48] as const;
+const DEFAULT_LOOKBACK = 12;
+const LOOKBACK_KEY = "seekers.attendance.lookbackHours";
+const RAIDNAME_KEY = "seekers.attendance.raidName";
+
+// Fallback minimum used only for the "< N" badge / sort when the site's
+// min_attendance setting hasn't loaded yet. The server is still the
+// authority on whether a short capture is actually accepted.
+const FALLBACK_MIN_ATTENDANCE = 12;
+
+function loadLookback(): number {
+  const n = Number(window.localStorage.getItem(LOOKBACK_KEY));
+  return (LOOKBACK_OPTIONS as readonly number[]).includes(n) ? n : DEFAULT_LOOKBACK;
+}
 
 // `name` is the resolution/submission identity — looked up against the
 // roster and sent to the site. `displayName` is frozen at capture time (or,
@@ -89,9 +108,26 @@ export function AttendancePanel() {
   const [submitting, setSubmitting] = useState(false);
   const [submitSummary, setSubmitSummary] = useState<string | null>(null);
   const [minAttendance, setMinAttendance] = useState<number | null>(null);
+  const [lookbackHours, setLookbackHours] = useState<number>(loadLookback);
+  const [raidName, setRaidName] = useState<string>(() => window.localStorage.getItem(RAIDNAME_KEY) ?? "");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const roster = useRoster();
 
   useEffect(() => saveCaptures(captures), [captures]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LOOKBACK_KEY, String(lookbackHours));
+    } catch {
+      // best-effort
+    }
+  }, [lookbackHours]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(RAIDNAME_KEY, raidName);
+    } catch {
+      // best-effort
+    }
+  }, [raidName]);
 
   // Feed the close-confirmation guard (LT-24): any capture that hasn't been
   // submitted is unsent work.
@@ -115,12 +151,31 @@ export function AttendancePanel() {
 
   const assignedCount = captures.filter((c) => c.assignment !== "" && !c.submitted).length;
 
+  // Threshold for the "< N" badge and the raid-sized-first sort. Server is
+  // still the authority on acceptance — this is just to keep small `/who
+  // Name` lookups from burying the real start/mid/end captures.
+  const effectiveMin = minAttendance ?? FALLBACK_MIN_ATTENDANCE;
+  const nameCount = (c: Capture) => c.rows.map((r) => r.name.trim()).filter(Boolean).length;
+  const isRaidSized = (c: Capture) => nameCount(c) >= effectiveMin;
+
+  // Raid-sized captures first, then newest-first within each group. Sub-12
+  // captures stay visible (the officer may still need to add names to one
+  // by hand) — just sorted below the full ones and badged.
+  function sortCaptures(list: Capture[]): Capture[] {
+    return [...list].sort((a, b) => {
+      const ra = isRaidSized(a) ? 0 : 1;
+      const rb = isRaidSized(b) ? 0 : 1;
+      if (ra !== rb) return ra - rb;
+      return b.occurredAt.localeCompare(a.occurredAt);
+    });
+  }
+
   async function onCapture() {
     setCapturing(true);
     setError(null);
     setSubmitSummary(null);
     try {
-      const snaps = (await ListAttendanceSnapshots()) ?? [];
+      const snaps = (await ListAttendanceSnapshots(lookbackHours)) ?? [];
       setCaptures((prev) => {
         const byId = new Map(prev.map((c) => [c.id, c]));
         let added = 0;
@@ -137,9 +192,8 @@ export function AttendancePanel() {
             expanded: false,
           });
         }
-        if (added === 0) setError("No new /who snapshots in the log since the ones already listed.");
-        // Newest first.
-        return [...byId.values()].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+        if (added === 0) setError(`No new /who snapshots in the log for the last ${lookbackHours}h.`);
+        return sortCaptures([...byId.values()]);
       });
     } catch (err) {
       setError(String(err));
@@ -191,8 +245,16 @@ export function AttendancePanel() {
     await Clipboard.SetText(lines.join("\n"));
   }
 
-  async function onSubmitAssigned() {
-    const toSubmit = captures.filter((c) => c.assignment !== "" && !c.submitted);
+  const toSubmit = captures.filter((c) => c.assignment !== "" && !c.submitted);
+
+  function onSubmitClick() {
+    if (toSubmit.length === 0) return;
+    setError(null);
+    setSubmitSummary(null);
+    setConfirmOpen(true);
+  }
+
+  async function doSubmit() {
     if (toSubmit.length === 0) return;
 
     setSubmitting(true);
@@ -214,15 +276,17 @@ export function AttendancePanel() {
       if (GATED.has(c.assignment) && required !== null && names.length < required) {
         setError(`${c.assignment} (${fmtTime(c.occurredAt)}): only ${names.length} of ${required} required members — assign fixed or remove it, then submit again.`);
         setSubmitting(false);
+        setConfirmOpen(false);
         return;
       }
     }
 
+    const trimmedRaidName = raidName.trim();
     const done: string[] = [];
     try {
       for (const c of toSubmit) {
         const names = c.rows.map((r) => r.name.trim()).filter(Boolean);
-        const res = await SubmitAttendance(c.assignment, c.occurredAt, names, c.zone);
+        const res = await SubmitAttendance(c.assignment, c.occurredAt, names, c.zone, trimmedRaidName);
         const unmatched = res.unmatched ?? [];
         const duplicates = res.duplicates ?? [];
         const note =
@@ -233,24 +297,45 @@ export function AttendancePanel() {
         );
         done.push(`${c.assignment}: ${res.inserted}`);
       }
-      setSubmitSummary(`Submitted ${done.length} capture(s) — ${done.join(" · ")}. Review the notes, then Clear all when the raid's wrapped.`);
+      setSubmitSummary(
+        `Submitted ${done.length} capture(s) — ${done.join(" · ")}${trimmedRaidName ? ` · raid "${trimmedRaidName}"` : ""}. Review the notes, then Clear all when the raid's wrapped.`,
+      );
     } catch (err) {
       setError(`Stopped after ${done.length} of ${toSubmit.length}: ${String(err)}`);
     } finally {
       setSubmitting(false);
+      setConfirmOpen(false);
     }
   }
 
   return (
     <div>
-      <div className="panel-header">
+      <div className="panel-header" style={{ flexWrap: "wrap", gap: 8 }}>
         <h2>Attendance</h2>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
+          Look back
+          <select value={lookbackHours} onChange={(e) => setLookbackHours(Number(e.target.value))} disabled={capturing}>
+            {LOOKBACK_OPTIONS.map((h) => (
+              <option key={h} value={h}>
+                {h}h
+              </option>
+            ))}
+          </select>
+        </label>
         <button className="primary" onClick={onCapture} disabled={capturing}>
           {capturing ? "Reading log…" : "Capture from log"}
         </button>
+        <input
+          type="text"
+          placeholder="Raid name (optional)"
+          value={raidName}
+          onChange={(e) => setRaidName(e.target.value)}
+          style={{ minWidth: 180 }}
+          title={'Names the night on the site Raids & Events page — e.g. "VT 9/8". Leave blank to name it there later.'}
+        />
         <button
           className="primary"
-          onClick={onSubmitAssigned}
+          onClick={onSubmitClick}
           disabled={submitting || assignedCount === 0}
         >
           {submitting ? "Submitting…" : `Submit assigned (${assignedCount})`}
@@ -274,8 +359,8 @@ export function AttendancePanel() {
       {captures.length === 0 ? (
         <div className="empty">
           Run "/who" or "/who guild" in-game at the start, middle, and end of the raid — click "Capture from log" after each
-          (or once at the end; every snapshot from the last 12h shows up). Assign the ones you want to Start / Mid / End, then
-          Submit assigned. Nothing is sent until you do.
+          (or once at the end; every snapshot from the last {lookbackHours}h shows up — widen "Look back" if you're doing this
+          the next day). Assign the ones you want to Start / Mid / End, then Submit assigned. Nothing is sent until you do.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -296,6 +381,15 @@ export function AttendancePanel() {
                   <span style={{ fontSize: 13 }}>
                     {fmtTime(c.occurredAt)}
                     {c.zone ? ` · ${c.zone}` : ""} · <strong>{c.rows.length}</strong> name(s)
+                    {!c.submitted && names.length < effectiveMin && (
+                      <span
+                        className="badge"
+                        style={{ marginLeft: 6, color: "#fbbf24", border: "1px solid #fbbf2455", borderRadius: 4, padding: "1px 5px", fontSize: 11 }}
+                        title={`Fewer than ${effectiveMin} names — likely a "/who <name>" lookup or a partial capture. Add names by hand if it's really a raid tick.`}
+                      >
+                        &lt; {effectiveMin}
+                      </span>
+                    )}
                     {short && <span style={{ color: "#f87171" }}> · {names.length} of {minAttendance} required</span>}
                   </span>
                   {c.submitted ? (
@@ -406,6 +500,39 @@ export function AttendancePanel() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Submit attendance to the site?"
+        confirmLabel={`Submit ${toSubmit.length} capture(s)`}
+        busy={submitting}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => void doSubmit()}
+        body={
+          <>
+            <p style={{ margin: "0 0 8px" }}>This writes EP to the ledger for everyone in these captures:</p>
+            <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+              {toSubmit.map((c) => {
+                const n = c.rows.map((r) => r.name.trim()).filter(Boolean).length;
+                return (
+                  <li key={c.id}>
+                    <strong>{c.assignment}</strong> — {fmtTime(c.occurredAt)}
+                    {c.zone ? ` · ${c.zone}` : ""} · {n} name(s)
+                    {n < effectiveMin ? <span style={{ color: "#fbbf24" }}> · under {effectiveMin}</span> : null}
+                  </li>
+                );
+              })}
+            </ul>
+            {raidName.trim() ? (
+              <p style={{ margin: 0 }}>
+                Raid name: <strong>{raidName.trim()}</strong> (only applied if the night isn't named yet).
+              </p>
+            ) : (
+              <p style={{ margin: 0, color: "#9ca3af" }}>No raid name — you can name it on the site later.</p>
+            )}
+          </>
+        }
+      />
     </div>
   );
 }

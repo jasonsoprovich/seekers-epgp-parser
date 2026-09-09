@@ -195,15 +195,16 @@ export function LinkCharacter(name: string, mainCharacterID: number | null): $Ca
 
 /**
  * ListAttendanceSnapshots returns every "/who" / "/who guild" block in the
- * followed log from the last attendanceLookback, newest first, each as its
- * own AttendanceResult. This backs the Attendance tab's multi-capture
- * workflow (post-live-test-1 LT-21/LT-22): an officer captures at the
- * start, middle, and end of a raid, keeps them all on screen, then assigns
- * and submits the ones they want after the raid instead of mid-fight.
- * Deduped by occurredAt; per-block warnings attached to their block.
+ * followed log from the last `lookbackHours` (0 -> default 12h, clamped to
+ * [1, 72]), newest first, each as its own AttendanceResult. This backs the
+ * Attendance tab's multi-capture workflow (post-live-test-1 LT-21/LT-22):
+ * an officer captures at the start, middle, and end of a raid, keeps them
+ * all on screen, then assigns and submits the ones they want after the
+ * raid instead of mid-fight. Deduped by occurredAt; per-block warnings
+ * attached to their block.
  */
-export function ListAttendanceSnapshots(): $CancellablePromise<$models.AttendanceResult[] | null> {
-    return $Call.ByID(3633388835);
+export function ListAttendanceSnapshots(lookbackHours: number): $CancellablePromise<$models.AttendanceResult[] | null> {
+    return $Call.ByID(3633388835, lookbackHours);
 }
 
 /**
@@ -295,8 +296,8 @@ export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
  * screen" contract as the Copy-to-clipboard button next to it, just to the
  * site's ledger instead of the clipboard.
  */
-export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
-    return $Call.ByID(2782717002, activity, occurredAt, names, zone);
+export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
+    return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName);
 }
 
 /**

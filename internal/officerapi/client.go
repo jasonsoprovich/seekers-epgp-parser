@@ -253,6 +253,11 @@ type AttendanceRequest struct {
 	// the award writes so the site's EP table shows what a Raid-Start/Mid/End
 	// row was for. Omitted when the parse couldn't determine a zone.
 	Zone string `json:"zone,omitempty"`
+	// Optional officer-typed name for the night ("VT 9/8", "Deep + Emp").
+	// The site names the raid on /epgp/raids from the first submit that
+	// carries this; a later Mid/End submit with the same value is a no-op
+	// server-side. Omitted when the officer left the field blank.
+	RaidName string `json:"raidName,omitempty"`
 }
 
 type AttendanceResponse struct {
