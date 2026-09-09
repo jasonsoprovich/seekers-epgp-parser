@@ -16,7 +16,15 @@ import type { GameDirInfo } from "../bindings/github.com/jasonsoprovich/seekers-
 import type { Settings as GuildSettings } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 import { invalidateRoster } from "./useRoster";
 
-export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: string) => void }) {
+export function SettingsPanel({
+  onLogPathChange,
+  onConnectionChanged,
+  onRunSetup,
+}: {
+  onLogPathChange: (path: string) => void;
+  onConnectionChanged?: () => void;
+  onRunSetup?: () => void;
+}) {
   const [apiKey, setApiKey] = useState("");
   const [logPath, setLogPath] = useState("");
   const [gameDir, setGameDir] = useState<GameDirInfo | null>(null);
@@ -109,6 +117,7 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
       // key refetch instead of staying stuck on a stale auth error.
       invalidateRoster();
       setSaved(true);
+      onConnectionChanged?.();
     } finally {
       setPending(false);
     }
@@ -128,6 +137,7 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
       setTestError(String(err));
     } finally {
       setPending(false);
+      onConnectionChanged?.();
     }
   }
 
@@ -140,154 +150,177 @@ export function SettingsPanel({ onLogPathChange }: { onLogPathChange: (path: str
   }
 
   return (
-    <div>
+    <div className="settings">
       <div className="panel-header">
         <h2>Settings</h2>
+        {onRunSetup && (
+          <button className="secondary" onClick={onRunSetup}>
+            Run setup wizard
+          </button>
+        )}
       </div>
 
-      <div className="form-grid">
-        <label>
-          EverQuest Folder
-          <div className="toolbar" style={{ margin: 0 }}>
-            <button className="secondary" onClick={onPickGameDir}>
-              Select EverQuest Folder
-            </button>
-            <span style={{ color: "#9ca3af", fontSize: 13, wordBreak: "break-all" }}>{gameDir?.gameDir || "Not set"}</span>
-            {gameDir && (
-              <button className="secondary" onClick={refreshDetectedLogs}>
-                Rescan
-              </button>
-            )}
-          </div>
-          <span style={{ display: "block", color: "#9ca3af", fontSize: 12 }}>
-            Point at your EverQuest folder (or its Logs folder). The app follows whichever character you're playing — no need to re-pick when
-            you swap to an alt for a raid.
-          </span>
-          {gameDirError && <div className="error">{gameDirError}</div>}
-          {gameDir && (gameDir.logs?.length ?? 0) > 0 && (
-            <table className="char-list col-fixed">
-              <colgroup>
-                <col style={{ width: "34%" }} />
-                <col style={{ width: "22%" }} />
-                <col style={{ width: "24%" }} />
-                <col style={{ width: "20%" }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Character</th>
-                  <th>Server</th>
-                  <th>Last written</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(gameDir.logs ?? []).map((l) => (
-                  <tr key={l.path} className={l.path === logPath ? "active" : ""}>
-                    <td>{l.character}</td>
-                    <td>{l.server}</td>
-                    <td>{new Date(l.modifiedAt).toLocaleString()}</td>
-                    <td>{l.path === logPath ? "watching" : ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </label>
-
-        <div style={{ fontSize: 12 }}>
-          <button
-            type="button"
-            onClick={() => setShowAdvanced((v) => !v)}
-            style={{ background: "none", border: "none", color: "#60a5fa", cursor: "pointer", padding: 0, fontSize: 12 }}
-          >
-            {showAdvanced ? "▾" : "▸"} Advanced: watch one specific log file instead
+      {/* --- EverQuest folder --- */}
+      <section className="form-card settings-card">
+        <h3>EverQuest folder</h3>
+        <p className="hint">
+          Point at your EverQuest folder (or its Logs folder). The app follows whichever character you&apos;re playing —
+          no need to re-pick when you swap to an alt for a raid.
+        </p>
+        <div className="settings-row">
+          <button className="secondary" onClick={onPickGameDir}>
+            Select EverQuest Folder
           </button>
-          {showAdvanced && (
-            <div style={{ marginTop: 6 }}>
-              <div className="toolbar" style={{ margin: 0 }}>
-                <button className="secondary" onClick={onPickLogFile}>
-                  Choose file…
-                </button>
-                <span style={{ color: "#9ca3af", wordBreak: "break-all" }}>{logPath || "none"}</span>
-              </div>
-              <span style={{ display: "block", color: "#9ca3af", marginTop: 4 }}>
-                Pins that file and turns off character auto-detection until you pick an EverQuest folder again. Only needed if your logs live
-                somewhere non-standard.
-              </span>
-            </div>
+          {gameDir && (
+            <button className="secondary" onClick={refreshDetectedLogs}>
+              Rescan
+            </button>
           )}
+          <span className="path">{gameDir?.gameDir || "Not set"}</span>
         </div>
+        {gameDirError && <div className="error">{gameDirError}</div>}
+        {gameDir && (gameDir.logs?.length ?? 0) > 0 && (
+          <table className="char-list col-fixed" style={{ marginTop: 12 }}>
+            <colgroup>
+              <col style={{ width: "34%" }} />
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "24%" }} />
+              <col style={{ width: "20%" }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Character</th>
+                <th>Server</th>
+                <th>Last written</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(gameDir.logs ?? []).map((l) => (
+                <tr key={l.path} className={l.path === logPath ? "active" : ""}>
+                  <td>{l.character}</td>
+                  <td>{l.server}</td>
+                  <td>{new Date(l.modifiedAt).toLocaleString()}</td>
+                  <td>{l.path === logPath ? "watching" : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
 
-        <label>
-          API Key
+        <button
+          type="button"
+          className="link-toggle"
+          onClick={() => setShowAdvanced((v) => !v)}
+        >
+          {showAdvanced ? "▾" : "▸"} Advanced: watch one specific log file instead
+        </button>
+        {showAdvanced && (
+          <div style={{ marginTop: 8 }}>
+            <div className="settings-row">
+              <button className="secondary" onClick={onPickLogFile}>
+                Choose file…
+              </button>
+              <span className="path">{logPath || "none"}</span>
+            </div>
+            <p className="hint" style={{ marginBottom: 0 }}>
+              Pins that file and turns off character auto-detection until you pick an EverQuest folder again. Only needed
+              if your logs live somewhere non-standard.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* --- Connection --- */}
+      <section className="form-card settings-card">
+        <h3>Site connection</h3>
+        <label className="field">
+          <span className="field-label">API key</span>
           <input
             type="password"
             placeholder="Generate one on the site, then paste it here"
             value={apiKey}
             onChange={(e) => {
               setApiKey(e.target.value);
-              // The key changed — the last "Saved" no longer describes
-              // what's in the box.
               setSaved(false);
               setTestResult(null);
               setTestError(null);
             }}
           />
         </label>
-        <button className="secondary" onClick={() => OpenAppKeyPage()} style={{ alignSelf: "flex-start" }}>
-          Generate an API Key on the site ↗
-        </button>
+        <div className="settings-row">
+          <button className="primary" onClick={onSave} disabled={pending}>
+            {saved ? "Saved" : "Save"}
+          </button>
+          <button className="secondary" onClick={onTest} disabled={pending || !apiKey.trim()}>
+            {pending ? "Testing…" : "Test Connection"}
+          </button>
+          <button className="secondary" onClick={() => OpenAppKeyPage()}>
+            Generate an API key on the site ↗
+          </button>
+        </div>
+        {testResult && <div className="success">{testResult}</div>}
+        {testError && <div className="error">{testError}</div>}
 
-        <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <label className="field field-inline" style={{ marginTop: 14 }}>
           <input
             type="checkbox"
             checked={autoDetectBids}
             onChange={(e) => onToggleAutoDetect(e.target.checked)}
-            style={{ width: "auto" }}
           />
           <span>
             Auto-start bid rounds from log announcements
-            <span style={{ display: "block", color: "#9ca3af", fontSize: 12 }}>
-              When you say "&lt;item&gt; send tells" in chat, the Bids tab starts that round on its own.
+            <span className="hint" style={{ display: "block", margin: "2px 0 0" }}>
+              When you say &quot;&lt;item&gt; send tells&quot; in chat, the Bids tab starts that round on its own.
             </span>
           </span>
         </label>
-      </div>
+      </section>
 
-      <div className="toolbar">
-        <button className="primary" onClick={onSave} disabled={pending}>
-          {saved ? "Saved" : "Save"}
-        </button>
-        <button className="secondary" onClick={onTest} disabled={pending || !apiKey.trim()}>
-          {pending ? "Testing…" : "Test Connection"}
-        </button>
-      </div>
-
-      {testResult && <div className="success">{testResult}</div>}
-      {testError && <div className="error">{testError}</div>}
-
-      <div className="panel-header" style={{ marginTop: 24 }}>
-        <h2>Guild Settings</h2>
-        <button className="secondary" onClick={refreshGuildSettings}>
-          Refresh
-        </button>
-      </div>
-      <p style={{ color: "#9ca3af", fontSize: 13, marginTop: -8, marginBottom: 12 }}>
-        Read-only — tuned by a leader at seekersofsouls.com/epgp/settings, never hardcoded here.
-      </p>
-      {guildSettings ? (
-        <div className="form-grid">
-          <div>EP cap per cycle: {guildSettings.EPCapPerCycle}</div>
-          <div>Minimum attendance: {guildSettings.MinAttendance}</div>
-          <div>EP decay rate: {guildSettings.EPDecay}</div>
-          <div>GP decay rate: {guildSettings.GPDecay}</div>
-          <div>Base EP: {guildSettings.BaseEP}</div>
-          <div>Base GP: {guildSettings.BaseGP}</div>
-          <div>Decay model: {guildSettings.DecayModel}</div>
+      {/* --- Guild settings (read-only) --- */}
+      <section className="form-card settings-card">
+        <div className="panel-header" style={{ marginBottom: 4 }}>
+          <h3 style={{ margin: 0 }}>Guild settings</h3>
+          <button className="secondary" onClick={refreshGuildSettings}>
+            Refresh
+          </button>
         </div>
-      ) : (
-        guildSettingsError && <div className="error">Couldn&apos;t load guild settings: {guildSettingsError}</div>
-      )}
+        <p className="hint">Read-only — tuned by a leader at seekersofsouls.com/epgp/settings, never hardcoded here.</p>
+        {guildSettings ? (
+          <dl className="kv">
+            <div>
+              <dt>EP cap per cycle</dt>
+              <dd>{guildSettings.EPCapPerCycle}</dd>
+            </div>
+            <div>
+              <dt>Minimum attendance</dt>
+              <dd>{guildSettings.MinAttendance}</dd>
+            </div>
+            <div>
+              <dt>EP decay rate</dt>
+              <dd>{guildSettings.EPDecay}</dd>
+            </div>
+            <div>
+              <dt>GP decay rate</dt>
+              <dd>{guildSettings.GPDecay}</dd>
+            </div>
+            <div>
+              <dt>Base EP</dt>
+              <dd>{guildSettings.BaseEP}</dd>
+            </div>
+            <div>
+              <dt>Base GP</dt>
+              <dd>{guildSettings.BaseGP}</dd>
+            </div>
+            <div>
+              <dt>Decay model</dt>
+              <dd>{guildSettings.DecayModel}</dd>
+            </div>
+          </dl>
+        ) : (
+          guildSettingsError && <div className="error">Couldn&apos;t load guild settings: {guildSettingsError}</div>
+        )}
+      </section>
     </div>
   );
 }

@@ -1,13 +1,22 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Events } from "@wailsio/runtime";
 import "./App.css";
-import { CheckForUpdate, GetLogPath, InstallUpdate, OpenReleasePage } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import {
+  CheckForUpdate,
+  GetLogPath,
+  GetSettings,
+  InstallUpdate,
+  OpenAppKeyPage,
+  OpenReleasePage,
+  TestConnection,
+} from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { UpdateInfo } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { AttendancePanel } from "./AttendancePanel";
 import { BidsPanel } from "./BidsPanel";
 import { BrowsePanel } from "./BrowsePanel";
 import { ManualEntryPanel } from "./ManualEntryPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { SetupWizard } from "./SetupWizard";
 
 type Tab = "attendance" | "bids" | "manual" | "browse" | "settings";
 
@@ -18,6 +27,35 @@ function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState("");
+  // null = still loading config; true/false = show the first-run wizard or not.
+  const [showWizard, setShowWizard] = useState<boolean | null>(null);
+  // Set when a key IS configured but doesn't work — a persistent banner so
+  // the officer regenerates it before a raid rather than mid-pull.
+  const [keyProblem, setKeyProblem] = useState(false);
+
+  const checkKeyHealth = useCallback(async () => {
+    try {
+      const s = await GetSettings();
+      if (!s.apiKey.trim()) {
+        setKeyProblem(false);
+        return;
+      }
+      await TestConnection();
+      setKeyProblem(false);
+    } catch {
+      setKeyProblem(true);
+    }
+  }, []);
+
+  // First-run gate + key health, once on launch.
+  useEffect(() => {
+    GetSettings()
+      .then((s) => {
+        setShowWizard(!s.setupComplete);
+        if (s.setupComplete) void checkKeyHealth();
+      })
+      .catch(() => setShowWizard(false));
+  }, [checkKeyHealth]);
 
   // Refreshed whenever Settings changes it — see SettingsPanel's onLogPathChange.
   useEffect(() => {
@@ -57,6 +95,14 @@ function App() {
 
   return (
     <div className="app">
+      {showWizard === true && (
+        <SetupWizard
+          onDone={() => {
+            setShowWizard(false);
+            void checkKeyHealth();
+          }}
+        />
+      )}
       {updateInfo && (
         <div className="update-banner">
           <span>
@@ -68,6 +114,20 @@ function App() {
           </button>
           <button className="secondary" onClick={() => OpenReleasePage(updateInfo.url)}>
             Download it ↗
+          </button>
+        </div>
+      )}
+      {keyProblem && (
+        <div className="update-banner" style={{ background: "#7c2d12" }}>
+          <span>
+            Your API key isn&apos;t working — the app can&apos;t reach the site. Generate a fresh one and paste it in Settings
+            <strong> before raid</strong> so it doesn&apos;t slow the pull down.
+          </span>
+          <button className="secondary" onClick={() => setTab("settings")}>
+            Open Settings
+          </button>
+          <button className="secondary" onClick={() => OpenAppKeyPage()}>
+            Generate a key ↗
           </button>
         </div>
       )}
@@ -116,7 +176,11 @@ function App() {
             <BrowsePanel />
           </div>
           <div hidden={tab !== "settings"}>
-            <SettingsPanel onLogPathChange={setLogPath} />
+            <SettingsPanel
+              onLogPathChange={setLogPath}
+              onConnectionChanged={checkKeyHealth}
+              onRunSetup={() => setShowWizard(true)}
+            />
           </div>
         </div>
       </div>
