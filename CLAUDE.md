@@ -219,6 +219,23 @@ or just use `wails3 build`, which does both.
   `"<same item> send tells - last call"` reminder is not a new item and
   must not raise the frontend's switch/ignore banner. A *different* item
   mid-round still does.
+- **The live poller pushes SNAPSHOTS, not deltas** (`startLiveBidPush`,
+  2026-09-10): `PushLiveBidSnapshot` sends the whole current bid list for
+  the item whenever it changes, and re-sends it every ~60s even when it
+  doesn't. The site's Durable Object can be hibernated in any quiet gap;
+  with the old one-tell-at-a-time push it rebuilt the round from a single
+  tell and viewers saw the card vanish, then reappear with the wrong
+  leader. Don't go back to pushing only "new" tells.
+- **A second item announced mid-round auto-parks the first**
+  (`App.SwitchBidRound`, called from the Bids tab's `bids:announcement`
+  handler): the open round is frozen at the new announcement's timestamp
+  and the new one starts *from* that timestamp (`roundFloor` moves to it,
+  not to "now" as `EndBidRound` does). Parked rounds sit above the table
+  until reviewed/submitted. Tells after the announcement belong to the
+  new item by convention.
+- **Review-table rows are keyed by `rowKey`, never by index** — manual
+  rows are prepended, and index keys made React hand one row's combobox
+  state to the row that slid into its slot (duplicate names on screen).
 - **Attendance dedupe is a server concern, but affects capture UX.**
   Project Quarm prohibits multiboxing, so one `/who` capture can't contain
   two characters from the same player. But a player may swap characters
