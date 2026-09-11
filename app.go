@@ -1455,14 +1455,22 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
-		pushed := 0
-		var lastPushedAt time.Time // OccurredAt of candidates[pushed-1] at the last push
+		// Signature of the last snapshot pushed. Seeded to a value no real
+		// scan produces so the very first tick pushes — an empty snapshot
+		// puts the round on the site's board ("no bids yet") the moment the
+		// announcement lands, instead of only once the first tell arrives.
+		lastSig := "\x00"
 		idleTicks := 0
 		// The DO's live TTL is 90s, so a heartbeat every ~20s on a quiet
 		// round is plenty of margin — and keeps per-key request volume low
 		// when 1-10 officers are all polling at once during a raid
-		// (PLAN.md §15). New tells still push immediately.
+		// (PLAN.md §15). A changed snapshot still pushes immediately.
 		const heartbeatEveryNIdleTicks = 4
+		// Even an unchanged snapshot is re-sent every ~60s so the board
+		// self-heals if the site's DO lost the round (eviction, a dropped
+		// push) — the snapshot is idempotent, so this costs nothing but a
+		// small request.
+		const resendEveryNIdleTicks = 12
 
 		for {
 			select {
@@ -1471,9 +1479,7 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 				// resolved, or left to idle-sweep is decided by whichever
 				// call stopped this poller — EndBidRound leaves it,
 				// SubmitBids resolves it, DiscardBidRound / a round switch /
-				// ServiceShutdown clear it. (Phase 16 — before this the
-				// poller blanket-cleared on every stop path, which also
-				// wiped a just-resolved round.)
+				// ServiceShutdown clear it.
 				return
 			case <-ticker.C:
 			}
@@ -1501,33 +1507,107 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 				continue
 			}
 
-			pushed = pushCursor(candidates, pushed, lastPushedAt)
+			// The site's snapshot: every tell in log order (the board keeps
+			// the latest per character, same as the review table). A
+			// "cancel my bid" tell has no tier and never shows as a bid.
+			snapshot := make([]officerapi.LiveBidSnapshotEntry, 0, len(candidates))
+			var sb strings.Builder
+			for _, c := range candidates {
+				if c.Cancel {
+					continue
+				}
+				at := c.OccurredAt.Format(time.RFC3339)
+				snapshot = append(snapshot, officerapi.LiveBidSnapshotEntry{CharacterName: c.CharacterName, Tier: c.Tier, OccurredAt: at})
+				sb.WriteString(c.CharacterName)
+				sb.WriteByte('|')
+				sb.WriteString(c.Tier)
+				sb.WriteByte('|')
+				sb.WriteString(at)
+				sb.WriteByte('\n')
+			}
+			sig := sb.String()
 
-			if len(candidates) <= pushed {
-				// Nothing new this tick — a quiet stretch of a real round,
-				// not evidence the officer's gone. Heartbeat so the site's
-				// idle TTL doesn't fire just because nobody's bid in a
-				// while — but not every 5s tick (see heartbeatEveryNIdleTicks):
-				// once right when it goes quiet, then every ~20s.
+			if sig == lastSig {
 				idleTicks++
-				if idleTicks%heartbeatEveryNIdleTicks == 1 {
+				if idleTicks%resendEveryNIdleTicks == 0 {
+					_ = client.PushLiveBidSnapshot(ctx, itemName, capturedBy, snapshot)
+				} else if idleTicks%heartbeatEveryNIdleTicks == 1 {
 					_ = client.HeartbeatLiveBids(ctx, itemName)
 				}
 				continue
 			}
-
 			idleTicks = 0
-			for _, c := range candidates[pushed:] {
-				_ = client.PushLiveBid(ctx, officerapi.LiveBidPushRequest{
-					ItemName:            itemName,
-					CharacterName:       c.CharacterName,
-					Tier:                c.Tier,
-					OccurredAt:          c.OccurredAt.Format(time.RFC3339),
-					CapturedByCharacter: capturedBy,
-				})
-			}
-			pushed = len(candidates)
-			lastPushedAt = candidates[pushed-1].OccurredAt
+			lastSig = sig
+			_ = client.PushLiveBidSnapshot(ctx, itemName, capturedBy, snapshot)
 		}
 	}()
+}
+
+// BidSwitchResult is what SwitchBidRound hands the Bids tab: the round
+// that was open, frozen and cut at the new announcement (Parked — for the
+// officer to review and submit after), and the new live round (Current).
+type BidSwitchResult struct {
+	Parked  BidRound `json:"parked"`
+	Current BidRound `json:"current"`
+}
+
+// SwitchBidRound (2026-09-10): a second "<item> send tells" landed while a
+// round was still live. The old flow made the officer click "Switch",
+// which DISCARDED the first round's bids and, until clicked, left the
+// second item's early tells unassigned. Now the Bids tab calls this the
+// moment the watcher fires: the open round is frozen with every tell up
+// to the new announcement, and the new item goes live from its
+// announcement time, so nothing said in between is lost. Tells after the
+// announcement belong to the new item — the guild's own convention; the
+// occasional straggler for the old item is what the review table's
+// "+ Add bid manually" is for. The parked round stays on the site's
+// board as-is (it's still a real, unfinished round); Submit later flips it
+// to resolved exactly as before.
+func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResult, error) {
+	nextItem = strings.TrimSpace(nextItem)
+	if nextItem == "" {
+		return BidSwitchResult{}, errors.New("name the item you're switching to")
+	}
+	at := time.Now()
+	if t, err := time.Parse(time.RFC3339, announcedAt); err == nil && !t.IsZero() {
+		at = t
+	}
+
+	a.liveBidsMu.Lock()
+	item, start := a.roundItem, a.roundStart
+	a.liveBidsMu.Unlock()
+	a.stopLiveBidPush()
+
+	raw, err := a.readLog()
+	if err != nil {
+		return BidSwitchResult{}, err
+	}
+	parked := BidRound{ItemName: item, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}
+	if item != "" {
+		if at.Before(start) {
+			at = start
+		}
+		parked.Rows = buildRows(raw, start, at)
+	}
+
+	// The parked round is done collecting: the floor moves to the new
+	// announcement — NOT to "now" as EndBidRound does — so the new round
+	// legitimately starts at `at` and picks up every tell sent since.
+	a.liveBidsMu.Lock()
+	a.roundFloor = at
+	a.roundItem = nextItem
+	a.roundStart = at
+	a.roundResolved = false
+	a.liveBidsMu.Unlock()
+
+	a.startLiveBidPush(nextItem, at)
+	return BidSwitchResult{
+		Parked: parked,
+		Current: BidRound{
+			ItemName:  nextItem,
+			StartedAt: at.Format(time.RFC3339),
+			Rows:      buildRows(raw, at, time.Now()),
+			Live:      true,
+		},
+	}, nil
 }

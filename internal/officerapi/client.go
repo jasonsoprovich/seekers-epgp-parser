@@ -386,6 +386,41 @@ func (c *Client) PushLiveBid(ctx context.Context, req LiveBidPushRequest) error 
 	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/push", req, nil)
 }
 
+// LiveBidSnapshotEntry is one tell in a snapshot push — see
+// PushLiveBidSnapshot.
+type LiveBidSnapshotEntry struct {
+	CharacterName string `json:"characterName"`
+	Tier          string `json:"tier"`
+	OccurredAt    string `json:"occurredAt"`
+}
+
+type liveBidSnapshotRequest struct {
+	ItemName            string                 `json:"itemName"`
+	Bids                []LiveBidSnapshotEntry `json:"bids"`
+	CapturedByCharacter string                 `json:"capturedByCharacter,omitempty"`
+}
+
+// PushLiveBidSnapshot (2026-09-10) replaces the one-tell-at-a-time
+// PushLiveBid in the live poller: it sends this item's WHOLE current bid
+// list every time it changes (and periodically even when it doesn't). The
+// site's live board used to hold a collecting round only in memory, and
+// its Durable Object can be evicted in any quiet stretch — after which the
+// next single-tell push rebuilt the round from just that tell, so viewers
+// saw the card vanish and come back with a wrong "leading" bidder. A
+// snapshot is idempotent: whatever the board has, one push makes it match
+// the officer's own table. Same endpoint; the site tells the two forms
+// apart by the `bids` array.
+func (c *Client) PushLiveBidSnapshot(ctx context.Context, itemName, capturedByCharacter string, bids []LiveBidSnapshotEntry) error {
+	if bids == nil {
+		bids = []LiveBidSnapshotEntry{}
+	}
+	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/push", liveBidSnapshotRequest{
+		ItemName:            itemName,
+		Bids:                bids,
+		CapturedByCharacter: capturedByCharacter,
+	}, nil)
+}
+
 // liveBidItemRef names which round a heartbeat/clear applies to. The site
 // now tracks one round per (item, officer) so 1-10 officers can collect
 // different items in parallel (PLAN.md §15), so both calls have to say

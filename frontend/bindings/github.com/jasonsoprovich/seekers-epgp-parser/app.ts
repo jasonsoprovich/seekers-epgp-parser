@@ -366,6 +366,24 @@ export function SubmitManualEntry(req: officerapi$0.ManualEntryRequest): $Cancel
 }
 
 /**
+ * SwitchBidRound (2026-09-10): a second "<item> send tells" landed while a
+ * round was still live. The old flow made the officer click "Switch",
+ * which DISCARDED the first round's bids and, until clicked, left the
+ * second item's early tells unassigned. Now the Bids tab calls this the
+ * moment the watcher fires: the open round is frozen with every tell up
+ * to the new announcement, and the new item goes live from its
+ * announcement time, so nothing said in between is lost. Tells after the
+ * announcement belong to the new item — the guild's own convention; the
+ * occasional straggler for the old item is what the review table's
+ * "+ Add bid manually" is for. The parked round stays on the site's
+ * board as-is (it's still a real, unfinished round); Submit later flips it
+ * to resolved exactly as before.
+ */
+export function SwitchBidRound(nextItem: string, announcedAt: string): $CancellablePromise<$models.BidSwitchResult> {
+    return $Call.ByID(1611946916, nextItem, announcedAt);
+}
+
+/**
  * TestConnection confirms the saved API key actually works by pulling the
  * roster (the same call the Attendance/Bids submit buttons eventually
  * validate names against) — the Settings screen's "did I set this up

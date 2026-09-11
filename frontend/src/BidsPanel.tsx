@@ -7,6 +7,7 @@ import {
   FetchKnownItems,
   SetBidsUnsaved,
   SubmitBids,
+  SwitchBidRound,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -39,7 +40,32 @@ const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low
 // place a "missed bid" is entered now: after End Round & Review, before
 // Submit — a bid recorded after the item's already been awarded is useless
 // because the item can't be traded anymore.
-type BidRow = CapturedBidRow & { winner: boolean; displayName: string; manual?: boolean };
+// `rowKey` is a stable React key (2026-09-10 fix). Rows used to be keyed by
+// table index, and a manual row is PREPENDED — so every existing row's
+// index shifted by one and React re-used each row's components (the
+// Character combobox's own typed text included) for the row that moved
+// into its slot. That's how the same name showed up on two rows at once
+// in the 2026-09-10 screenshot. Captured rows key on what the log said;
+// manual rows get a fresh id.
+type BidRow = CapturedBidRow & { winner: boolean; displayName: string; manual?: boolean; rowKey: string };
+
+let manualRowSeq = 0;
+function newManualRow(): BidRow {
+  manualRowSeq += 1;
+  return {
+    characterName: "",
+    displayName: "",
+    tier: "High Bid",
+    occurredAt: new Date().toISOString(),
+    ambiguous: false,
+    rawMessage: "(added manually)",
+    superseded: false,
+    cancelRequested: false,
+    winner: false,
+    manual: true,
+    rowKey: `manual-${Date.now()}-${manualRowSeq}`,
+  };
+}
 
 // idle: nothing running, the manual "name it + Capture" escape hatch is shown.
 // live: a round is tracking; the table refreshes itself from "bids:round"
@@ -49,7 +75,12 @@ type BidRow = CapturedBidRow & { winner: boolean; displayName: string; manual?: 
 type Phase = "idle" | "live" | "review";
 
 function toReviewRows(round: BidRound | null): BidRow[] {
-  return (round?.rows ?? []).map((r) => ({ ...r, winner: false, displayName: r.characterName }));
+  return (round?.rows ?? []).map((r, i) => ({
+    ...r,
+    winner: false,
+    displayName: r.characterName,
+    rowKey: `cap-${r.characterName}|${r.occurredAt}|${r.rawMessage}|${i}`,
+  }));
 }
 
 // Which rows are superseded by a later bid from the same person — recomputed
@@ -110,6 +141,13 @@ export function BidsPanel() {
   // way — shown as a switch/dismiss banner rather than clobbering the
   // in-progress round. Null when there's nothing pending.
   const [pendingAnnouncement, setPendingAnnouncement] = useState<{ item: string; announcedAt: string } | null>(null);
+  // Rounds auto-parked when a NEW item was announced while one was still
+  // open (2026-09-10 — see the "bids:announcement" handler). Each is a
+  // frozen, unsubmitted round the officer reviews and submits after the
+  // current one; nothing here has reached the site's ledger yet.
+  const [parkedRounds, setParkedRounds] = useState<BidRound[]>([]);
+  // Brief toast naming what just got parked.
+  const [parkedNotice, setParkedNotice] = useState<string | null>(null);
   // Toast shown briefly when a round auto-starts from a detected announcement.
   const [autoStarted, setAutoStarted] = useState<string | null>(null);
   // A round the officer is entering by hand (auto capture didn't run) —
@@ -143,6 +181,18 @@ export function BidsPanel() {
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+  const rowsRef = useRef<BidRow[]>([]);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+  const capturedItemRef = useRef("");
+  useEffect(() => {
+    capturedItemRef.current = capturedItem;
+  }, [capturedItem]);
+  const roundStartedAtRef = useRef("");
+  useEffect(() => {
+    roundStartedAtRef.current = roundStartedAt;
+  }, [roundStartedAt]);
 
   // Streamline (2026-09-09): entering review auto-runs Determine Winner so
   // the common case is End Round & Review -> glance -> Submit, with no
@@ -168,8 +218,8 @@ export function BidsPanel() {
   // Feed the close-confirmation guard (LT-24): a round that's live or in
   // review is work that hasn't hit the site yet.
   useEffect(() => {
-    SetBidsUnsaved(phase !== "idle").catch(() => {});
-  }, [phase]);
+    SetBidsUnsaved(phase !== "idle" || parkedRounds.length > 0).catch(() => {});
+  }, [phase, parkedRounds.length]);
   useEffect(() => () => void SetBidsUnsaved(false).catch(() => {}), []);
 
   // PLAN.md §15 — the app watches the log for the officer's own
@@ -180,18 +230,102 @@ export function BidsPanel() {
     return Events.On("bids:announcement", (ev: { data?: { itemName?: string; announcedAt?: string } }) => {
       const item = ev?.data?.itemName?.trim();
       if (!item) return;
-      if (phaseRef.current !== "idle") {
-        setPendingAnnouncement({ item, announcedAt: ev?.data?.announcedAt ?? "" });
+      const announcedAt = ev?.data?.announcedAt ?? "";
+
+      // A new item announced while a round is still LIVE (2026-09-10): the
+      // old "Switch / Ignore" banner discarded the open round if clicked,
+      // and lost the new item's early tells if not clicked in time. Now
+      // the open round is parked automatically — frozen with every tell
+      // up to this announcement — and the new item goes live from its
+      // announcement time, so no tell on either side is lost. The officer
+      // reviews and submits the parked round after this one.
+      if (phaseRef.current === "live") {
+        void switchTo(item, announcedAt);
+        return;
+      }
+      // Same idea when the officer is mid-REVIEW of an ended round: park
+      // the table exactly as they left it (edits, winner ticks and all)
+      // and start the new round. Their review resumes from "Parked".
+      if (phaseRef.current === "review") {
+        const parked: BidRound = {
+          itemName: capturedItemRef.current,
+          startedAt: roundStartedAtRef.current,
+          rows: rowsRef.current.map(({ winner: _w, displayName: _d, manual: _m, rowKey: _k, ...r }) => r),
+          live: false,
+        };
+        setParkedRounds((prev) => [...prev, parked]);
+        noteParked(parked);
+        setSubmitResult(null);
+        setDupPrompt(null);
+        setTieWarning(null);
+        setGratsCopied(false);
+        setManualRound(false);
+        setPendingAnnouncement(null);
+        setItemName(item);
+        void captureFor(item, announcedAt);
         return;
       }
       setItemName(item);
       // Pass the detected line's timestamp — CaptureBids anchors the window
       // to exactly it, so a re-announcement can't fold in a finished round.
-      void captureFor(item, ev?.data?.announcedAt ?? "");
+      void captureFor(item, announcedAt);
       setAutoStarted(item);
       setTimeout(() => setAutoStarted((v) => (v === item ? null : v)), 8000);
     });
   }, []);
+
+  function noteParked(round: BidRound) {
+    const n = round.rows?.length ?? 0;
+    const msg = `Parked "${round.itemName || "(unnamed)"}" with ${n} bid${n === 1 ? "" : "s"} — review and submit it after this round.`;
+    setParkedNotice(msg);
+    setTimeout(() => setParkedNotice((v) => (v === msg ? null : v)), 12000);
+  }
+
+  // Live round -> park it, go live on the new item (Go does the cut).
+  async function switchTo(nextItem: string, announcedAt: string) {
+    setError(null);
+    setPending(true);
+    try {
+      const result = await SwitchBidRound(nextItem, announcedAt);
+      if (result.parked.itemName) {
+        setParkedRounds((prev) => [...prev, result.parked]);
+        noteParked(result.parked);
+      }
+      setItemName(nextItem);
+      setRows(toReviewRows(result.current));
+      setCapturedItem(result.current.itemName);
+      setRoundStartedAt(result.current.startedAt);
+      setPhase("live");
+      setPendingAnnouncement(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // Bring a parked round into the review table (only from idle — one
+  // round on the table at a time).
+  function reviewParked(index: number) {
+    const round = parkedRounds[index];
+    if (!round || phase !== "idle") return;
+    setParkedRounds((prev) => prev.filter((_, i) => i !== index));
+    setError(null);
+    setSubmitResult(null);
+    setDupPrompt(null);
+    setTieWarning(null);
+    setGratsCopied(false);
+    setManualRound(false);
+    setRows(toReviewRows(round));
+    setCapturedItem(round.itemName);
+    setRoundStartedAt(round.startedAt);
+    setItemName(round.itemName);
+    setPhase("review");
+  }
+
+  function discardParked(index: number) {
+    setParkedRounds((prev) => prev.filter((_, i) => i !== index));
+  }
 
   // While a round is live the Go-side poller re-emits the whole round every
   // few seconds as tells arrive. Replace the table wholesale — nothing is
@@ -248,20 +382,7 @@ export function BidsPanel() {
     setCapturedItem(itemName.trim());
     setRoundStartedAt("");
     setManualRound(true);
-    setRows([
-      {
-        characterName: "",
-        displayName: "",
-        tier: "High Bid",
-        occurredAt: new Date().toISOString(),
-        ambiguous: false,
-        rawMessage: "(manual round)",
-        superseded: false,
-        cancelRequested: false,
-        winner: false,
-        manual: true,
-      },
-    ]);
+    setRows([{ ...newManualRow(), rawMessage: "(manual round)" }]);
     setPhase("review");
   }
 
@@ -329,6 +450,18 @@ export function BidsPanel() {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, tier, ambiguous: false } : r)));
   }
 
+  // Names already on the other rows (lower-cased) — the manual-row picker
+  // lists them disabled so one person can't be added twice by accident.
+  function takenNamesExcept(index: number): Set<string> {
+    const out = new Set<string>();
+    rows.forEach((r, i) => {
+      if (i === index) return;
+      const n = r.characterName.trim().toLowerCase();
+      if (n) out.add(n);
+    });
+    return out;
+  }
+
   function resolveIdentity(index: number, characterName: string) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, characterName } : r)));
   }
@@ -354,21 +487,7 @@ export function BidsPanel() {
   function addManualRow() {
     setTieWarning(null);
     setGratsCopied(false);
-    setRows((prev) => [
-      {
-        characterName: "",
-        displayName: "",
-        tier: "High Bid",
-        occurredAt: new Date().toISOString(),
-        ambiguous: false,
-        rawMessage: "(added manually)",
-        superseded: false,
-        cancelRequested: false,
-        winner: false,
-        manual: true,
-      },
-      ...prev,
-    ]);
+    setRows((prev) => [newManualRow(), ...prev]);
   }
 
   function setManualName(index: number, name: string) {
@@ -639,29 +758,43 @@ export function BidsPanel() {
         </div>
       )}
 
+      {parkedNotice && <div className="success">{parkedNotice}</div>}
+
       {pendingAnnouncement && (
         <div className="warning" style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
           <span>
-            <strong>{pendingAnnouncement.item}</strong> was announced again. Finish the current round first, or switch now (discards the
-            current one).
+            <strong>{pendingAnnouncement.item}</strong> was announced. Finish or park the current round first.
           </span>
-          <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <button
-              className="primary"
-              onClick={() => {
-                const next = pendingAnnouncement;
-                setPendingAnnouncement(null);
-                setPhase("idle");
-                setItemName(next.item);
-                void captureFor(next.item, next.announcedAt);
-              }}
-            >
-              Switch
-            </button>
-            <button className="secondary" onClick={() => setPendingAnnouncement(null)}>
-              Ignore
-            </button>
-          </span>
+          <button className="secondary" onClick={() => setPendingAnnouncement(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {parkedRounds.length > 0 && (
+        <div className="warning">
+          <div style={{ marginBottom: 6 }}>
+            <strong>
+              {parkedRounds.length} parked round{parkedRounds.length === 1 ? "" : "s"}
+            </strong>{" "}
+            — not submitted yet. {phase === "idle" ? "Review each one to pick its winner and submit." : "Finish the current round to review them."}
+          </div>
+          {parkedRounds.map((r, i) => (
+            <div key={`${r.itemName}-${r.startedAt}-${i}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0" }}>
+              <span style={{ flex: 1 }}>
+                <strong>{r.itemName || "(unnamed item)"}</strong>{" "}
+                <span style={{ color: "#9ca3af" }}>
+                  · {r.rows?.length ?? 0} bid{(r.rows?.length ?? 0) === 1 ? "" : "s"}
+                </span>
+              </span>
+              <button className="primary" disabled={phase !== "idle" || pending} onClick={() => reviewParked(i)}>
+                Review &amp; submit
+              </button>
+              <button className="danger" onClick={() => discardParked(i)} title="Throw this parked round away — nothing was recorded">
+                Discard
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -778,7 +911,7 @@ export function BidsPanel() {
               const rowClickable = !live && !isSuperseded;
               return (
                 <tr
-                  key={i}
+                  key={r.rowKey}
                   className={[
                     r.ambiguous || cancelReq ? "ambiguous" : "",
                     isSuperseded ? "superseded" : "",
@@ -810,6 +943,7 @@ export function BidsPanel() {
                         roster={roster}
                         onResolved={(name) => setManualName(i, name)}
                         onError={setError}
+                        taken={takenNamesExcept(i)}
                       />
                     ) : (
                       r.displayName

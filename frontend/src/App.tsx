@@ -57,6 +57,21 @@ function App() {
       .catch(() => setShowWizard(false));
   }, [checkKeyHealth]);
 
+  // Re-check the key while the app stays open (2026-09-10): a key that
+  // dies mid-session — revoked on the site, expired, the officer demoted —
+  // should light the banner before the next pull, not after a submit
+  // fails. Every 10 minutes, and whenever the window regains focus (the
+  // officer alt-tabbing back from the game).
+  useEffect(() => {
+    const id = window.setInterval(() => void checkKeyHealth(), 10 * 60 * 1000);
+    const onFocus = () => void checkKeyHealth();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [checkKeyHealth]);
+
   // Refreshed whenever Settings changes it — see SettingsPanel's onLogPathChange.
   useEffect(() => {
     GetLogPath().then((p) => p && setLogPath(p));

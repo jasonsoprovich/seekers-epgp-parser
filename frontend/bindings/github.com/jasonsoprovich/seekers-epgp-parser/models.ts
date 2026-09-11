@@ -58,6 +58,16 @@ export interface BidRow {
 }
 
 /**
+ * BidSwitchResult is what SwitchBidRound hands the Bids tab: the round
+ * that was open, frozen and cut at the new announcement (Parked — for the
+ * officer to review and submit after), and the new live round (Current).
+ */
+export interface BidSwitchResult {
+    "parked": BidRound;
+    "current": BidRound;
+}
+
+/**
  * GameDirInfo is what the Settings screen renders after the officer picks
  * their EverQuest folder: the folder itself, every character log found
  * under it, and which one the app is now following (the most recently

@@ -10,6 +10,7 @@ export type {
     AttendanceResult,
     BidRound,
     BidRow,
+    BidSwitchResult,
     GameDirInfo,
     LedgerPage,
     PointValues,
