@@ -34,6 +34,97 @@ body {
   flex-shrink: 0;
 }
 
+/* Dead-API-key banner — red, persistent, can't be missed before a raid. */
+.key-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(90deg, rgba(220, 38, 38, 0.22), rgba(220, 38, 38, 0.12));
+  border-bottom: 1px solid rgba(248, 113, 113, 0.45);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  color: #fecaca;
+  font-size: 13px;
+  padding: 10px 16px;
+  flex-shrink: 0;
+}
+
+.key-banner-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(248, 113, 113, 0.16);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #f87171;
+  flex-shrink: 0;
+}
+
+.key-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.key-banner-text strong {
+  color: #fee2e2;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.key-banner-text span {
+  color: #fca5a5;
+}
+
+.key-banner-text em {
+  font-style: normal;
+  font-weight: 600;
+  color: #fee2e2;
+}
+
+.key-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.key-banner-primary,
+.key-banner-secondary {
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.key-banner-primary {
+  background: #ef4444;
+  border: 1px solid #ef4444;
+  color: #fff;
+}
+
+.key-banner-primary:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.key-banner-secondary {
+  background: transparent;
+  border: 1px solid rgba(252, 165, 165, 0.5);
+  color: #fecaca;
+}
+
+.key-banner-secondary:hover {
+  background: rgba(248, 113, 113, 0.14);
+  border-color: #fca5a5;
+  color: #fff;
+}
+
 .sidebar {
   width: 200px;
   flex-shrink: 0;
