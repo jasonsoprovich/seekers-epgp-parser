@@ -311,6 +311,14 @@ type BidsRequest struct {
 	// Set true to record even when the site flags this item as a likely
 	// duplicate of an already-recorded round (see SubmitBidsChecked).
 	ConfirmDuplicate bool `json:"confirmDuplicate,omitempty"`
+	// The round's own immutable id (app.go's BidRound.RoundID, remediation
+	// plan Phase 3 task 3.1) — empty for a manual round or an app build
+	// that predates this field. Lets the site recognize a retry of THIS
+	// exact submission (its own HTTP client already retries once on a
+	// transport error or a 502/503/504) and return the original result
+	// without charging GP a second time, instead of relying solely on the
+	// coarser item/time heuristic.
+	SubmissionID string `json:"submissionId,omitempty"`
 }
 
 type BidsResponse struct {
@@ -323,6 +331,11 @@ type BidsResponse struct {
 	// and offers a "Record anyway" that resends with ConfirmDuplicate.
 	Duplicate        bool   `json:"duplicate,omitempty"`
 	DuplicateMessage string `json:"duplicateMessage,omitempty"`
+	// True when the site recognized SubmissionID as an already-recorded
+	// round and handed back that original result instead of writing
+	// anything new — a successful retry, not a fresh submission. GP was
+	// charged once, on whichever attempt actually landed first.
+	Replay bool `json:"replay,omitempty"`
 }
 
 func (c *Client) SubmitBids(ctx context.Context, req BidsRequest) (BidsResponse, error) {

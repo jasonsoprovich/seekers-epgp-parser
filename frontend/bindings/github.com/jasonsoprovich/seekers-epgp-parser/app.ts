@@ -358,9 +358,16 @@ export function SubmitAttendance(activity: string, occurredAt: string, names: st
  * the Bids tab can show "Record anyway"; calling again with
  * confirmDuplicate=true records it regardless (a boss really did drop the
  * same item twice in one night).
+ * roundID is the round's own immutable id (BidRound.RoundID, task 3.1) —
+ * supplied by the frontend rather than read from a.roundID because by the
+ * time a PARKED round is submitted, a.roundID already belongs to whatever
+ * round is current, not this one. Empty for a manual round or a build of
+ * this app that predates the field; the site treats a missing id as "no
+ * retry-idempotency for this submission" and falls back to its own
+ * item/time heuristic, same as before this task.
  */
-export function SubmitBids(itemName: string, entries: officerapi$0.BidEntry[] | null, confirmDuplicate: boolean): $CancellablePromise<officerapi$0.BidsResponse> {
-    return $Call.ByID(3424067681, itemName, entries, confirmDuplicate);
+export function SubmitBids(itemName: string, roundID: string, entries: officerapi$0.BidEntry[] | null, confirmDuplicate: boolean): $CancellablePromise<officerapi$0.BidsResponse> {
+    return $Call.ByID(3424067681, itemName, roundID, entries, confirmDuplicate);
 }
 
 /**

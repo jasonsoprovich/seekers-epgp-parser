@@ -48,6 +48,14 @@ export interface BidsResponse {
      */
     "duplicate"?: boolean;
     "duplicateMessage"?: string;
+
+    /**
+     * True when the site recognized SubmissionID as an already-recorded
+     * round and handed back that original result instead of writing
+     * anything new — a successful retry, not a fresh submission. GP was
+     * charged once, on whichever attempt actually landed first.
+     */
+    "replay"?: boolean;
 }
 
 export interface Character {

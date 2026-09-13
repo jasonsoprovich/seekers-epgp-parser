@@ -29,6 +29,15 @@ export interface AttendanceResult {
  */
 export interface BidRound {
     "itemName": string;
+
+    /**
+     * The round's immutable id (remediation plan Phase 3 task 3.1) — see
+     * App.roundID. Carried by the frontend through review/park and handed
+     * back to SubmitBids so the final submission names the exact round it's
+     * finalizing, not just an item name that could collide with a later
+     * re-drop of the same item.
+     */
+    "roundId": string;
     "startedAt": string;
     "rows": BidRow[] | null;
     "live": boolean;

@@ -17,6 +17,15 @@ import { useRoster } from "./useRoster";
 
 const TIERS = ["High Bid", "Medium Bid", "Low Bid", "Alt Loot", "Rot (No-Drop)"];
 
+// A manual round (no auto-capture — see onStartManualRound) never goes
+// through Go's CaptureBids/SwitchBidRound, so it never gets a BidRound.roundId
+// from there. Mint one the same way (an opaque, collision-resistant id, not
+// parsed by anything) so it still gets task 3.1/3.5's submit-retry benefit.
+function newClientRoundId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 // Bid resolution: tier always wins first (a High Bid beats any Medium/
 // Low/Alt Loot bid regardless of priority), then priority breaks ties
 // within the same tier. Alt Loot ranks below Low Bid even though both
@@ -130,6 +139,14 @@ export function BidsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [capturedItem, setCapturedItem] = useState("");
+  // The open/reviewed round's immutable id (remediation plan Phase 3 task
+  // 3.1) — mirrors capturedItem/roundStartedAt's pattern. Carried through
+  // to SubmitBids so the site can recognize a retry of this exact
+  // submission instead of relying only on its item/time heuristic. Set
+  // from BidRound.roundId everywhere a round is captured/switched/parked/
+  // resumed; generated locally for a manual round, which Go never assigns
+  // one for.
+  const [capturedRoundId, setCapturedRoundId] = useState("");
   const [roundStartedAt, setRoundStartedAt] = useState<string>("");
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -190,6 +207,10 @@ export function BidsPanel() {
   useEffect(() => {
     capturedItemRef.current = capturedItem;
   }, [capturedItem]);
+  const capturedRoundIdRef = useRef("");
+  useEffect(() => {
+    capturedRoundIdRef.current = capturedRoundId;
+  }, [capturedRoundId]);
   const roundStartedAtRef = useRef("");
   useEffect(() => {
     roundStartedAtRef.current = roundStartedAt;
@@ -250,6 +271,7 @@ export function BidsPanel() {
       if (phaseRef.current === "review") {
         const parked: BidRound = {
           itemName: capturedItemRef.current,
+          roundId: capturedRoundIdRef.current,
           startedAt: roundStartedAtRef.current,
           rows: rowsRef.current.map(({ winner: _w, displayName: _d, manual: _m, rowKey: _k, ...r }) => r),
           live: false,
@@ -295,6 +317,7 @@ export function BidsPanel() {
       setItemName(nextItem);
       setRows(toReviewRows(result.current));
       setCapturedItem(result.current.itemName);
+      setCapturedRoundId(result.current.roundId);
       setRoundStartedAt(result.current.startedAt);
       setPhase("live");
       setPendingAnnouncement(null);
@@ -319,6 +342,7 @@ export function BidsPanel() {
     setManualRound(false);
     setRows(toReviewRows(round));
     setCapturedItem(round.itemName);
+    setCapturedRoundId(round.roundId);
     setRoundStartedAt(round.startedAt);
     setItemName(round.itemName);
     setPhase("review");
@@ -367,6 +391,7 @@ export function BidsPanel() {
       if (!round?.live) return;
       setRows(toReviewRows(round));
       setCapturedItem(round.itemName);
+      setCapturedRoundId(round.roundId);
       setRoundStartedAt(round.startedAt);
     });
   }, []);
@@ -383,6 +408,7 @@ export function BidsPanel() {
       const round = await CaptureBids(target, announcedAt);
       setRows(toReviewRows(round));
       setCapturedItem(round.itemName);
+      setCapturedRoundId(round.roundId);
       setRoundStartedAt(round.startedAt);
       setPhase("live");
     } catch (err) {
@@ -410,6 +436,7 @@ export function BidsPanel() {
     setGratsCopied(false);
     setPendingAnnouncement(null);
     setCapturedItem(itemName.trim());
+    setCapturedRoundId(newClientRoundId());
     setRoundStartedAt("");
     setManualRound(true);
     setRows([{ ...newManualRow(), rawMessage: "(manual round)" }]);
@@ -422,7 +449,10 @@ export function BidsPanel() {
     try {
       const round = await EndBidRound();
       setRows(toReviewRows(round));
-      if (round.itemName) setCapturedItem(round.itemName);
+      if (round.itemName) {
+        setCapturedItem(round.itemName);
+        setCapturedRoundId(round.roundId);
+      }
       setPhase("review");
     } catch (err) {
       // The round still ended server-side; surface the error but let the
@@ -438,6 +468,7 @@ export function BidsPanel() {
     setRows([]);
     setPhase("idle");
     setCapturedItem("");
+    setCapturedRoundId("");
     setRoundStartedAt("");
     setItemName("");
     setTieWarning(null);
@@ -653,7 +684,7 @@ export function BidsPanel() {
     if (!confirmDuplicate) setDupPrompt(null);
     try {
       const entries = activeRows.map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt, isWinner: r.winner }));
-      const result = await SubmitBids(capturedItem, entries, confirmDuplicate);
+      const result = await SubmitBids(capturedItem, capturedRoundId, entries, confirmDuplicate);
       // Site rejected it as a likely double-click of a same-item finalize
       // within 12h. Not an error — offer "Record anyway" (a boss really can
       // drop the same item twice a night). Close the confirm dialog so the

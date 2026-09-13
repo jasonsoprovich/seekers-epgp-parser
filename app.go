@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"sort"
@@ -68,7 +69,17 @@ type App struct {
 	// because a round was live (applied when the round closes — swapping
 	// mid-round would rewind the capture window onto a different file). All
 	// under liveBidsMu.
-	roundItem      string
+	roundItem string
+	// Client-generated, immutable for the life of the round (remediation
+	// plan Phase 3 task 3.1) — set once when the round opens (CaptureBids)
+	// or is switched to (SwitchBidRound) and carried unchanged through
+	// every live-push snapshot and the final SubmitBids call. Lets the site
+	// recognize a finalize retry (its own HTTP client already retries once
+	// on a transport error or a 502/503/504 — see officerapi.sendWithRetry)
+	// as the SAME submission instead of a new one, so a response lost after
+	// the write actually succeeded can't double-charge GP or make an
+	// automatic retry look like a duplicate drop to the officer.
+	roundID        string
 	roundStart     time.Time
 	roundResolved  bool
 	pendingLogPath string
@@ -975,10 +986,33 @@ type BidRow struct {
 // rather than returning a bare []BidRow also sidesteps the Wails "extra
 // return value silently dropped" gotcha for the StartedAt/Live fields.
 type BidRound struct {
-	ItemName  string   `json:"itemName"`
+	ItemName string `json:"itemName"`
+	// The round's immutable id (remediation plan Phase 3 task 3.1) — see
+	// App.roundID. Carried by the frontend through review/park and handed
+	// back to SubmitBids so the final submission names the exact round it's
+	// finalizing, not just an item name that could collide with a later
+	// re-drop of the same item.
+	RoundID   string   `json:"roundId"`
 	StartedAt string   `json:"startedAt"`
 	Rows      []BidRow `json:"rows"`
 	Live      bool     `json:"live"`
+}
+
+// newRoundID mints a random v4-shaped UUID for a bid round. Hand-rolled
+// instead of a dependency — crypto/rand is the standard library, and a
+// round id is purely an opaque, collision-resistant correlation key, never
+// parsed or validated for RFC 4122 conformance by either side.
+func newRoundID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failing is effectively never on a real OS — fall back
+		// to something still unique enough that a round is never left
+		// without an id at all.
+		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // buildRows turns a parse window into the review-table rows the frontend
@@ -1082,9 +1116,11 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 	// unless it was already finalized (SubmitBids left it "resolved" for
 	// members to review — Phase 16; the DO also sweeps this officer's
 	// resolved rounds when the new item's first bid pushes).
+	roundID := newRoundID()
 	a.liveBidsMu.Lock()
 	prevItem, prevResolved := a.roundItem, a.roundResolved
 	a.roundItem = itemName
+	a.roundID = roundID
 	a.roundStart = startAt
 	a.roundResolved = false
 	a.liveBidsMu.Unlock()
@@ -1099,6 +1135,7 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 
 	return BidRound{
 		ItemName:  itemName,
+		RoundID:   roundID,
 		StartedAt: startAt.Format(time.RFC3339),
 		Rows:      buildRows(raw, startAt, now),
 		Live:      true,
@@ -1114,7 +1151,7 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 // returns an empty, non-live BidRound.
 func (a *App) EndBidRound() (BidRound, error) {
 	a.liveBidsMu.Lock()
-	item, start := a.roundItem, a.roundStart
+	item, roundID, start := a.roundItem, a.roundID, a.roundStart
 	a.roundFloor = time.Now() // this round is done collecting — a later re-announce is a new round
 	a.liveBidsMu.Unlock()
 
@@ -1125,10 +1162,11 @@ func (a *App) EndBidRound() (BidRound, error) {
 	}
 	raw, err := a.readLog()
 	if err != nil {
-		return BidRound{ItemName: item, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}, err
+		return BidRound{ItemName: item, RoundID: roundID, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}, err
 	}
 	return BidRound{
 		ItemName:  item,
+		RoundID:   roundID,
 		StartedAt: start.Format(time.RFC3339),
 		Rows:      buildRows(raw, start, time.Now()),
 		Live:      false,
@@ -1142,6 +1180,7 @@ func (a *App) DiscardBidRound() {
 	a.liveBidsMu.Lock()
 	item := a.roundItem
 	a.roundItem = ""
+	a.roundID = ""
 	a.roundResolved = false
 	a.roundFloor = time.Now() // don't let a re-announce re-ingest this round's bids
 	a.liveBidsMu.Unlock()
@@ -1164,7 +1203,14 @@ func (a *App) DiscardBidRound() {
 // the Bids tab can show "Record anyway"; calling again with
 // confirmDuplicate=true records it regardless (a boss really did drop the
 // same item twice in one night).
-func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry, confirmDuplicate bool) (officerapi.BidsResponse, error) {
+// roundID is the round's own immutable id (BidRound.RoundID, task 3.1) —
+// supplied by the frontend rather than read from a.roundID because by the
+// time a PARKED round is submitted, a.roundID already belongs to whatever
+// round is current, not this one. Empty for a manual round or a build of
+// this app that predates the field; the site treats a missing id as "no
+// retry-idempotency for this submission" and falls back to its own
+// item/time heuristic, same as before this task.
+func (a *App) SubmitBids(itemName string, roundID string, entries []officerapi.BidEntry, confirmDuplicate bool) (officerapi.BidsResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.BidsResponse{}, err
@@ -1173,6 +1219,7 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry, confirm
 		ItemName:         itemName,
 		Entries:          entries,
 		ConfirmDuplicate: confirmDuplicate,
+		SubmissionID:     roundID,
 	})
 	if err == nil && !resp.Duplicate {
 		a.liveBidsMu.Lock()
@@ -1695,7 +1742,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	}
 
 	a.liveBidsMu.Lock()
-	item, start := a.roundItem, a.roundStart
+	item, roundID, start := a.roundItem, a.roundID, a.roundStart
 	a.liveBidsMu.Unlock()
 	a.stopLiveBidPush()
 
@@ -1703,7 +1750,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	if err != nil {
 		return BidSwitchResult{}, err
 	}
-	parked := BidRound{ItemName: item, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}
+	parked := BidRound{ItemName: item, RoundID: roundID, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}
 	if item != "" {
 		if at.Before(start) {
 			at = start
@@ -1711,12 +1758,20 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 		parked.Rows = buildRows(raw, start, at)
 	}
 
+	// A genuinely new round gets its own id — the parked round keeps the
+	// one it already had (task 3.1: immutable for the life of a round), so
+	// the officer's eventual SubmitBids for either one names the exact
+	// round, not whichever happened to be "current" in Go's state at that
+	// moment (which by then is neither — see SubmitBids's roundID param).
+	nextRoundID := newRoundID()
+
 	// The parked round is done collecting: the floor moves to the new
 	// announcement — NOT to "now" as EndBidRound does — so the new round
 	// legitimately starts at `at` and picks up every tell sent since.
 	a.liveBidsMu.Lock()
 	a.roundFloor = at
 	a.roundItem = nextItem
+	a.roundID = nextRoundID
 	a.roundStart = at
 	a.roundResolved = false
 	a.liveBidsMu.Unlock()
@@ -1726,6 +1781,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 		Parked: parked,
 		Current: BidRound{
 			ItemName:  nextItem,
+			RoundID:   nextRoundID,
 			StartedAt: at.Format(time.RFC3339),
 			Rows:      buildRows(raw, at, time.Now()),
 			Live:      true,
