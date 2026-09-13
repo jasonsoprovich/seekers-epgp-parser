@@ -5,6 +5,7 @@ import {
   DetectedLogs,
   FetchGuildSettings,
   GetLogPath,
+  GetLogTailStatus,
   GetSettings,
   OpenAppKeyPage,
   SaveSettings,
@@ -13,9 +14,15 @@ import {
   SetAutoDetectBids,
   TestConnection,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
-import type { GameDirInfo } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
+import type { GameDirInfo, LogTailStatus } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import type { Settings as GuildSettings } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 import { invalidateRoster } from "./useRoster";
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function SettingsPanel({
   onLogPathChange,
@@ -39,6 +46,12 @@ export function SettingsPanel({
   const [guildSettings, setGuildSettings] = useState<GuildSettings | null>(null);
   const [guildSettingsError, setGuildSettingsError] = useState<string | null>(null);
   const [version, setVersion] = useState("");
+  // The followed log's size/read progress (remediation plan Phase 2 task
+  // 2.5) — mainly a "is the incremental tailer actually working" sanity
+  // check, not something an officer needs day-to-day. Refreshed on a slow
+  // poll rather than tied to any event, since it just reflects whatever the
+  // last capture/poll already read.
+  const [tailStatus, setTailStatus] = useState<LogTailStatus | null>(null);
 
   useEffect(() => {
     GetSettings().then((s) => {
@@ -51,6 +64,11 @@ export function SettingsPanel({
     AppVersion().then(setVersion).catch(() => {});
     refreshDetectedLogs();
     refreshGuildSettings();
+
+    const refreshTailStatus = () => GetLogTailStatus().then(setTailStatus).catch(() => {});
+    refreshTailStatus();
+    const id = setInterval(refreshTailStatus, 5000);
+    return () => clearInterval(id);
   }, []);
 
   // The active-character watcher swaps the followed log on its own when the
@@ -231,6 +249,12 @@ export function SettingsPanel({
               if your logs live somewhere non-standard.
             </p>
           </div>
+        )}
+        {tailStatus && tailStatus.path && (
+          <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+            {formatBytes(tailStatus.size)} read
+            {tailStatus.resets > 1 ? ` · reset ${tailStatus.resets - 1} time${tailStatus.resets - 1 === 1 ? "" : "s"} (log cleared or replaced)` : ""}
+          </p>
         )}
       </section>
 

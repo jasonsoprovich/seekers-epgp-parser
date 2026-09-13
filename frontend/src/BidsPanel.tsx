@@ -5,11 +5,12 @@ import {
   DiscardBidRound,
   EndBidRound,
   FetchKnownItems,
+  GetLiveBidPushStatus,
   SetBidsUnsaved,
   SubmitBids,
   SwitchBidRound,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
-import type { BidRound, BidRow as CapturedBidRow } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
+import type { BidRound, BidRow as CapturedBidRow, LiveBidPushStatus } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { MainResolveCombobox } from "./MainResolveCombobox";
 import { useRoster } from "./useRoster";
@@ -326,6 +327,35 @@ export function BidsPanel() {
   function discardParked(index: number) {
     setParkedRounds((prev) => prev.filter((_, i) => i !== index));
   }
+
+  // Whether the live round is actually reaching the site (remediation plan
+  // Phase 2 task 2.5) — the table above always updates from the local log
+  // regardless (see the "bids:round" listener below), so without this the
+  // officer has no way to notice the site delivery side is stuck until a
+  // member says the live board looks wrong. Polling GetLiveBidPushStatus is
+  // a local, in-memory Wails call (livebidpush.go's status snapshot), not a
+  // network request of its own.
+  const [pushStatus, setPushStatus] = useState<LiveBidPushStatus | null>(null);
+  useEffect(() => {
+    if (phase !== "live") {
+      setPushStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      GetLiveBidPushStatus()
+        .then((s) => {
+          if (!cancelled) setPushStatus(s);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [phase]);
 
   // While a round is live the Go-side poller re-emits the whole round every
   // few seconds as tells arrive. Replace the table wholesale — nothing is
@@ -822,6 +852,21 @@ export function BidsPanel() {
               {rows.length} bid{rows.length === 1 ? "" : "s"}
               {phase === "live" && " · watching…"}
             </span>
+            {phase === "live" && (
+              <span
+                style={{
+                  fontSize: 12,
+                  color: pushStatus?.pendingRetry ? "#f59e0b" : pushStatus?.lastDeliveredAt ? "#6b7280" : "#9ca3af",
+                }}
+                title={pushStatus?.pendingRetry ? pushStatus.lastError : undefined}
+              >
+                {pushStatus?.pendingRetry
+                  ? "⚠ site connection trouble — retrying"
+                  : pushStatus?.lastDeliveredAt
+                    ? "✓ live board synced"
+                    : "connecting to site…"}
+              </span>
+            )}
             {phase === "live" && (
               <button className="primary" style={{ marginLeft: "auto" }} onClick={onEndRound} disabled={pending}>
                 {pending ? "Ending…" : "End Round & Review"}
