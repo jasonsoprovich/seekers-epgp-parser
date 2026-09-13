@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/eqlogs"
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/logtail"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
 )
@@ -40,6 +40,17 @@ type App struct {
 	logPath  string
 	settings officerapi.Settings
 
+	// tailer follows logPath incrementally (remediation plan Phase 2,
+	// task 2.1/2.2) instead of every caller re-reading the whole file with
+	// os.ReadFile — a production officer log can approach 1 GB, and this
+	// app polls it from two independent watchers every few seconds.
+	// Guarded by tailerMu, not liveBidsMu/annMu/activeLogMu — those guard
+	// unrelated round/announcement state and swapping the followed file is
+	// orthogonal to all of them. Always go through setLogPath to change
+	// a.logPath so the tailer never points at a stale file.
+	tailerMu sync.RWMutex
+	tailer   *logtail.Tailer
+
 	// Guards liveBidsCancel and the round-state fields below — Capture
 	// Bids (starts a poller, opens a round), End Round and Submit (stop the
 	// poller, close the round) are all Wails-bound methods JS can call
@@ -47,6 +58,9 @@ type App struct {
 	// ticking goroutine itself.
 	liveBidsMu     sync.Mutex
 	liveBidsCancel context.CancelFunc
+	// The current round's delivery status (livebidpush.go, remediation
+	// plan Phase 2 task 2.4/2.5) — nil when no round is live.
+	liveBidsPushStatus *livePushStatus
 	// The item a round is currently open for ("" = no round), its window
 	// start, whether SubmitBids has finalized it (so the poller's stop path
 	// doesn't clear a round the site should now keep as "resolved"), and a
@@ -154,13 +168,13 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	a.app = application.Get()
 	a.ctx = ctx
 	if s, err := config.Load(); err == nil {
-		a.logPath = s.LogPath
+		a.setLogPath(s.LogPath)
 		// If a game folder is configured, re-resolve the active character's
 		// log on launch — the officer may have last raided on a different
 		// character than the one saved in LogPath.
 		if s.GameDir != "" && !s.ManualLogPath {
 			if active, ok := a.resolveActiveLog(s.GameDir); ok {
-				a.logPath = active.Path
+				a.setLogPath(active.Path)
 				a.persistLogPath(active.Path)
 			}
 		}
@@ -218,7 +232,7 @@ func (a *App) SelectLogFile() (string, error) {
 		return "", err
 	}
 	if path != "" {
-		a.logPath = path
+		a.setLogPath(path)
 		// A hand-picked file wins over game-folder auto-detection: mark it
 		// manual so startActiveLogWatch stands down and stops re-pointing
 		// logPath on the officer.
@@ -235,7 +249,7 @@ func (a *App) SelectLogFile() (string, error) {
 }
 
 func (a *App) GetLogPath() string {
-	return a.logPath
+	return a.currentLogPath()
 }
 
 // AppVersion is the running build's version string — "vX.Y.Z" for a
@@ -292,7 +306,7 @@ func (a *App) SelectGameDir() (GameDirInfo, error) {
 	s.ManualLogPath = false
 	if active, ok := eqlogs.Active(logs); ok {
 		s.LogPath = active.Path
-		a.logPath = active.Path
+		a.setLogPath(active.Path)
 	}
 	_ = config.Save(s)
 
@@ -328,8 +342,9 @@ func (a *App) gameDirInfo() GameDirInfo {
 		return info
 	}
 	info.Logs = logs
+	active := a.currentLogPath()
 	for _, l := range logs {
-		if l.Path == a.logPath {
+		if l.Path == active {
 			info.ActivePath = l.Path
 			info.ActiveChar = l.Character
 			info.ActiveServer = l.Server
@@ -645,15 +660,81 @@ func (a *App) FetchTotals(query string) ([]officerapi.TotalsRow, error) {
 	return client.FetchTotals(a.ctx, query)
 }
 
+// setLogPath is the only place a.logPath should be assigned once the app
+// is running — it keeps a.tailer pointed at the same file, closing the
+// previous one first (each Tailer holds an open file handle). Setting
+// a.logPath directly would leave a stale tailer reading (or erroring
+// against) the wrong path. A no-op if path is unchanged and a tailer
+// already exists for it.
+func (a *App) setLogPath(path string) {
+	a.tailerMu.Lock()
+	defer a.tailerMu.Unlock()
+	if a.logPath == path && a.tailer != nil {
+		return
+	}
+	if a.tailer != nil {
+		_ = a.tailer.Close()
+	}
+	a.logPath = path
+	if path != "" {
+		a.tailer = logtail.New(path)
+	} else {
+		a.tailer = nil
+	}
+}
+
+// currentLogPath is the synchronized read counterpart to setLogPath — the
+// active-character watcher, the announcement watcher, and the live-bid
+// poller each run on their own goroutine and can race a UI-invoked
+// SelectLogFile/SelectGameDir call that reassigns a.logPath concurrently.
+func (a *App) currentLogPath() string {
+	a.tailerMu.RLock()
+	defer a.tailerMu.RUnlock()
+	return a.logPath
+}
+
+// readLog returns the followed log's full content so far. Backed by
+// a.tailer (remediation plan Phase 2): after the first call, this only
+// costs a seeked read of whatever the EQ client appended since the
+// previous poll, not a full re-read of a file that can approach 1 GB.
 func (a *App) readLog() (string, error) {
-	if a.logPath == "" {
+	a.tailerMu.RLock()
+	tl := a.tailer
+	a.tailerMu.RUnlock()
+	if tl == nil {
 		return "", errors.New("no log file selected — use Settings to pick one first")
 	}
-	data, err := os.ReadFile(a.logPath)
-	if err != nil {
-		return "", err
+	return tl.Read()
+}
+
+// LogTailStatus backs a small diagnostics display (remediation plan Phase
+// 2 task 2.5): the followed file's size, how much of it has actually been
+// read, and how many times the tailer had to reset (the log was cleared
+// or replaced) — visibility into whether incremental tailing is behaving,
+// without adding a UI dependency on internal/logtail's own types.
+type LogTailStatus struct {
+	Path       string `json:"path"`
+	Size       int64  `json:"size"`
+	BytesRead  int64  `json:"bytesRead"`
+	Resets     int    `json:"resets"`
+	LastReadAt string `json:"lastReadAt"`
+}
+
+// GetLogTailStatus returns the current tailer's stats, or a zero-value
+// LogTailStatus (not an error) when no log file is selected yet.
+func (a *App) GetLogTailStatus() LogTailStatus {
+	a.tailerMu.RLock()
+	tl := a.tailer
+	a.tailerMu.RUnlock()
+	if tl == nil {
+		return LogTailStatus{}
 	}
-	return string(data), nil
+	st := tl.Stat()
+	out := LogTailStatus{Path: st.Path, Size: st.Size, BytesRead: st.BytesRead, Resets: st.Resets}
+	if !st.LastReadAt.IsZero() {
+		out.LastReadAt = st.LastReadAt.Format(time.RFC3339)
+	}
+	return out
 }
 
 // --- Attendance ---
@@ -1117,7 +1198,7 @@ func (a *App) SubmitBids(itemName string, entries []officerapi.BidEntry, confirm
 			})
 		}
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = client.ResolveLiveBids(bg, itemName, eqlogs.CharacterFromPath(a.logPath), resolveBids)
+		_ = client.ResolveLiveBids(bg, itemName, eqlogs.CharacterFromPath(a.currentLogPath()), resolveBids)
 		cancel()
 		a.applyPendingLogSwap()
 	}
@@ -1133,6 +1214,7 @@ func (a *App) stopLiveBidPush() {
 		a.liveBidsCancel()
 		a.liveBidsCancel = nil
 	}
+	a.liveBidsPushStatus = nil
 }
 
 // clearLiveBids removes an item's round from the site's live view,
@@ -1171,7 +1253,7 @@ func (a *App) ServiceShutdown() error {
 // officer said before opening the app doesn't fire.
 func (a *App) startAnnouncementWatch() {
 	a.stopAnnouncementWatch()
-	if a.logPath == "" {
+	if a.currentLogPath() == "" {
 		return
 	}
 	if s, err := config.Load(); err == nil && !s.AutoDetectBidsEnabled() {
@@ -1322,7 +1404,7 @@ func (a *App) startActiveLogWatch() {
 			}
 
 			active, ok := a.resolveActiveLog(s.GameDir)
-			if !ok || active.Path == a.logPath {
+			if !ok || active.Path == a.currentLogPath() {
 				continue
 			}
 
@@ -1345,7 +1427,7 @@ func (a *App) startActiveLogWatch() {
 // persists it, restarts the announcement watch against it, and tells the
 // frontend.
 func (a *App) switchActiveLog(active eqlogs.CharacterLog) {
-	a.logPath = active.Path
+	a.setLogPath(active.Path)
 	a.persistLogPath(active.Path)
 	a.startAnnouncementWatch()
 	if a.app != nil {
@@ -1367,7 +1449,7 @@ func (a *App) applyPendingLogSwap() {
 	path := a.pendingLogPath
 	a.pendingLogPath = ""
 	a.liveBidsMu.Unlock()
-	if path == "" || path == a.logPath {
+	if path == "" || path == a.currentLogPath() {
 		return
 	}
 	s, err := config.Load()
@@ -1439,32 +1521,75 @@ func pushCursor(candidates []parse.BidCandidate, prevPushed int, prevLastAt time
 	return prevPushed
 }
 
+// LiveBidPushStatus backs a small "is this actually reaching the site"
+// indicator (remediation plan Phase 2 task 2.5) — the officer's own
+// "bids:round" view updates from the local log regardless, so without
+// this they'd have no way to notice the site delivery side is stuck
+// until a member says the live board looks wrong.
+type LiveBidPushStatus struct {
+	LastDeliveredAt string `json:"lastDeliveredAt"`
+	PendingRetry    bool   `json:"pendingRetry"`
+	LastError       string `json:"lastError"`
+}
+
+// GetLiveBidPushStatus returns the current round's delivery status, or a
+// zero value when no round is live.
+func (a *App) GetLiveBidPushStatus() LiveBidPushStatus {
+	a.liveBidsMu.Lock()
+	status := a.liveBidsPushStatus
+	a.liveBidsMu.Unlock()
+	if status == nil {
+		return LiveBidPushStatus{}
+	}
+	return status.snapshot()
+}
+
+// startLiveBidPush runs two independent loops for the round's lifetime,
+// both stopped by the same ctx (stopLiveBidPush / a round ending):
+//
+//   - the ingestion loop below, which reads the log, re-emits "bids:round"
+//     to the officer's own UI, and hands the latest snapshot to a mailbox;
+//   - runLivePushDelivery (livebidpush.go), which drains that mailbox and
+//     does the actual HTTP push, on its own schedule.
+//
+// Splitting them (remediation plan Phase 2 task 2.4) means a slow or
+// stalled site connection can never delay the officer's own live view of
+// their round — before this, both were one sequential loop, so a hung
+// push held up the very next log read too.
 func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 	a.stopLiveBidPush()
 
 	ctx, cancel := context.WithCancel(a.ctx)
+	mailbox := newLivePushMailbox()
+	status := &livePushStatus{}
 	a.liveBidsMu.Lock()
 	a.liveBidsCancel = cancel
+	a.liveBidsPushStatus = status
 	a.liveBidsMu.Unlock()
 
 	// Which of the officer's characters is capturing this round — the site
 	// shows it as "collected by" (LT-07). Fixed for the round's lifetime: a
 	// character swap is deferred while a round is live (startActiveLogWatch).
-	capturedBy := eqlogs.CharacterFromPath(a.logPath)
+	capturedBy := eqlogs.CharacterFromPath(a.currentLogPath())
+
+	if client, err := a.officerClient(); err == nil {
+		go runLivePushDelivery(ctx, mailbox, status, client)
+	}
 
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
-		// Signature of the last snapshot pushed. Seeded to a value no real
-		// scan produces so the very first tick pushes — an empty snapshot
-		// puts the round on the site's board ("no bids yet") the moment the
-		// announcement lands, instead of only once the first tell arrives.
+		// Signature of the last snapshot enqueued. Seeded to a value no
+		// real scan produces so the very first tick enqueues — an empty
+		// snapshot puts the round on the site's board ("no bids yet") the
+		// moment the announcement lands, instead of only once the first
+		// tell arrives.
 		lastSig := "\x00"
 		idleTicks := 0
 		// The DO's live TTL is 90s, so a heartbeat every ~20s on a quiet
 		// round is plenty of margin — and keeps per-key request volume low
 		// when 1-10 officers are all polling at once during a raid
-		// (PLAN.md §15). A changed snapshot still pushes immediately.
+		// (PLAN.md §15). A changed snapshot still enqueues immediately.
 		const heartbeatEveryNIdleTicks = 4
 		// Even an unchanged snapshot is re-sent every ~60s so the board
 		// self-heals if the site's DO lost the round (eviction, a dropped
@@ -1493,19 +1618,15 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 
 			// Re-emit the round to THIS app every tick (bids or not) so the
 			// Bids tab's live table and bid count track reality without its
-			// own timer. Local-only and independent of the site push below —
-			// the officer's own view updates even with no API key set.
+			// own timer. Local-only and entirely independent of the mailbox
+			// below — the officer's own view updates even with no API key
+			// set, or while a push is stuck retrying.
 			a.app.Event.Emit("bids:round", BidRound{
 				ItemName:  itemName,
 				StartedAt: startAt.Format(time.RFC3339),
 				Rows:      buildRows(raw, startAt, now),
 				Live:      true,
 			})
-
-			client, err := a.officerClient()
-			if err != nil {
-				continue
-			}
 
 			// The site's snapshot: every tell in log order (the board keeps
 			// the latest per character, same as the review table). A
@@ -1530,15 +1651,15 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 			if sig == lastSig {
 				idleTicks++
 				if idleTicks%resendEveryNIdleTicks == 0 {
-					_ = client.PushLiveBidSnapshot(ctx, itemName, capturedBy, snapshot)
+					mailbox.Put(livePushJob{itemName: itemName, capturedBy: capturedBy, entries: snapshot, sig: sig})
 				} else if idleTicks%heartbeatEveryNIdleTicks == 1 {
-					_ = client.HeartbeatLiveBids(ctx, itemName)
+					mailbox.Put(livePushJob{itemName: itemName, sig: sig}) // entries == nil => heartbeat-only
 				}
 				continue
 			}
 			idleTicks = 0
 			lastSig = sig
-			_ = client.PushLiveBidSnapshot(ctx, itemName, capturedBy, snapshot)
+			mailbox.Put(livePushJob{itemName: itemName, capturedBy: capturedBy, entries: snapshot, sig: sig})
 		}
 	}()
 }

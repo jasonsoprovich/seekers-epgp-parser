@@ -91,6 +91,34 @@ export interface LedgerPage {
 }
 
 /**
+ * LiveBidPushStatus backs a small "is this actually reaching the site"
+ * indicator (remediation plan Phase 2 task 2.5) — the officer's own
+ * "bids:round" view updates from the local log regardless, so without
+ * this they'd have no way to notice the site delivery side is stuck
+ * until a member says the live board looks wrong.
+ */
+export interface LiveBidPushStatus {
+    "lastDeliveredAt": string;
+    "pendingRetry": boolean;
+    "lastError": string;
+}
+
+/**
+ * LogTailStatus backs a small diagnostics display (remediation plan Phase
+ * 2 task 2.5): the followed file's size, how much of it has actually been
+ * read, and how many times the tailer had to reset (the log was cleared
+ * or replaced) — visibility into whether incremental tailing is behaving,
+ * without adding a UI dependency on internal/logtail's own types.
+ */
+export interface LogTailStatus {
+    "path": string;
+    "size": number;
+    "bytesRead": number;
+    "resets": number;
+    "lastReadAt": string;
+}
+
+/**
  * PointValues wraps FetchPointValues' two lists into one Wails-friendly
  * return — Wails bindings only carry a single value plus a trailing
  * error, so a bare (ep, gp, error) signature silently drops gp from the

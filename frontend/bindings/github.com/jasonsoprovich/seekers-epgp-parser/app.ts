@@ -182,8 +182,24 @@ export function FetchTotals(query: string): $CancellablePromise<officerapi$0.Tot
     return $Call.ByID(2327640120, query);
 }
 
+/**
+ * GetLiveBidPushStatus returns the current round's delivery status, or a
+ * zero value when no round is live.
+ */
+export function GetLiveBidPushStatus(): $CancellablePromise<$models.LiveBidPushStatus> {
+    return $Call.ByID(819017598);
+}
+
 export function GetLogPath(): $CancellablePromise<string> {
     return $Call.ByID(371917464);
+}
+
+/**
+ * GetLogTailStatus returns the current tailer's stats, or a zero-value
+ * LogTailStatus (not an error) when no log file is selected yet.
+ */
+export function GetLogTailStatus(): $CancellablePromise<$models.LogTailStatus> {
+    return $Call.ByID(3575400447);
 }
 
 export function GetSettings(): $CancellablePromise<config$0.Settings> {

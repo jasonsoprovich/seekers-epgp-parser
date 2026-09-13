@@ -13,6 +13,8 @@ export type {
     BidSwitchResult,
     GameDirInfo,
     LedgerPage,
+    LiveBidPushStatus,
+    LogTailStatus,
     PointValues,
     UpdateInfo
 } from "./models.js";
