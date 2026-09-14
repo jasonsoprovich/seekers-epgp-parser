@@ -17,6 +17,7 @@
 package logtail
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -78,8 +79,10 @@ func (t *Tailer) Stat() Stat {
 	}
 }
 
-// Read returns the full accumulated content of the followed file. The
-// first call, and any call after the file is truncated or replaced (a
+// Read returns the full accumulated content through the last completed
+// newline. An in-progress trailing line stays buffered until a later read
+// observes its newline, so parsers never act on a transient partial record.
+// The first call, and any call after the file is truncated or replaced (a
 // fresh cmd/simlog run, a log cleared at a server restart, the officer
 // re-pointing SelectLogFile at a different file that happens to reuse the
 // same path), does a full read from the start. Every other call reads
@@ -154,7 +157,11 @@ func (t *Tailer) Read() (string, error) {
 	// length (never mutates bytes at an index a previously-returned string
 	// already covers) and a reset always starts a brand-new backing array
 	// rather than reusing one a live string might still reference.
-	return unsafe.String(unsafe.SliceData(t.content), len(t.content)), nil
+	completeLen := bytes.LastIndexByte(t.content, '\n') + 1
+	if completeLen == 0 {
+		return "", nil
+	}
+	return unsafe.String(unsafe.SliceData(t.content), completeLen), nil
 }
 
 // appendGrowing appends b to t.content, always leaving meaningful spare

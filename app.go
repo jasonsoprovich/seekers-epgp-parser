@@ -1131,7 +1131,7 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 	// PLAN.md §15 / Phase 12 task 12.3: from here on, push each
 	// newly-detected tell for this item to the site's live view, and
 	// re-emit the round locally, until EndBidRound or SubmitBids stops it.
-	a.startLiveBidPush(itemName, startAt)
+	a.startLiveBidPush(itemName, roundID, startAt)
 
 	return BidRound{
 		ItemName:  itemName,
@@ -1603,7 +1603,7 @@ func (a *App) GetLiveBidPushStatus() LiveBidPushStatus {
 // stalled site connection can never delay the officer's own live view of
 // their round — before this, both were one sequential loop, so a hung
 // push held up the very next log read too.
-func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
+func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Time) {
 	a.stopLiveBidPush()
 
 	ctx, cancel := context.WithCancel(a.ctx)
@@ -1670,6 +1670,7 @@ func (a *App) startLiveBidPush(itemName string, startAt time.Time) {
 			// set, or while a push is stuck retrying.
 			a.app.Event.Emit("bids:round", BidRound{
 				ItemName:  itemName,
+				RoundID:   roundID,
 				StartedAt: startAt.Format(time.RFC3339),
 				Rows:      buildRows(raw, startAt, now),
 				Live:      true,
@@ -1776,7 +1777,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	a.roundResolved = false
 	a.liveBidsMu.Unlock()
 
-	a.startLiveBidPush(nextItem, at)
+	a.startLiveBidPush(nextItem, nextRoundID, at)
 	return BidSwitchResult{
 		Parked: parked,
 		Current: BidRound{

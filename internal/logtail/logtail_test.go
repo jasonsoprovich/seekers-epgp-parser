@@ -85,8 +85,8 @@ func TestTailer_PartialLineAcrossReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if got != "[Wed Sep 10 20:15:0" {
-		t.Fatalf("Read of partial line = %q", got)
+	if got != "" {
+		t.Fatalf("Read of partial line = %q, want it buffered until newline", got)
 	}
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
