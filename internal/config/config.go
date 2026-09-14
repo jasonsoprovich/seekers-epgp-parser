@@ -41,6 +41,19 @@ type Settings struct {
 	// false; Settings has a "Run setup again" button that reopens it
 	// regardless.
 	SetupComplete bool `json:"setupComplete,omitempty"`
+	// RollWinnerRule is the Rolls tab's global "highest" or "lowest" wins
+	// preference (empty reads as "highest" — see RollWinnerRuleOrDefault).
+	// Reference-only tracker, no server or ledger involvement at all — see
+	// internal/parse/rolls.go.
+	RollWinnerRule string `json:"rollWinnerRule,omitempty"`
+}
+
+// RollWinnerRuleOrDefault defaults to "highest" when never set.
+func (s Settings) RollWinnerRuleOrDefault() string {
+	if s.RollWinnerRule != "lowest" {
+		return "highest"
+	}
+	return "lowest"
 }
 
 // AutoDetectBidsEnabled defaults to true when the setting has never been

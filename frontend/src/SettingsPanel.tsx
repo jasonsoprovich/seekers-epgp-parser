@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { Events } from "@wailsio/runtime";
 import {
+  ArchiveAndTrimLog,
   AppVersion,
   DetectedLogs,
   FetchGuildSettings,
+  GetActiveLogInfo,
+  GetLogMaintenanceThresholds,
   GetLogPath,
   GetLogTailStatus,
   GetSettings,
@@ -14,8 +17,15 @@ import {
   SetAutoDetectBids,
   TestConnection,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
-import type { GameDirInfo, LogTailStatus } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
+import type {
+  ArchiveResultView,
+  GameDirInfo,
+  LogFileInfoView,
+  LogMaintenanceThresholds,
+  LogTailStatus,
+} from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import type { Settings as GuildSettings } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { invalidateRoster } from "./useRoster";
 
 function formatBytes(n: number): string {
@@ -53,6 +63,19 @@ export function SettingsPanel({
   // last capture/poll already read.
   const [tailStatus, setTailStatus] = useState<LogTailStatus | null>(null);
 
+  // Log maintenance ("Archive & Trim" — ported from pq-companion). Size/
+  // date info for the currently-watched log only, loaded on demand
+  // ("Check Log File") rather than eagerly — it does a bounded content
+  // scan, not just a stat, so it's not worth running on every poll.
+  const [logThresholds, setLogThresholds] = useState<LogMaintenanceThresholds | null>(null);
+  const [activeLogInfo, setActiveLogInfo] = useState<LogFileInfoView | null>(null);
+  const [logInfoError, setLogInfoError] = useState<string | null>(null);
+  const [logInfoLoading, setLogInfoLoading] = useState(false);
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveResult, setArchiveResult] = useState<ArchiveResultView | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+
   useEffect(() => {
     GetSettings().then((s) => {
       setApiKey(s.apiKey);
@@ -64,6 +87,7 @@ export function SettingsPanel({
     AppVersion().then(setVersion).catch(() => {});
     refreshDetectedLogs();
     refreshGuildSettings();
+    GetLogMaintenanceThresholds().then(setLogThresholds).catch(() => {});
 
     const refreshTailStatus = () => GetLogTailStatus().then(setTailStatus).catch(() => {});
     refreshTailStatus();
@@ -170,6 +194,55 @@ export function SettingsPanel({
     }
   }
 
+  async function onCheckLogFile() {
+    setLogInfoLoading(true);
+    setLogInfoError(null);
+    setArchiveResult(null);
+    setArchiveError(null);
+    try {
+      setActiveLogInfo(await GetActiveLogInfo());
+    } catch (err) {
+      setLogInfoError(String(err));
+      setActiveLogInfo(null);
+    } finally {
+      setLogInfoLoading(false);
+    }
+  }
+
+  // The button is disabled well before the click reaches here (see
+  // recentlyWritten below) — this re-check is just so a stale info screen
+  // (checked a while ago, EQ has since written more) doesn't let the click
+  // through anyway.
+  function onArchiveClick() {
+    if (!activeLogInfo) return;
+    setArchiveError(null);
+    setArchiveConfirmOpen(true);
+  }
+
+  async function onArchiveConfirm() {
+    if (!activeLogInfo) return;
+    setArchiving(true);
+    setArchiveError(null);
+    try {
+      const result = await ArchiveAndTrimLog(activeLogInfo.path);
+      setArchiveResult(result);
+      setArchiveConfirmOpen(false);
+      // The trim changed the live file out from under whatever info we
+      // were showing — refresh it so size/dates reflect reality.
+      await onCheckLogFile();
+      refreshDetectedLogs();
+    } catch (err) {
+      setArchiveError(String(err));
+      setArchiveConfirmOpen(false);
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  const recentlyWritten = activeLogInfo
+    ? Date.now() - new Date(activeLogInfo.modifiedAt).getTime() < (logThresholds?.liveWriteWindowMs ?? 2 * 60 * 1000)
+    : false;
+
   return (
     <div className="settings">
       <div className="panel-header">
@@ -203,28 +276,41 @@ export function SettingsPanel({
         {gameDir && (gameDir.logs?.length ?? 0) > 0 && (
           <table className="char-list col-fixed" style={{ marginTop: 12 }}>
             <colgroup>
-              <col style={{ width: "34%" }} />
+              <col style={{ width: "28%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "16%" }} />
               <col style={{ width: "22%" }} />
-              <col style={{ width: "24%" }} />
-              <col style={{ width: "20%" }} />
+              <col style={{ width: "16%" }} />
             </colgroup>
             <thead>
               <tr>
                 <th>Character</th>
                 <th>Server</th>
+                <th>Size</th>
                 <th>Last written</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {(gameDir.logs ?? []).map((l) => (
-                <tr key={l.path} className={l.path === logPath ? "active" : ""}>
-                  <td>{l.character}</td>
-                  <td>{l.server}</td>
-                  <td>{new Date(l.modifiedAt).toLocaleString()}</td>
-                  <td>{l.path === logPath ? "watching" : ""}</td>
-                </tr>
-              ))}
+              {(gameDir.logs ?? []).map((l) => {
+                const large = logThresholds ? l.size >= logThresholds.sizeWarningBytes : false;
+                return (
+                  <tr key={l.path} className={l.path === logPath ? "active" : ""}>
+                    <td>{l.character}</td>
+                    <td>{l.server}</td>
+                    <td title={large ? "Large — see Log maintenance below" : undefined}>
+                      {formatBytes(l.size)}
+                      {large && (
+                        <span className="badge large" style={{ marginLeft: 6 }}>
+                          large
+                        </span>
+                      )}
+                    </td>
+                    <td>{new Date(l.modifiedAt).toLocaleString()}</td>
+                    <td>{l.path === logPath ? "watching" : ""}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -257,6 +343,106 @@ export function SettingsPanel({
           </p>
         )}
       </section>
+
+      {/* --- Log maintenance ("Archive & Trim") --- */}
+      <section className={`form-card settings-card ${activeLogInfo?.largeFile ? "settings-card-warning" : ""}`}>
+        <div className="panel-header" style={{ marginBottom: 4 }}>
+          <h3 style={{ margin: 0 }}>Log maintenance</h3>
+          {activeLogInfo?.largeFile && (
+            <span className="badge large" style={{ marginLeft: 8 }}>
+              large file detected
+            </span>
+          )}
+        </div>
+        <p className="hint">
+          A very large log file (an officer's reached ~1 GB once) makes every capture slower to read. "Archive &amp; Trim"
+          zips the whole current log to a backup next to it, then keeps only the last {logThresholds?.keepDays ?? 30} days
+          live — nothing is ever deleted outright.
+        </p>
+        <div className="settings-row">
+          <button className="secondary" onClick={onCheckLogFile} disabled={logInfoLoading || !logPath}>
+            {logInfoLoading ? "Checking…" : "Check Log File"}
+          </button>
+          {activeLogInfo && (
+            <button
+              className="primary"
+              onClick={onArchiveClick}
+              disabled={archiving || recentlyWritten}
+              title={recentlyWritten ? "This log was written to recently — camp out of EverQuest first, then Check Log File again" : undefined}
+            >
+              Archive &amp; Trim
+            </button>
+          )}
+        </div>
+        {logInfoError && <div className="error">{logInfoError}</div>}
+        {activeLogInfo && (
+          <dl className="kv" style={{ marginTop: 10 }}>
+            <div>
+              <dt>File</dt>
+              <dd className="path">{activeLogInfo.path}</dd>
+            </div>
+            <div>
+              <dt>Size</dt>
+              <dd>
+                {formatBytes(activeLogInfo.size)}
+                {activeLogInfo.largeFile && (
+                  <span className="badge large" style={{ marginLeft: 6 }}>
+                    large
+                  </span>
+                )}
+              </dd>
+            </div>
+            {activeLogInfo.oldestEntry && (
+              <div>
+                <dt>Oldest entry</dt>
+                <dd>{new Date(activeLogInfo.oldestEntry).toLocaleString()}</dd>
+              </div>
+            )}
+            {activeLogInfo.newestEntry && (
+              <div>
+                <dt>Newest entry</dt>
+                <dd>{new Date(activeLogInfo.newestEntry).toLocaleString()}</dd>
+              </div>
+            )}
+          </dl>
+        )}
+        {recentlyWritten && (
+          <div className="warning">
+            This log was written to in the last couple minutes — EverQuest still has it open. Camp out of the zone, wait a
+            bit, then Check Log File again before archiving.
+          </div>
+        )}
+        {archiveError && <div className="error">{archiveError}</div>}
+        {archiveResult && (
+          <div className="success">
+            Archived {formatBytes(archiveResult.originalBytes)} to <span className="path">{archiveResult.backupPath}</span> —
+            kept {formatBytes(archiveResult.keptBytes)} live.
+          </div>
+        )}
+      </section>
+
+      <ConfirmDialog
+        open={archiveConfirmOpen}
+        title="Archive & Trim this log?"
+        confirmLabel="Archive & Trim"
+        busy={archiving}
+        onCancel={() => setArchiveConfirmOpen(false)}
+        onConfirm={() => void onArchiveConfirm()}
+        body={
+          activeLogInfo && (
+            <>
+              <p style={{ margin: "0 0 8px" }}>
+                This zips the entire current log (<strong>{formatBytes(activeLogInfo.size)}</strong>) to a backup file next
+                to it, then rewrites the live log to keep only the last {logThresholds?.keepDays ?? 30} days.
+              </p>
+              <p style={{ margin: 0, color: "#9ca3af" }}>
+                Nothing is deleted — the full original stays in the backup zip. Make sure you're fully camped out of
+                EverQuest first.
+              </p>
+            </>
+          )
+        }
+      />
 
       {/* --- Connection --- */}
       <section className="form-card settings-card">

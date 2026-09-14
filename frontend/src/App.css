@@ -414,6 +414,13 @@ tr.winner td {
   background: rgba(16, 185, 129, 0.1);
 }
 
+/* Rolls tab: top roll while a session is still live/collecting — same
+   amber as .warning, distinct from tr.winner's green (a stopped session's
+   final result). */
+tr.leading td {
+  background: rgba(251, 191, 36, 0.08);
+}
+
 .badge {
   font-size: 11px;
   padding: 2px 6px;
@@ -429,6 +436,17 @@ tr.winner td {
 .badge.superseded {
   background: rgba(107, 114, 128, 0.2);
   color: #9ca3af;
+}
+
+.badge.leading {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+/* Settings: a detected log file at/above the size-warning threshold. */
+.badge.large {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
 }
 
 .warning {
@@ -541,6 +559,12 @@ tr.winner td {
   margin-bottom: 16px;
 }
 
+/* Log maintenance card once a large file is detected — same orange as
+   .badge.large, applied to the whole card so it's hard to miss. */
+.settings-card-warning {
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
 .settings-card h3 {
   margin: 0 0 8px;
   font-size: 15px;
@@ -561,7 +585,7 @@ tr.winner td {
   margin-bottom: 4px;
 }
 
-.settings-row .path {
+.settings .path {
   color: #9ca3af;
   font-size: 12px;
   word-break: break-all;

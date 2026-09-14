@@ -42,4 +42,12 @@ export interface Settings {
      * regardless.
      */
     "setupComplete"?: boolean;
+
+    /**
+     * RollWinnerRule is the Rolls tab's global "highest" or "lowest" wins
+     * preference (empty reads as "highest" — see RollWinnerRuleOrDefault).
+     * Reference-only tracker, no server or ledger involvement at all — see
+     * internal/parse/rolls.go.
+     */
+    "rollWinnerRule"?: string;
 }

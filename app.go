@@ -17,6 +17,7 @@ import (
 
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/eqlogs"
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/logmaint"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/logtail"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/parse"
@@ -126,6 +127,22 @@ type App struct {
 	attendanceUnsaved atomic.Bool
 	bidsUnsaved       atomic.Bool
 	allowQuit         atomic.Bool
+
+	// --- Rolls tab: a reference-only /random tracker, confirmed with the
+	// leader to need no server or ledger involvement at all — it never
+	// calls officerapi and nothing here is ever submitted anywhere. See
+	// internal/parse/rolls.go for the detection/bucketing logic; every
+	// method below just re-derives the current session list from the log
+	// on each call (cheap — the tailer only re-reads newly appended
+	// bytes), so there's no background poller/goroutine to manage, unlike
+	// Bids' live-push machinery.
+	rollsMu           sync.Mutex
+	rollWinnerRule    string               // "highest" | "lowest"
+	rollClearedBefore time.Time            // "Clear all" floor — events at/before this never show
+	rollBoundaries    map[string]time.Time // parse.RangeKey(min,max) -> Stop/Remove forces a fresh session after this time
+	rollStopped       map[string]bool      // sessionID -> officer clicked Stop/Determine Winner
+	rollRemoved       map[string]bool      // sessionID -> officer clicked Remove
+	rollLabels        map[string]string    // sessionID -> officer-typed item name
 }
 
 // SetAttendanceUnsaved / SetBidsUnsaved are called by their panels whenever
@@ -178,7 +195,13 @@ func NewApp() *App {
 func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	a.app = application.Get()
 	a.ctx = ctx
+	a.rollBoundaries = map[string]time.Time{}
+	a.rollStopped = map[string]bool{}
+	a.rollRemoved = map[string]bool{}
+	a.rollLabels = map[string]string{}
+	a.rollWinnerRule = "highest"
 	if s, err := config.Load(); err == nil {
+		a.rollWinnerRule = s.RollWinnerRuleOrDefault()
 		a.setLogPath(s.LogPath)
 		// If a game folder is configured, re-resolve the active character's
 		// log on launch — the officer may have last raided on a different
@@ -748,6 +771,139 @@ func (a *App) GetLogTailStatus() LogTailStatus {
 	return out
 }
 
+// --- Log maintenance ("Archive & Trim") ---
+//
+// Ported from the sibling pq-companion desktop app's "Archive & Trim Log
+// File" feature, ahead of a real incident: an officer's log grew to
+// roughly 1 GB and made every Bids/Attendance capture noticeably laggy.
+// See internal/logmaint for the actual algorithm and the two safety
+// improvements made over pq-companion's own implementation (an atomic
+// rename instead of an in-place truncate, and a re-check immediately
+// before the swap).
+
+// LogFileInfoView is a size/date snapshot of one log file, backing the
+// Settings tab's log-maintenance section.
+type LogFileInfoView struct {
+	Path        string `json:"path"`
+	Size        int64  `json:"size"`
+	LargeFile   bool   `json:"largeFile"`
+	ModifiedAt  string `json:"modifiedAt"`
+	OldestEntry string `json:"oldestEntry,omitempty"`
+	NewestEntry string `json:"newestEntry,omitempty"`
+}
+
+func toLogFileInfoView(info logmaint.FileInfo) LogFileInfoView {
+	v := LogFileInfoView{
+		Path:       info.Path,
+		Size:       info.Size,
+		LargeFile:  info.LargeFile,
+		ModifiedAt: info.ModifiedAt.Format(time.RFC3339),
+	}
+	if !info.OldestEntry.IsZero() {
+		v.OldestEntry = info.OldestEntry.Format(time.RFC3339)
+	}
+	if !info.NewestEntry.IsZero() {
+		v.NewestEntry = info.NewestEntry.Format(time.RFC3339)
+	}
+	return v
+}
+
+// GetLogMaintenanceThresholds exposes logmaint's constants to the
+// frontend rather than duplicating the numbers there — same
+// never-hardcode-what-the-backend-already-knows convention this app uses
+// for the site's leader-tunable EPGP settings.
+type LogMaintenanceThresholds struct {
+	SizeWarningBytes  int64 `json:"sizeWarningBytes"`
+	KeepDays          int   `json:"keepDays"`
+	LiveWriteWindowMs int64 `json:"liveWriteWindowMs"`
+}
+
+func (a *App) GetLogMaintenanceThresholds() LogMaintenanceThresholds {
+	return LogMaintenanceThresholds{
+		SizeWarningBytes:  logmaint.SizeWarningThreshold,
+		KeepDays:          logmaint.KeepDays,
+		LiveWriteWindowMs: logmaint.LiveWriteWindow.Milliseconds(),
+	}
+}
+
+// GetActiveLogInfo runs the heavier size+oldest/newest-entry scan against
+// the currently-watched log — the Settings tab's "Check Log File" step.
+// Errors if no log file is selected yet.
+func (a *App) GetActiveLogInfo() (LogFileInfoView, error) {
+	path := a.currentLogPath()
+	if path == "" {
+		return LogFileInfoView{}, errors.New("no log file selected — use Settings to pick one first")
+	}
+	info, err := logmaint.GetFileInfo(path)
+	if err != nil {
+		return LogFileInfoView{}, err
+	}
+	return toLogFileInfoView(info), nil
+}
+
+// ArchiveAndTrimLog zips the given log file's ENTIRE current content to a
+// verified backup next to it, then trims the live file down to the last
+// logmaint.KeepDays. Refuses (mirroring pq-companion, which added this
+// after a real corruption-risk bug) if the file was written to within
+// logmaint.LiveWriteWindow — the EverQuest client holds its own write
+// handle open on the log for the whole play session, so the officer has
+// to actually camp out of the zone before this is safe to run.
+//
+// path is normally the currently-watched log (a.currentLogPath()), but
+// any log eqlogs.Discover found under the configured game folder can be
+// targeted the same way — pruning one that isn't actively being tailed
+// carries none of the "release our own handle before renaming" hazard
+// below, since only the actively-watched path ever has an open handle
+// from this app's own tailer.
+func (a *App) ArchiveAndTrimLog(path string) (ArchiveResultView, error) {
+	if path == "" {
+		return ArchiveResultView{}, errors.New("no log file given")
+	}
+	recently, modAt, err := logmaint.RecentlyWritten(path, logmaint.LiveWriteWindow)
+	if err != nil {
+		return ArchiveResultView{}, err
+	}
+	if recently {
+		return ArchiveResultView{}, fmt.Errorf(
+			"this log was written to at %s — camp out of EverQuest first (it still has the file open) and try again in a couple minutes",
+			modAt.Format(time.Kitchen))
+	}
+
+	// Release our own tailer's handle on this exact path immediately
+	// before the atomic rename — Windows refuses to rename a file over an
+	// open handle that wasn't granted delete-sharing, which is exactly
+	// what Go's plain os.Open (what logtail uses) does NOT grant. The
+	// tailer reopens lazily on its next Read() and, since the rename
+	// swaps in a different underlying file, correctly treats it as a
+	// truncation/replacement and re-reads from the start of the (now
+	// trimmed) file rather than concatenating stale content — the same
+	// path TestTailer_Replacement already exercises, just triggered by us
+	// instead of an external tool.
+	beforeSwap := func() {
+		if path != a.currentLogPath() {
+			return
+		}
+		a.tailerMu.Lock()
+		if a.tailer != nil {
+			_ = a.tailer.Close()
+		}
+		a.tailerMu.Unlock()
+	}
+
+	result, err := logmaint.ArchiveAndTrim(path, beforeSwap)
+	if err != nil {
+		return ArchiveResultView{}, err
+	}
+	return ArchiveResultView{BackupPath: result.BackupPath, OriginalBytes: result.OriginalBytes, KeptBytes: result.KeptBytes}, nil
+}
+
+// ArchiveResultView is what one Archive & Trim run produced.
+type ArchiveResultView struct {
+	BackupPath    string `json:"backupPath"`
+	OriginalBytes int64  `json:"originalBytes"`
+	KeptBytes     int64  `json:"keptBytes"`
+}
+
 // --- Attendance ---
 
 // AttendanceResult is what the frontend's Attendance tab renders into its
@@ -1275,6 +1431,211 @@ func (a *App) clearLiveBids(itemName string) {
 	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = client.ClearLiveBids(bg, itemName)
 	cancel()
+}
+
+// --- Rolls (reference-only /random tracker) ---
+//
+// This never touches officerapi or the site at all — confirmed with the
+// leader: a roll winner is announced in-game by the officer, not recorded
+// anywhere. Every method here just re-derives the current session list
+// from the log fresh each call (parse.ParseRollEvents + BucketRollEvents),
+// so there's no background poller to start/stop — the frontend just polls
+// GetRollSessions on a plain interval while the Rolls tab is visible.
+
+// rollStaleGap mirrors parse.staleRollGap for the Active-status check
+// below (a session's own bucketing already used it to decide whether a
+// later roll joins it; this second check is "is the tracked session
+// itself still receiving rolls, right now").
+const rollStaleGap = 5 * time.Minute
+
+// RollView is one roll within a RollSessionView.
+type RollView struct {
+	Roller     string `json:"roller"`
+	Value      int    `json:"value"`
+	OccurredAt string `json:"occurredAt"`
+	Duplicate  bool   `json:"duplicate"`
+}
+
+// RollSessionView is one /random roll-off as shown in the Rolls tab.
+type RollSessionView struct {
+	ID         string     `json:"id"`
+	Min        int        `json:"min"`
+	Max        int        `json:"max"`
+	ItemName   string     `json:"itemName"`
+	StartedAt  string     `json:"startedAt"`
+	LastRollAt string     `json:"lastRollAt"`
+	Active     bool       `json:"active"`
+	Rolls      []RollView `json:"rolls"`
+	Winners    []string   `json:"winners"`
+}
+
+// rollSnapshot re-reads the log and re-buckets it under the officer's
+// current boundaries/clear-floor. Pure re-derivation, no stored session
+// state beyond those small maps.
+func (a *App) rollSnapshot() ([]parse.RollSession, error) {
+	raw, err := a.readLog()
+	if err != nil {
+		return nil, err
+	}
+	events := parse.ParseRollEvents(raw)
+
+	a.rollsMu.Lock()
+	boundaries := make(map[string]time.Time, len(a.rollBoundaries))
+	for k, v := range a.rollBoundaries {
+		boundaries[k] = v
+	}
+	clearedBefore := a.rollClearedBefore
+	a.rollsMu.Unlock()
+
+	return parse.BucketRollEvents(events, boundaries, clearedBefore), nil
+}
+
+func (a *App) rollSessionView(s parse.RollSession, now time.Time) RollSessionView {
+	a.rollsMu.Lock()
+	stopped := a.rollStopped[s.ID]
+	label := a.rollLabels[s.ID]
+	rule := a.rollWinnerRule
+	a.rollsMu.Unlock()
+
+	rolls := make([]RollView, 0, len(s.Rolls))
+	for _, r := range s.Rolls {
+		rolls = append(rolls, RollView{Roller: r.Roller, Value: r.Value, OccurredAt: r.OccurredAt.Format(time.RFC3339), Duplicate: r.Duplicate})
+	}
+	return RollSessionView{
+		ID:         s.ID,
+		Min:        s.Min,
+		Max:        s.Max,
+		ItemName:   label,
+		StartedAt:  s.StartedAt.Format(time.RFC3339),
+		LastRollAt: s.LastRollAt.Format(time.RFC3339),
+		Active:     !stopped && now.Sub(s.LastRollAt) < rollStaleGap,
+		Rolls:      rolls,
+		Winners:    parse.WinnersOf(s.Rolls, rule != "lowest"),
+	}
+}
+
+// GetRollSessions returns every /random roll-off currently tracked,
+// newest-first. Called on a plain frontend poll — nothing here involves
+// the network, so there's no latency to hide behind a push/event
+// mechanism the way Bids' live-push to the site needed.
+func (a *App) GetRollSessions() ([]RollSessionView, error) {
+	sessions, err := a.rollSnapshot()
+	if err != nil {
+		return nil, err
+	}
+
+	a.rollsMu.Lock()
+	removed := make(map[string]bool, len(a.rollRemoved))
+	for k, v := range a.rollRemoved {
+		removed[k] = v
+	}
+	a.rollsMu.Unlock()
+
+	now := time.Now()
+	out := make([]RollSessionView, 0, len(sessions))
+	for i := len(sessions) - 1; i >= 0; i-- { // newest-first
+		s := sessions[i]
+		if removed[s.ID] {
+			continue
+		}
+		out = append(out, a.rollSessionView(s, now))
+	}
+	return out, nil
+}
+
+// StopRollSession freezes one session — its rolls are final as far as
+// this tracker is concerned — and forces the next /random in the same
+// range to start a NEW session rather than silently reopening this one.
+func (a *App) StopRollSession(id string) (RollSessionView, error) {
+	sessions, err := a.rollSnapshot()
+	if err != nil {
+		return RollSessionView{}, err
+	}
+	now := time.Now()
+	for _, s := range sessions {
+		if s.ID != id {
+			continue
+		}
+		a.rollsMu.Lock()
+		a.rollStopped[id] = true
+		a.rollBoundaries[parse.RangeKey(s.Min, s.Max)] = now
+		a.rollsMu.Unlock()
+		return a.rollSessionView(s, now), nil
+	}
+	return RollSessionView{}, fmt.Errorf("roll session not found — it may have already been cleared")
+}
+
+// RemoveRollSession hides one session from the Rolls tab entirely (a test
+// /random, or a range that wasn't actually a loot roll) and, like Stop,
+// forces the next roll in the same range to start fresh rather than
+// silently reappearing inside the hidden session.
+func (a *App) RemoveRollSession(id string) error {
+	sessions, err := a.rollSnapshot()
+	if err != nil {
+		return err
+	}
+	for _, s := range sessions {
+		if s.ID != id {
+			continue
+		}
+		a.rollsMu.Lock()
+		a.rollRemoved[id] = true
+		a.rollBoundaries[parse.RangeKey(s.Min, s.Max)] = time.Now()
+		a.rollsMu.Unlock()
+		return nil
+	}
+	return nil // already gone — fine
+}
+
+// SetRollItemName labels a session with a free-text item name — unlike
+// Bids there's no "<item> send tells" announcement to parse the name out
+// of, so the officer types it.
+func (a *App) SetRollItemName(id string, itemName string) error {
+	a.rollsMu.Lock()
+	a.rollLabels[id] = strings.TrimSpace(itemName)
+	a.rollsMu.Unlock()
+	return nil
+}
+
+// GetRollWinnerRule returns the current "highest" | "lowest" preference.
+func (a *App) GetRollWinnerRule() string {
+	a.rollsMu.Lock()
+	defer a.rollsMu.Unlock()
+	return a.rollWinnerRule
+}
+
+// SetRollWinnerRule flips whether the top or bottom roll wins, applied
+// live to every session (a global preference, not per-session — matches
+// pq-companion). Persisted so it survives a restart.
+func (a *App) SetRollWinnerRule(rule string) error {
+	if rule != "highest" && rule != "lowest" {
+		return fmt.Errorf("winner rule must be %q or %q", "highest", "lowest")
+	}
+	s, err := config.Load()
+	if err != nil {
+		s = config.Settings{}
+	}
+	s.RollWinnerRule = rule
+	if err := config.Save(s); err != nil {
+		return err
+	}
+	a.rollsMu.Lock()
+	a.rollWinnerRule = rule
+	a.rollsMu.Unlock()
+	return nil
+}
+
+// ClearAllRolls hides every currently-tracked roll session — a fresh
+// /random anywhere starts a brand-new one. Nothing is deleted from the
+// log itself; this only affects what the Rolls tab shows.
+func (a *App) ClearAllRolls() {
+	a.rollsMu.Lock()
+	a.rollClearedBefore = time.Now()
+	a.rollBoundaries = map[string]time.Time{}
+	a.rollStopped = map[string]bool{}
+	a.rollRemoved = map[string]bool{}
+	a.rollLabels = map[string]string{}
+	a.rollsMu.Unlock()
 }
 
 // ServiceShutdown is Wails v3's optional teardown hook (services.go). If the

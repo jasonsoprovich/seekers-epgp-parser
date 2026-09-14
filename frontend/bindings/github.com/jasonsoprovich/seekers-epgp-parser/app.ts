@@ -41,6 +41,26 @@ export function AppVersion(): $CancellablePromise<string> {
 }
 
 /**
+ * ArchiveAndTrimLog zips the given log file's ENTIRE current content to a
+ * verified backup next to it, then trims the live file down to the last
+ * logmaint.KeepDays. Refuses (mirroring pq-companion, which added this
+ * after a real corruption-risk bug) if the file was written to within
+ * logmaint.LiveWriteWindow — the EverQuest client holds its own write
+ * handle open on the log for the whole play session, so the officer has
+ * to actually camp out of the zone before this is safe to run.
+ * 
+ * path is normally the currently-watched log (a.currentLogPath()), but
+ * any log eqlogs.Discover found under the configured game folder can be
+ * targeted the same way — pruning one that isn't actively being tailed
+ * carries none of the "release our own handle before renaming" hazard
+ * below, since only the actively-watched path ever has an open handle
+ * from this app's own tailer.
+ */
+export function ArchiveAndTrimLog(path: string): $CancellablePromise<$models.ArchiveResultView> {
+    return $Call.ByID(2609359236, path);
+}
+
+/**
  * CaptureAttendance re-reads the log file and returns the MOST RECENT
  * "/who" or "/who guild" snapshot (both produce the same "Players on
  * EverQuest:" block parse.ParseAttendance reads) — a raid night can have
@@ -101,6 +121,15 @@ export function CheckAttendanceRecorded(activity: string, occurredAt: string): $
  */
 export function CheckForUpdate(): $CancellablePromise<$models.UpdateInfo> {
     return $Call.ByID(2347956003);
+}
+
+/**
+ * ClearAllRolls hides every currently-tracked roll session — a fresh
+ * /random anywhere starts a brand-new one. Nothing is deleted from the
+ * log itself; this only affects what the Rolls tab shows.
+ */
+export function ClearAllRolls(): $CancellablePromise<void> {
+    return $Call.ByID(2552100915);
 }
 
 /**
@@ -183,11 +212,24 @@ export function FetchTotals(query: string): $CancellablePromise<officerapi$0.Tot
 }
 
 /**
+ * GetActiveLogInfo runs the heavier size+oldest/newest-entry scan against
+ * the currently-watched log — the Settings tab's "Check Log File" step.
+ * Errors if no log file is selected yet.
+ */
+export function GetActiveLogInfo(): $CancellablePromise<$models.LogFileInfoView> {
+    return $Call.ByID(2183016829);
+}
+
+/**
  * GetLiveBidPushStatus returns the current round's delivery status, or a
  * zero value when no round is live.
  */
 export function GetLiveBidPushStatus(): $CancellablePromise<$models.LiveBidPushStatus> {
     return $Call.ByID(819017598);
+}
+
+export function GetLogMaintenanceThresholds(): $CancellablePromise<$models.LogMaintenanceThresholds> {
+    return $Call.ByID(1298552278);
 }
 
 export function GetLogPath(): $CancellablePromise<string> {
@@ -200,6 +242,23 @@ export function GetLogPath(): $CancellablePromise<string> {
  */
 export function GetLogTailStatus(): $CancellablePromise<$models.LogTailStatus> {
     return $Call.ByID(3575400447);
+}
+
+/**
+ * GetRollSessions returns every /random roll-off currently tracked,
+ * newest-first. Called on a plain frontend poll — nothing here involves
+ * the network, so there's no latency to hide behind a push/event
+ * mechanism the way Bids' live-push to the site needed.
+ */
+export function GetRollSessions(): $CancellablePromise<$models.RollSessionView[] | null> {
+    return $Call.ByID(1961889629);
+}
+
+/**
+ * GetRollWinnerRule returns the current "highest" | "lowest" preference.
+ */
+export function GetRollWinnerRule(): $CancellablePromise<string> {
+    return $Call.ByID(1912962457);
 }
 
 export function GetSettings(): $CancellablePromise<config$0.Settings> {
@@ -285,6 +344,16 @@ export function ParseAttendanceText(raw: string): $CancellablePromise<$models.At
     return $Call.ByID(2891183248, raw);
 }
 
+/**
+ * RemoveRollSession hides one session from the Rolls tab entirely (a test
+ * /random, or a range that wasn't actually a loot roll) and, like Stop,
+ * forces the next roll in the same range to start fresh rather than
+ * silently reappearing inside the hidden session.
+ */
+export function RemoveRollSession(id: string): $CancellablePromise<void> {
+    return $Call.ByID(1084244466, id);
+}
+
 export function SaveSettings(apiKey: string): $CancellablePromise<void> {
     return $Call.ByID(1949631069, apiKey);
 }
@@ -332,6 +401,24 @@ export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
 }
 
 /**
+ * SetRollItemName labels a session with a free-text item name — unlike
+ * Bids there's no "<item> send tells" announcement to parse the name out
+ * of, so the officer types it.
+ */
+export function SetRollItemName(id: string, itemName: string): $CancellablePromise<void> {
+    return $Call.ByID(3629064640, id, itemName);
+}
+
+/**
+ * SetRollWinnerRule flips whether the top or bottom roll wins, applied
+ * live to every session (a global preference, not per-session — matches
+ * pq-companion). Persisted so it survives a restart.
+ */
+export function SetRollWinnerRule(rule: string): $CancellablePromise<void> {
+    return $Call.ByID(233379877, rule);
+}
+
+/**
  * SetSetupComplete records that the officer has finished (or dismissed)
  * the first-run setup wizard, so it stops showing on launch. `false`
  * re-arms it (Settings' "Run setup again" doesn't need this — it opens the
@@ -339,6 +426,15 @@ export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
  */
 export function SetSetupComplete(done: boolean): $CancellablePromise<void> {
     return $Call.ByID(353136387, done);
+}
+
+/**
+ * StopRollSession freezes one session — its rolls are final as far as
+ * this tracker is concerned — and forces the next /random in the same
+ * range to start a NEW session rather than silently reopening this one.
+ */
+export function StopRollSession(id: string): $CancellablePromise<$models.RollSessionView> {
+    return $Call.ByID(3649302074, id);
 }
 
 export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {

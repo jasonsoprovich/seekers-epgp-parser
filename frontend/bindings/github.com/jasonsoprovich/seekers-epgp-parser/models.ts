@@ -9,6 +9,15 @@ import * as eqlogs$0 from "./internal/eqlogs/models.js";
 import * as officerapi$0 from "./internal/officerapi/models.js";
 
 /**
+ * ArchiveResultView is what one Archive & Trim run produced.
+ */
+export interface ArchiveResultView {
+    "backupPath": string;
+    "originalBytes": number;
+    "keptBytes": number;
+}
+
+/**
  * AttendanceResult is what the frontend's Attendance tab renders into its
  * editable table — see the app's sketch (Name/Timestamp column layout).
  */
@@ -113,6 +122,31 @@ export interface LiveBidPushStatus {
 }
 
 /**
+ * LogFileInfoView is a size/date snapshot of one log file, backing the
+ * Settings tab's log-maintenance section.
+ */
+export interface LogFileInfoView {
+    "path": string;
+    "size": number;
+    "largeFile": boolean;
+    "modifiedAt": string;
+    "oldestEntry"?: string;
+    "newestEntry"?: string;
+}
+
+/**
+ * GetLogMaintenanceThresholds exposes logmaint's constants to the
+ * frontend rather than duplicating the numbers there — same
+ * never-hardcode-what-the-backend-already-knows convention this app uses
+ * for the site's leader-tunable EPGP settings.
+ */
+export interface LogMaintenanceThresholds {
+    "sizeWarningBytes": number;
+    "keepDays": number;
+    "liveWriteWindowMs": number;
+}
+
+/**
  * LogTailStatus backs a small diagnostics display (remediation plan Phase
  * 2 task 2.5): the followed file's size, how much of it has actually been
  * read, and how many times the tailer had to reset (the log was cleared
@@ -136,6 +170,31 @@ export interface LogTailStatus {
 export interface PointValues {
     "ep": officerapi$0.PointValue[] | null;
     "gp": officerapi$0.PointValue[] | null;
+}
+
+/**
+ * RollSessionView is one /random roll-off as shown in the Rolls tab.
+ */
+export interface RollSessionView {
+    "id": string;
+    "min": number;
+    "max": number;
+    "itemName": string;
+    "startedAt": string;
+    "lastRollAt": string;
+    "active": boolean;
+    "rolls": RollView[] | null;
+    "winners": string[] | null;
+}
+
+/**
+ * RollView is one roll within a RollSessionView.
+ */
+export interface RollView {
+    "roller": string;
+    "value": number;
+    "occurredAt": string;
+    "duplicate": boolean;
 }
 
 /**

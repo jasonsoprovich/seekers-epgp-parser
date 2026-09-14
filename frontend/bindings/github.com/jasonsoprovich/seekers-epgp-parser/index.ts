@@ -7,6 +7,7 @@ export {
 };
 
 export type {
+    ArchiveResultView,
     AttendanceResult,
     BidRound,
     BidRow,
@@ -14,7 +15,11 @@ export type {
     GameDirInfo,
     LedgerPage,
     LiveBidPushStatus,
+    LogFileInfoView,
+    LogMaintenanceThresholds,
     LogTailStatus,
     PointValues,
+    RollSessionView,
+    RollView,
     UpdateInfo
 } from "./models.js";

@@ -15,10 +15,11 @@ import { AttendancePanel } from "./AttendancePanel";
 import { BidsPanel } from "./BidsPanel";
 import { BrowsePanel } from "./BrowsePanel";
 import { ManualEntryPanel } from "./ManualEntryPanel";
+import { RollsPanel } from "./RollsPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { SetupWizard } from "./SetupWizard";
 
-type Tab = "attendance" | "bids" | "manual" | "browse" | "settings";
+type Tab = "attendance" | "bids" | "rolls" | "manual" | "browse" | "settings";
 
 function App() {
   const [tab, setTab] = useState<Tab>("attendance");
@@ -167,6 +168,9 @@ function App() {
           <button className={`nav-button ${tab === "bids" ? "active" : ""}`} onClick={() => setTab("bids")}>
             Bids
           </button>
+          <button className={`nav-button ${tab === "rolls" ? "active" : ""}`} onClick={() => setTab("rolls")}>
+            Rolls
+          </button>
           <button className={`nav-button ${tab === "manual" ? "active" : ""}`} onClick={() => setTab("manual")}>
             Manual Entry
           </button>
@@ -195,6 +199,9 @@ function App() {
           </div>
           <div hidden={tab !== "bids"}>
             <BidsPanel />
+          </div>
+          <div hidden={tab !== "rolls"}>
+            <RollsPanel active={tab === "rolls"} />
           </div>
           <div hidden={tab !== "manual"}>
             <ManualEntryPanel />

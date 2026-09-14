@@ -1,0 +1,11 @@
+[Thu Aug 06 15:22:16 2026] Tabbie tells the raid, 'Cloak of Flames send tells 0 222'
+[Thu Aug 06 15:22:20 2026] **A Magic Die is rolled by Tabbie.
+[Thu Aug 06 15:22:20 2026] **It could have been any number from 0 to 222, but this time it turned up a 69.
+[Thu Aug 06 15:22:24 2026] **A Magic Die is rolled by Osui.
+[Thu Aug 06 15:22:24 2026] **It could have been any number from 0 to 222, but this time it turned up a 185.
+[Thu Aug 06 15:22:29 2026] **A Magic Die is rolled by Kaalos.
+[Thu Aug 06 15:22:29 2026] **It could have been any number from 0 to 222, but this time it turned up a 185.
+[Thu Aug 06 15:22:41 2026] **A Magic Die is rolled by Osui.
+[Thu Aug 06 15:22:41 2026] **It could have been any number from 0 to 222, but this time it turned up a 12.
+[Thu Aug 06 15:23:05 2026] **A Magic Die is rolled by Grokenspiel.
+[Thu Aug 06 15:23:05 2026] **It could have been any number from 0 to 100, but this time it turned up a 42.
