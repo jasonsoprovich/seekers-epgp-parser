@@ -354,6 +354,15 @@ export function RemoveRollSession(id: string): $CancellablePromise<void> {
     return $Call.ByID(1084244466, id);
 }
 
+/**
+ * ResolveNoBidRound closes a reviewed round with no bids as rot loot. It does
+ * not create a ledger row or winner: officers record any rot-loot GP charge
+ * separately as a linked manual entry on the site.
+ */
+export function ResolveNoBidRound(itemName: string, roundID: string): $CancellablePromise<void> {
+    return $Call.ByID(2519945105, itemName, roundID);
+}
+
 export function SaveSettings(apiKey: string): $CancellablePromise<void> {
     return $Call.ByID(1949631069, apiKey);
 }

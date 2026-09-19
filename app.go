@@ -1457,6 +1457,34 @@ func (a *App) SubmitBids(itemName string, roundID string, entries []officerapi.B
 	return resp, err
 }
 
+// ResolveNoBidRound closes a reviewed round with no bids as rot loot. It does
+// not create a ledger row or winner: officers record any rot-loot GP charge
+// separately as a linked manual entry on the site.
+func (a *App) ResolveNoBidRound(itemName string, roundID string) error {
+	if strings.TrimSpace(itemName) == "" {
+		return errors.New("item name is required")
+	}
+	client, err := a.officerClient()
+	if err != nil {
+		return err
+	}
+	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err = client.ResolveLiveBids(bg, itemName, eqlogs.CharacterFromPath(a.currentLogPath()), []officerapi.ResolveLiveBidEntry{})
+	cancel()
+	if err != nil {
+		return err
+	}
+	a.liveBidsMu.Lock()
+	a.roundItem = ""
+	a.roundID = ""
+	a.roundResolved = true
+	a.roundFloor = time.Now()
+	a.liveBidsMu.Unlock()
+	a.stopLiveBidPush()
+	a.applyPendingLogSwap()
+	return nil
+}
+
 // stopLiveBidPush cancels any in-flight live-bid polling loop. Safe to
 // call when none is running.
 func (a *App) stopLiveBidPush() {

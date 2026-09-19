@@ -6,6 +6,7 @@ import {
   EndBidRound,
   FetchKnownItems,
   GetLiveBidPushStatus,
+  ResolveNoBidRound,
   SetBidsUnsaved,
   SubmitBids,
   SwitchBidRound,
@@ -154,6 +155,7 @@ export function BidsPanel() {
   const [winnerCount, setWinnerCount] = useState(1);
   const [gratsCopied, setGratsCopied] = useState(false);
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
+  const [rotConfirmOpen, setRotConfirmOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   // A "send tells" the watcher detected while a round is already under
   // way — shown as a switch/dismiss banner rather than clobbering the
@@ -726,6 +728,21 @@ export function BidsPanel() {
     }
   }
 
+  async function onResolveRot() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await ResolveNoBidRound(capturedItem, capturedRoundId);
+      resetToIdle();
+      setSubmitResult(`No bids recorded for ${capturedItem}; resolved as rot loot. Record any looter's GP as a linked manual entry on the site.`);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRotConfirmOpen(false);
+      setSubmitting(false);
+    }
+  }
+
   const winners = rows.filter((r, i) => r.winner && !supersededSet.has(i));
   const startedLabel = roundStartedAt ? new Date(roundStartedAt).toLocaleTimeString() : "";
 
@@ -947,6 +964,9 @@ export function BidsPanel() {
 
       {phase === "review" && rows.length === 0 && (
         <div className="toolbar">
+          <button className="primary" onClick={() => setRotConfirmOpen(true)} disabled={submitting || !capturedItem.trim()}>
+            Resolve as rot loot
+          </button>
           <button className="secondary" onClick={addManualRow}>
             {manualRound ? "+ Add bidder" : "+ Add bid manually"}
           </button>
@@ -1109,6 +1129,15 @@ export function BidsPanel() {
             </p>
           </>
         }
+      />
+      <ConfirmDialog
+        open={rotConfirmOpen}
+        title="Resolve this round as rot loot?"
+        confirmLabel="Resolve as rot"
+        busy={submitting}
+        onCancel={() => setRotConfirmOpen(false)}
+        onConfirm={() => void onResolveRot()}
+        body="No bids or GP charges will be recorded. If someone loots the item, add their Rot (No-Drop) GP entry on the site and link it to this event."
       />
 
       <ConfirmDialog
