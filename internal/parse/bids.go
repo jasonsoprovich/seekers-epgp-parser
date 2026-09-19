@@ -21,6 +21,7 @@ var ownChatRe = regexp.MustCompile(`^You .*, '(.*)'$`)
 // "<item> start bids", "<item> starting bids", "bids open <item>". Splitting
 // a message on this lets extractItemName take whichever side holds the name.
 var announceTriggerRe = regexp.MustCompile(`(?i)\b(?:sends?[\s-]+tells?|start(?:ing)?[\s-]+bids?|bids?[\s-]+open|open[\s-]+bids?)\b`)
+var announcementWordRe = regexp.MustCompile(`(?i)[a-z]+`)
 
 // itemLinkRe matches an EQ client item link: the visible name wrapped in
 // DC2 (0x12) control bytes with a run of fixed-width numeric header fields
@@ -49,6 +50,55 @@ func stripItemLinks(msg string) string {
 		}
 		return strings.TrimSpace(inner)
 	})
+}
+
+func oneEditOrLess(a, b string) bool {
+	a, b = strings.ToLower(a), strings.ToLower(b)
+	if a == b {
+		return true
+	}
+	if len(a) == len(b) {
+		diffs := make([]int, 0, 2)
+		for i := range a {
+			if a[i] != b[i] {
+				diffs = append(diffs, i)
+			}
+		}
+		return len(diffs) == 1 || (len(diffs) == 2 && diffs[1] == diffs[0]+1 && a[diffs[0]] == b[diffs[1]] && a[diffs[1]] == b[diffs[0]])
+	}
+	if len(a)+1 == len(b) {
+		a, b = b, a
+	}
+	if len(a) != len(b)+1 {
+		return false
+	}
+	for i := range a {
+		if i == len(b) || a[i] != b[i] {
+			return a[:i]+a[i+1:] == b
+		}
+	}
+	return false
+}
+
+// normalizeAnnouncementTriggerTypos repairs only an adjacent send/tell word
+// pair where each word is at most one ordinary edit (including a transposed
+// pair) from its singular/plural form. Item plausibility remains mandatory,
+// so this does not turn fuzzy matching into broad all-chat detection.
+func normalizeAnnouncementTriggerTypos(msg string) string {
+	words := announcementWordRe.FindAllStringIndex(msg, -1)
+	for i := 0; i+1 < len(words); i++ {
+		first, second := words[i], words[i+1]
+		sendWord, tellWord := msg[first[0]:first[1]], msg[second[0]:second[1]]
+		sendExact := strings.EqualFold(sendWord, "send") || strings.EqualFold(sendWord, "sends")
+		tellExact := strings.EqualFold(tellWord, "tell") || strings.EqualFold(tellWord, "tells")
+		sendOK := oneEditOrLess(sendWord, "send") || oneEditOrLess(sendWord, "sends")
+		tellOK := oneEditOrLess(tellWord, "tell") || oneEditOrLess(tellWord, "tells")
+		if !sendOK || !tellOK || (!sendExact && !tellExact) {
+			continue
+		}
+		return msg[:first[0]] + "send" + msg[first[1]:second[0]] + "tells" + msg[second[1]:]
+	}
+	return msg
 }
 
 // itemNameConnectors are the only lowercase words allowed to appear
@@ -128,7 +178,7 @@ func isPlausibleItem(name string, known []string) bool {
 // best-effort: the app shows the result in an editable field and the
 // officer corrects it if it came out wrong.
 func extractItemName(msg string) string {
-	parts := announceTriggerRe.Split(stripItemLinks(msg), 2)
+	parts := announceTriggerRe.Split(normalizeAnnouncementTriggerTypos(stripItemLinks(msg)), 2)
 	cand := strings.TrimSpace(parts[0])
 	if len(parts) == 2 {
 		after := strings.TrimSpace(parts[1])
@@ -200,7 +250,7 @@ func DetectAnnouncement(raw string, since, cutoff time.Time, known []string) (it
 		if m == nil {
 			continue
 		}
-		if !announceTriggerRe.MatchString(m[1]) {
+		if !announceTriggerRe.MatchString(normalizeAnnouncementTriggerTypos(m[1])) {
 			continue
 		}
 		name := extractItemName(m[1])
@@ -246,7 +296,7 @@ func FindAnnouncementStart(raw string, itemName string, cutoff time.Time) (found
 		if m == nil {
 			continue
 		}
-		msg := stripItemLinks(m[1])
+		msg := normalizeAnnouncementTriggerTypos(stripItemLinks(m[1]))
 		if announceTriggerRe.MatchString(msg) && strings.Contains(strings.ToLower(msg), item) {
 			times = append(times, l.Time)
 		}
@@ -291,6 +341,15 @@ type BidCandidate struct {
 // at once, which is exactly what makes a manual window safe and
 // unambiguous instead of needing to disambiguate overlapping items.
 func CaptureBids(raw string, startAt, stopAt time.Time) []BidCandidate {
+	// A direct parser caller may race the EQ client's append between bytes.
+	// The app tailer already withholds this fragment, but keeping the same
+	// rule here prevents a quote-complete yet newline-incomplete tell from
+	// being acted on in tests or future file readers.
+	if end := strings.LastIndexByte(raw, '\n'); end >= 0 {
+		raw = raw[:end+1]
+	} else {
+		raw = ""
+	}
 	lines := splitLogLines(raw)
 
 	var out []BidCandidate
@@ -302,7 +361,7 @@ func CaptureBids(raw string, startAt, stopAt time.Time) []BidCandidate {
 		if m == nil {
 			continue
 		}
-		signal := DetectBidSignal(m[2])
+		signal := DetectBidSignal(stripItemLinks(m[2]))
 		if signal.Tier == "" && !signal.Cancel {
 			continue
 		}

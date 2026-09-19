@@ -2,12 +2,16 @@ package parse
 
 import (
 	_ "embed"
+	"strings"
 	"testing"
 	"time"
 )
 
 //go:embed testdata/bids_sample.txt
 var bidsSample string
+
+//go:embed testdata/bid_item_link_sample.txt
+var bidItemLinkSample string
 
 func TestCaptureBids_RealSample(t *testing.T) {
 	start := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.Local)
@@ -75,6 +79,34 @@ func TestCaptureBids_WindowExcludesOutsideTells(t *testing.T) {
 	}
 	if candidates[0].Tier != TierHigh {
 		t.Errorf("tier = %q, want %q", candidates[0].Tier, TierHigh)
+	}
+}
+
+func TestCaptureBids_ItemLinkAndPlainHigh(t *testing.T) {
+	link := "\x12000042000000000000000000000000000000000000000000000000Cloak of Flames\x12"
+	raw := strings.ReplaceAll(bidItemLinkSample, "[ITEMLINK]", link)
+	start := time.Date(2026, time.August, 17, 22, 19, 0, 0, time.Local)
+	got := CaptureBids(raw, start, start.Add(time.Minute))
+	if len(got) != 2 {
+		t.Fatalf("got %d bids, want item-link + High and plain High: %+v", len(got), got)
+	}
+	for _, bid := range got {
+		if bid.Tier != TierHigh {
+			t.Errorf("%s tier = %q, want %q (raw %q)", bid.CharacterName, bid.Tier, TierHigh, bid.RawMessage)
+		}
+	}
+	if got[0].RawMessage != link+" High" {
+		t.Errorf("raw linked message was not preserved: %q", got[0].RawMessage)
+	}
+}
+
+func TestCaptureBids_IgnoresIncompleteTrailingTell(t *testing.T) {
+	start := time.Date(2026, time.August, 17, 22, 19, 0, 0, time.Local)
+	raw := "[Mon Aug 17 22:19:50 2026] Complete tells you, 'high'\n" +
+		"[Mon Aug 17 22:19:51 2026] Partial tells you, 'high'"
+	got := CaptureBids(raw, start, start.Add(time.Minute))
+	if len(got) != 1 || got[0].CharacterName != "Complete" {
+		t.Fatalf("got %+v, want only the newline-complete tell", got)
 	}
 }
 
@@ -242,6 +274,35 @@ func TestDetectAnnouncement_StartBidsTrigger(t *testing.T) {
 	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil)
 	if !ok || item != "Mask of Piety" {
 		t.Errorf("DetectAnnouncement = (%q, %v), want (%q, true)", item, ok, "Mask of Piety")
+	}
+}
+
+func TestDetectAnnouncement_SendTellTypos(t *testing.T) {
+	for _, msg := range []string{
+		"Cloak of Flames sned tells",
+		"Cloak of Flames send tels",
+		"Cloak of Flames send tell",
+	} {
+		raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, '" + msg + "'\n"
+		item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil)
+		if !ok || item != "Cloak of Flames" {
+			t.Errorf("%q detected as (%q, %v), want Cloak of Flames", msg, item, ok)
+		}
+	}
+}
+
+func TestDetectAnnouncement_TypoToleranceStillRequiresPlausibleItem(t *testing.T) {
+	bad := []string{
+		"please sned tells when you can",
+		"last call, it reset mine because it saw send tels",
+		"Cloak of Flames please message tells",
+		"Cloak of Flames sned tels",
+	}
+	for _, msg := range bad {
+		raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, '" + msg + "'\n"
+		if item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil); ok {
+			t.Errorf("detected %q as announcement %q", msg, item)
+		}
 	}
 }
 
