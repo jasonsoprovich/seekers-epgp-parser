@@ -21,6 +21,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 // log-tailing, not a network round trip to hide behind an event push the
 // way Bids' live board needed.
 const POLL_MS = 2000;
+const LOOKBACK_OPTIONS = [6, 12, 24, 48, 168] as const;
 
 function rollsOrEmpty(s: RollSessionView): NonNullable<RollSessionView["rolls"]> {
   return s.rolls ?? [];
@@ -54,6 +55,13 @@ function relativeTime(iso: string, now: number): string {
   return `${deltaM}m ago`;
 }
 
+function rollTime(iso: string, now: number): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const today = new Date(now);
+  return d.toDateString() === today.toDateString() ? d.toLocaleTimeString() : d.toLocaleString();
+}
+
 export function RollsPanel({ active }: { active: boolean }) {
   const [sessions, setSessions] = useState<RollSessionView[]>([]);
   const [winnerRule, setWinnerRule] = useState<"highest" | "lowest">("highest");
@@ -61,6 +69,7 @@ export function RollsPanel({ active }: { active: boolean }) {
   const [now, setNow] = useState(() => Date.now());
   const [copiedFor, setCopiedFor] = useState<string | null>(null);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [lookbackHours, setLookbackHours] = useState<number>(6);
   // Locally-edited item-name text, keyed by session id — so typing doesn't
   // fight the poll's next snapshot until the officer stops typing (a
   // simple debounce via the input's onBlur/Enter commit below).
@@ -85,7 +94,7 @@ export function RollsPanel({ active }: { active: boolean }) {
       if (pollingRef.current) return; // don't overlap a slow call with the next tick
       pollingRef.current = true;
       try {
-        const result = await GetRollSessions();
+        const result = await GetRollSessions(lookbackHours);
         if (!cancelled) {
           setSessions(result ?? []);
           setError(null);
@@ -102,7 +111,7 @@ export function RollsPanel({ active }: { active: boolean }) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [active]);
+  }, [active, lookbackHours]);
 
   async function onWinnerRuleChange(rule: "highest" | "lowest") {
     setWinnerRule(rule);
@@ -181,6 +190,16 @@ export function RollsPanel({ active }: { active: boolean }) {
           <select value={winnerRule} onChange={(e) => void onWinnerRuleChange(e.target.value as "highest" | "lowest")}>
             <option value="highest">Highest roll</option>
             <option value="lowest">Lowest roll</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
+          Show
+          <select value={lookbackHours} onChange={(e) => setLookbackHours(Number(e.target.value))}>
+            {LOOKBACK_OPTIONS.map((hours) => (
+              <option key={hours} value={hours}>
+                Last {hours === 168 ? "7 days" : `${hours} hours`}
+              </option>
+            ))}
           </select>
         </label>
         <span style={{ fontSize: 12, color: "#6b7280" }}>
@@ -287,7 +306,7 @@ export function RollsPanel({ active }: { active: boolean }) {
                             </span>
                           )}
                         </td>
-                        <td style={{ color: "#9ca3af" }}>{new Date(r.occurredAt).toLocaleTimeString()}</td>
+                        <td style={{ color: "#9ca3af" }}>{rollTime(r.occurredAt, now)}</td>
                       </tr>
                     );
                   })}

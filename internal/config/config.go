@@ -46,6 +46,36 @@ type Settings struct {
 	// Reference-only tracker, no server or ledger involvement at all — see
 	// internal/parse/rolls.go.
 	RollWinnerRule string `json:"rollWinnerRule,omitempty"`
+	// LogRetentionDays and LogTargetMB control Archive & Trim. Zero means
+	// the default so existing config files pick up safe values automatically.
+	LogRetentionDays int `json:"logRetentionDays,omitempty"`
+	LogTargetMB      int `json:"logTargetMB,omitempty"`
+}
+
+const (
+	DefaultLogRetentionDays = 14
+	DefaultLogTargetMB      = 100
+	MinLogRetentionDays     = 1
+	MaxLogRetentionDays     = 365
+	MinLogTargetMB          = 10
+	MaxLogTargetMB          = 4096
+)
+
+func (s Settings) LogMaintenanceValues() (days, targetMB int) {
+	days = s.LogRetentionDays
+	if days == 0 {
+		days = DefaultLogRetentionDays
+	}
+	targetMB = s.LogTargetMB
+	if targetMB == 0 {
+		targetMB = DefaultLogTargetMB
+	}
+	return days, targetMB
+}
+
+func ValidLogMaintenanceValues(days, targetMB int) bool {
+	return days >= MinLogRetentionDays && days <= MaxLogRetentionDays &&
+		targetMB >= MinLogTargetMB && targetMB <= MaxLogTargetMB
 }
 
 // RollWinnerRuleOrDefault defaults to "highest" when never set.

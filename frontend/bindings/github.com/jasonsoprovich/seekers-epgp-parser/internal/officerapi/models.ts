@@ -16,6 +16,7 @@ export interface AttendanceCheck {
 
 export interface AttendanceResponse {
     "inserted": number;
+    "eventLeadInserted": boolean;
     "unmatched": string[] | null;
 
     /**

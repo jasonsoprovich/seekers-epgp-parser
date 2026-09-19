@@ -250,8 +250,8 @@ export function GetLogTailStatus(): $CancellablePromise<$models.LogTailStatus> {
  * the network, so there's no latency to hide behind a push/event
  * mechanism the way Bids' live-push to the site needed.
  */
-export function GetRollSessions(): $CancellablePromise<$models.RollSessionView[] | null> {
-    return $Call.ByID(1961889629);
+export function GetRollSessions(lookbackHours: number): $CancellablePromise<$models.RollSessionView[] | null> {
+    return $Call.ByID(1961889629, lookbackHours);
 }
 
 /**
@@ -400,6 +400,10 @@ export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
     return $Call.ByID(3851909227, v);
 }
 
+export function SetLogMaintenanceSettings(days: number, targetMB: number): $CancellablePromise<void> {
+    return $Call.ByID(3412069079, days, targetMB);
+}
+
 /**
  * SetRollItemName labels a session with a free-text item name — unlike
  * Bids there's no "<item> send tells" announcement to parse the name out
@@ -437,8 +441,8 @@ export function StopRollSession(id: string): $CancellablePromise<$models.RollSes
     return $Call.ByID(3649302074, id);
 }
 
-export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
-    return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName);
+export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string, awardEventLead: boolean): $CancellablePromise<officerapi$0.AttendanceResponse> {
+    return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName, awardEventLead);
 }
 
 /**

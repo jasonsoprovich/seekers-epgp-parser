@@ -50,8 +50,9 @@ type App struct {
 	// unrelated round/announcement state and swapping the followed file is
 	// orthogonal to all of them. Always go through setLogPath to change
 	// a.logPath so the tailer never points at a stale file.
-	tailerMu sync.RWMutex
-	tailer   *logtail.Tailer
+	tailerMu      sync.RWMutex
+	tailer        *logtail.Tailer
+	tailReadLimit int64
 
 	// Guards liveBidsCancel and the round-state fields below — Capture
 	// Bids (starts a poller, opens a round), End Round and Submit (stop the
@@ -201,6 +202,8 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	a.rollLabels = map[string]string{}
 	a.rollWinnerRule = "highest"
 	if s, err := config.Load(); err == nil {
+		_, targetMB := s.LogMaintenanceValues()
+		a.tailReadLimit = int64(targetMB) * 1024 * 1024
 		a.rollWinnerRule = s.RollWinnerRuleOrDefault()
 		a.setLogPath(s.LogPath)
 		// If a game folder is configured, re-resolve the active character's
@@ -450,6 +453,30 @@ func (a *App) SetAutoDetectBids(enabled bool) error {
 	} else {
 		a.stopAnnouncementWatch()
 	}
+	return nil
+}
+
+func (a *App) SetLogMaintenanceSettings(days int, targetMB int) error {
+	if !config.ValidLogMaintenanceValues(days, targetMB) {
+		return fmt.Errorf("retention must be %d-%d days and target must be %d-%d MB",
+			config.MinLogRetentionDays, config.MaxLogRetentionDays, config.MinLogTargetMB, config.MaxLogTargetMB)
+	}
+	s, err := config.Load()
+	if err != nil {
+		return err
+	}
+	s.LogRetentionDays = days
+	s.LogTargetMB = targetMB
+	if err := config.Save(s); err != nil {
+		return err
+	}
+	a.tailerMu.Lock()
+	a.tailReadLimit = int64(targetMB) * 1024 * 1024
+	if a.tailer != nil {
+		_ = a.tailer.Close()
+		a.tailer = logtail.New(a.logPath, a.tailReadLimit)
+	}
+	a.tailerMu.Unlock()
 	return nil
 }
 
@@ -711,7 +738,11 @@ func (a *App) setLogPath(path string) {
 	}
 	a.logPath = path
 	if path != "" {
-		a.tailer = logtail.New(path)
+		limit := a.tailReadLimit
+		if limit == 0 {
+			limit = int64(config.DefaultLogTargetMB) * 1024 * 1024
+		}
+		a.tailer = logtail.New(path, limit)
 	} else {
 		a.tailer = nil
 	}
@@ -819,9 +850,13 @@ type LogMaintenanceThresholds struct {
 }
 
 func (a *App) GetLogMaintenanceThresholds() LogMaintenanceThresholds {
+	days, targetMB := config.DefaultLogRetentionDays, config.DefaultLogTargetMB
+	if s, err := config.Load(); err == nil {
+		days, targetMB = s.LogMaintenanceValues()
+	}
 	return LogMaintenanceThresholds{
-		SizeWarningBytes:  logmaint.SizeWarningThreshold,
-		KeepDays:          logmaint.KeepDays,
+		SizeWarningBytes:  int64(targetMB) * 1024 * 1024,
+		KeepDays:          days,
 		LiveWriteWindowMs: logmaint.LiveWriteWindow.Milliseconds(),
 	}
 }
@@ -834,7 +869,8 @@ func (a *App) GetActiveLogInfo() (LogFileInfoView, error) {
 	if path == "" {
 		return LogFileInfoView{}, errors.New("no log file selected — use Settings to pick one first")
 	}
-	info, err := logmaint.GetFileInfo(path)
+	thresholds := a.GetLogMaintenanceThresholds()
+	info, err := logmaint.GetFileInfo(path, thresholds.SizeWarningBytes)
 	if err != nil {
 		return LogFileInfoView{}, err
 	}
@@ -890,10 +926,22 @@ func (a *App) ArchiveAndTrimLog(path string) (ArchiveResultView, error) {
 		a.tailerMu.Unlock()
 	}
 
-	result, err := logmaint.ArchiveAndTrim(path, beforeSwap)
+	thresholds := a.GetLogMaintenanceThresholds()
+	result, err := logmaint.ArchiveAndTrim(path, thresholds.KeepDays, thresholds.SizeWarningBytes, beforeSwap)
 	if err != nil {
 		return ArchiveResultView{}, err
 	}
+	// Replace the object, rather than merely reopening it, so no large old
+	// backing buffer remains reachable after a successful trim.
+	a.tailerMu.Lock()
+	if path == a.logPath {
+		limit := a.tailReadLimit
+		if limit == 0 {
+			limit = int64(config.DefaultLogTargetMB) * 1024 * 1024
+		}
+		a.tailer = logtail.New(path, limit)
+	}
+	a.tailerMu.Unlock()
 	return ArchiveResultView{BackupPath: result.BackupPath, OriginalBytes: result.OriginalBytes, KeptBytes: result.KeptBytes}, nil
 }
 
@@ -1105,7 +1153,7 @@ func (a *App) CheckAttendanceRecorded(activity string, occurredAt string) (offic
 	return client.CheckAttendance(a.ctx, activity, occurredAt)
 }
 
-func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string) (officerapi.AttendanceResponse, error) {
+func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string, awardEventLead bool) (officerapi.AttendanceResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.AttendanceResponse{}, err
@@ -1116,6 +1164,7 @@ func (a *App) SubmitAttendance(activity string, occurredAt string, names []strin
 		CharacterNames: names,
 		Zone:           zone,
 		RaidName:       raidName,
+		AwardEventLead: awardEventLead,
 	})
 }
 
@@ -1448,6 +1497,11 @@ func (a *App) clearLiveBids(itemName string) {
 // itself still receiving rolls, right now").
 const rollStaleGap = 5 * time.Minute
 
+const (
+	defaultRollLookbackHours = 6
+	maxRollLookbackHours     = 168
+)
+
 // RollView is one roll within a RollSessionView.
 type RollView struct {
 	Roller     string `json:"roller"`
@@ -1518,7 +1572,7 @@ func (a *App) rollSessionView(s parse.RollSession, now time.Time) RollSessionVie
 // newest-first. Called on a plain frontend poll — nothing here involves
 // the network, so there's no latency to hide behind a push/event
 // mechanism the way Bids' live-push to the site needed.
-func (a *App) GetRollSessions() ([]RollSessionView, error) {
+func (a *App) GetRollSessions(lookbackHours int) ([]RollSessionView, error) {
 	sessions, err := a.rollSnapshot()
 	if err != nil {
 		return nil, err
@@ -1532,9 +1586,19 @@ func (a *App) GetRollSessions() ([]RollSessionView, error) {
 	a.rollsMu.Unlock()
 
 	now := time.Now()
+	if lookbackHours <= 0 {
+		lookbackHours = defaultRollLookbackHours
+	}
+	if lookbackHours > maxRollLookbackHours {
+		lookbackHours = maxRollLookbackHours
+	}
+	cutoff := now.Add(-time.Duration(lookbackHours) * time.Hour)
 	out := make([]RollSessionView, 0, len(sessions))
 	for i := len(sessions) - 1; i >= 0; i-- { // newest-first
 		s := sessions[i]
+		if s.LastRollAt.Before(cutoff) {
+			continue
+		}
 		if removed[s.ID] {
 			continue
 		}

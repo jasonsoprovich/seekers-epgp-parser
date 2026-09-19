@@ -15,6 +15,7 @@ import {
   SelectGameDir,
   SelectLogFile,
   SetAutoDetectBids,
+  SetLogMaintenanceSettings,
   TestConnection,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type {
@@ -75,6 +76,9 @@ export function SettingsPanel({
   const [archiving, setArchiving] = useState(false);
   const [archiveResult, setArchiveResult] = useState<ArchiveResultView | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [retentionDays, setRetentionDays] = useState(14);
+  const [targetMB, setTargetMB] = useState(100);
+  const [maintenanceSaved, setMaintenanceSaved] = useState(false);
 
   useEffect(() => {
     GetSettings().then((s) => {
@@ -87,7 +91,13 @@ export function SettingsPanel({
     AppVersion().then(setVersion).catch(() => {});
     refreshDetectedLogs();
     refreshGuildSettings();
-    GetLogMaintenanceThresholds().then(setLogThresholds).catch(() => {});
+    GetLogMaintenanceThresholds()
+      .then((thresholds) => {
+        setLogThresholds(thresholds);
+        setRetentionDays(thresholds.keepDays);
+        setTargetMB(Math.round(thresholds.sizeWarningBytes / (1024 * 1024)));
+      })
+      .catch(() => {});
 
     const refreshTailStatus = () => GetLogTailStatus().then(setTailStatus).catch(() => {});
     refreshTailStatus();
@@ -239,6 +249,20 @@ export function SettingsPanel({
     }
   }
 
+  async function onSaveLogMaintenance() {
+    setArchiveError(null);
+    setMaintenanceSaved(false);
+    try {
+      await SetLogMaintenanceSettings(retentionDays, targetMB);
+      const thresholds = await GetLogMaintenanceThresholds();
+      setLogThresholds(thresholds);
+      setMaintenanceSaved(true);
+      setActiveLogInfo(null);
+    } catch (err) {
+      setArchiveError(String(err));
+    }
+  }
+
   const recentlyWritten = activeLogInfo
     ? Date.now() - new Date(activeLogInfo.modifiedAt).getTime() < (logThresholds?.liveWriteWindowMs ?? 2 * 60 * 1000)
     : false;
@@ -356,9 +380,40 @@ export function SettingsPanel({
         </div>
         <p className="hint">
           A very large log file (an officer's reached ~1 GB once) makes every capture slower to read. "Archive &amp; Trim"
-          zips the whole current log to a backup next to it, then keeps only the last {logThresholds?.keepDays ?? 30} days
-          live — nothing is ever deleted outright.
+          zips the whole current log to a backup next to it, then keeps recent complete lines up to the configured age and
+          size limits. The full original always remains in the backup.
         </p>
+        <div className="form-row" style={{ alignItems: "end" }}>
+          <label>
+            Keep up to (days)
+            <input
+              type="number"
+              min={1}
+              max={365}
+              value={retentionDays}
+              onChange={(e) => {
+                setRetentionDays(Number(e.target.value));
+                setMaintenanceSaved(false);
+              }}
+            />
+          </label>
+          <label>
+            Target maximum (MB)
+            <input
+              type="number"
+              min={10}
+              max={4096}
+              value={targetMB}
+              onChange={(e) => {
+                setTargetMB(Number(e.target.value));
+                setMaintenanceSaved(false);
+              }}
+            />
+          </label>
+          <button className="secondary" type="button" onClick={onSaveLogMaintenance}>
+            {maintenanceSaved ? "Saved" : "Save limits"}
+          </button>
+        </div>
         <div className="settings-row">
           <button className="secondary" onClick={onCheckLogFile} disabled={logInfoLoading || !logPath}>
             {logInfoLoading ? "Checking…" : "Check Log File"}
@@ -433,7 +488,7 @@ export function SettingsPanel({
             <>
               <p style={{ margin: "0 0 8px" }}>
                 This zips the entire current log (<strong>{formatBytes(activeLogInfo.size)}</strong>) to a backup file next
-                to it, then rewrites the live log to keep only the last {logThresholds?.keepDays ?? 30} days.
+                to it, then rewrites the live log to keep at most the last {logThresholds?.keepDays ?? 14} days and about {targetMB} MB.
               </p>
               <p style={{ margin: 0, color: "#9ca3af" }}>
                 Nothing is deleted — the full original stays in the backup zip. Make sure you're fully camped out of

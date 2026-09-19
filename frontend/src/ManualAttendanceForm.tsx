@@ -48,6 +48,7 @@ export function ManualAttendanceForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [minAttendance, setMinAttendance] = useState<number | null>(null);
+  const [awardEventLead, setAwardEventLead] = useState(false);
 
   // Best-effort, same as everywhere else settings are read (PLAN.md §4i) —
   // a missing value just skips the pre-check; the server still enforces the
@@ -135,13 +136,17 @@ export function ManualAttendanceForm() {
     try {
       // Raid naming is a raid-night concern — the Missed Attendance form is
       // for one-off player-quest timestamps, so it never names a raid.
-      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "");
+      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "", awardEventLead);
       const unmatched = resp.unmatched ?? [];
       const duplicates = resp.duplicates ?? [];
       const notes: string[] = [];
       if (unmatched.length) notes.push(`no match for: ${unmatched.join(", ")}`);
       if (duplicates.length) notes.push(`already recorded, skipped: ${duplicates.join(", ")}`);
-      setSuccess(`Recorded ${activity} for ${resp.inserted} character(s).${notes.length ? " — " + notes.join(" — ") : ""}`);
+      setSuccess(
+        `Recorded ${activity} for ${resp.inserted} character(s).${resp.eventLeadInserted ? " Event Lead was awarded." : ""}${
+          notes.length ? " — " + notes.join(" — ") : ""
+        }`,
+      );
       if (resp.inserted > 0) {
         setNamesText("");
         setParseNote(null);
@@ -179,6 +184,16 @@ export function ManualAttendanceForm() {
           <input type="text" value={zone} onChange={(e) => setZone(e.target.value)} placeholder="e.g. Plane of Sky" />
         </label>
       </div>
+
+      <label className="field field-inline">
+        <input
+          type="checkbox"
+          checked={awardEventLead}
+          disabled={!gated}
+          onChange={(e) => setAwardEventLead(e.target.checked)}
+        />
+        <span>Award Event Lead to me{!gated ? " (attendance activities only)" : ""}</span>
+      </label>
 
       <div className="form-row">
         <button type="button" className="secondary" onClick={() => setShowPaste((v) => !v)}>

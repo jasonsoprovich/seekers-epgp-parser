@@ -22,7 +22,7 @@ func TestTailer_IncrementalGrowth(t *testing.T) {
 	path := filepath.Join(dir, "eqlog.txt")
 	mustWrite(t, path, "line one\n")
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 
 	got, err := tl.Read()
@@ -78,7 +78,7 @@ func TestTailer_PartialLineAcrossReads(t *testing.T) {
 	// polled.
 	mustWrite(t, path, "[Wed Sep 10 20:15:0")
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 
 	got, err := tl.Read()
@@ -113,7 +113,7 @@ func TestTailer_Truncation(t *testing.T) {
 	path := filepath.Join(dir, "eqlog.txt")
 	mustWrite(t, path, "old content that will be cleared\n")
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 	if _, err := tl.Read(); err != nil {
 		t.Fatalf("initial Read: %v", err)
@@ -139,7 +139,7 @@ func TestTailer_Replacement(t *testing.T) {
 	path := filepath.Join(dir, "eqlog.txt")
 	mustWrite(t, path, "original file content\n")
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 	if _, err := tl.Read(); err != nil {
 		t.Fatalf("initial Read: %v", err)
@@ -165,7 +165,7 @@ func TestTailer_Replacement(t *testing.T) {
 func TestTailer_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist.txt")
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 	if _, err := tl.Read(); err == nil {
 		t.Fatal("Read of a missing file: want an error, got nil")
@@ -201,7 +201,7 @@ func TestTailer_LargeLog_IncrementalReadIsFast(t *testing.T) {
 	}
 	_ = f.Close()
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 
 	start := time.Now()
@@ -249,9 +249,25 @@ func TestTailer_LargeLog_IncrementalReadIsFast(t *testing.T) {
 }
 
 func TestTailer_Path(t *testing.T) {
-	tl := New("/some/path.txt")
+	tl := New("/some/path.txt", 0)
 	if tl.Path() != "/some/path.txt" {
 		t.Fatalf("Path() = %q", tl.Path())
+	}
+}
+
+func TestTailer_InitialReadIsBoundedAndStartsOnCompleteLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "eqlog.txt")
+	mustWrite(t, path, "old-one\nold-two\nnew-one\nnew-two\n")
+
+	tl := New(path, 18)
+	defer tl.Close()
+	got, err := tl.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "new-one\nnew-two\n" {
+		t.Fatalf("bounded Read = %q, want newest complete lines", got)
 	}
 }
 
@@ -261,7 +277,7 @@ func TestTailer_StatFieldsPopulated(t *testing.T) {
 	content := "hello\n"
 	mustWrite(t, path, content)
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 	if _, err := tl.Read(); err != nil {
 		t.Fatalf("Read: %v", err)
@@ -282,7 +298,7 @@ func TestTailer_StatFieldsPopulated(t *testing.T) {
 }
 
 func TestTailer_CloseIsIdempotentAndSafeBeforeRead(t *testing.T) {
-	tl := New(filepath.Join(t.TempDir(), "never-read.txt"))
+	tl := New(filepath.Join(t.TempDir(), "never-read.txt"), 0)
 	if err := tl.Close(); err != nil {
 		t.Fatalf("Close before any Read: %v", err)
 	}
@@ -302,7 +318,7 @@ func TestTailer_ConcurrentReadersDuringGrowth(t *testing.T) {
 	path := filepath.Join(dir, "eqlog.txt")
 	mustWrite(t, path, "start\n")
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 
 	done := make(chan struct{})
@@ -369,7 +385,7 @@ func TestTailer_ManySmallAppends(t *testing.T) {
 	path := filepath.Join(dir, "eqlog.txt")
 	mustWrite(t, path, "")
 
-	tl := New(path)
+	tl := New(path, 0)
 	defer tl.Close()
 
 	var want strings.Builder

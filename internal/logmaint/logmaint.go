@@ -29,6 +29,10 @@ package logmaint
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,17 +41,6 @@ import (
 	"strings"
 	"time"
 )
-
-// SizeWarningThreshold is the file size above which the officer app
-// recommends running Archive & Trim. Picked from a real incident (an
-// officer's log reached ~1 GB and made captures lag) rather than copied
-// from pq-companion's own, lower 75 MB default.
-const SizeWarningThreshold = 150 * 1024 * 1024
-
-// KeepDays is how many days of content Archive & Trim leaves in the live
-// file — matches pq-companion's own proven rolling window. Anything older
-// moves to the zip backup; nothing is ever discarded outright.
-const KeepDays = 30
 
 // LiveWriteWindow: Archive & Trim refuses to run if the file was modified
 // more recently than this. See the package doc for why this is a
@@ -99,7 +92,7 @@ type FileInfo struct {
 // newest parseable line timestamps — from the start until the first
 // parseable line (oldest), and backward from the last 64 KB (newest) —
 // so this stays fast even on a huge file.
-func GetFileInfo(path string) (FileInfo, error) {
+func GetFileInfo(path string, sizeWarningBytes int64) (FileInfo, error) {
 	st, err := os.Stat(path)
 	if err != nil {
 		return FileInfo{}, err
@@ -107,7 +100,7 @@ func GetFileInfo(path string) (FileInfo, error) {
 	info := FileInfo{
 		Path:       path,
 		Size:       st.Size(),
-		LargeFile:  st.Size() >= SizeWarningThreshold,
+		LargeFile:  st.Size() >= sizeWarningBytes,
 		ModifiedAt: st.ModTime(),
 	}
 	if oldest, ok := scanOldest(path); ok {
@@ -198,7 +191,10 @@ type ArchiveResult struct {
 // a sharing violation against our own process. See app.go's
 // ArchiveAndTrimLog, which closes the tailer only when path is the one
 // it's currently following.
-func ArchiveAndTrim(path string, beforeSwap func()) (ArchiveResult, error) {
+func ArchiveAndTrim(path string, keepDays int, targetBytes int64, beforeSwap func()) (ArchiveResult, error) {
+	if keepDays < 1 || targetBytes < 1 {
+		return ArchiveResult{}, errors.New("keep days and target bytes must be positive")
+	}
 	st, err := os.Stat(path)
 	if err != nil {
 		return ArchiveResult{}, err
@@ -206,18 +202,34 @@ func ArchiveAndTrim(path string, beforeSwap func()) (ArchiveResult, error) {
 	originalSize := st.Size()
 	originalModTime := st.ModTime()
 
-	backupPath := backupFilename(path)
-	if err := zipFile(path, backupPath); err != nil {
+	backupTemp, backupPath, err := newBackupPaths(path)
+	if err != nil {
+		return ArchiveResult{}, fmt.Errorf("creating backup: %w", err)
+	}
+	wantHash, err := zipFile(path, backupTemp)
+	if err != nil {
+		_ = os.Remove(backupTemp)
 		return ArchiveResult{}, fmt.Errorf("writing backup: %w", err)
 	}
-	if err := verifyZipEntry(backupPath, filepath.Base(path), originalSize); err != nil {
-		_ = os.Remove(backupPath)
+	if err := verifyZipEntry(backupTemp, filepath.Base(path), originalSize, wantHash); err != nil {
+		_ = os.Remove(backupTemp)
 		return ArchiveResult{}, fmt.Errorf("backup verification failed, nothing was changed: %w", err)
 	}
+	if err := os.Rename(backupTemp, backupPath); err != nil {
+		_ = os.Remove(backupTemp)
+		return ArchiveResult{}, fmt.Errorf("publishing backup: %w", err)
+	}
 
-	tempPath := path + ".trimming.tmp"
-	_ = os.Remove(tempPath) // clear a stray leftover from a prior crashed run, if any
-	kept, err := writeFiltered(path, tempPath)
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".trimming-*.tmp")
+	if err != nil {
+		return ArchiveResult{BackupPath: backupPath}, fmt.Errorf("creating trimmed log (your backup at %s is safe): %w", backupPath, err)
+	}
+	tempPath := temp.Name()
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return ArchiveResult{BackupPath: backupPath}, err
+	}
+	kept, err := writeFiltered(path, tempPath, st.Mode(), originalSize, keepDays, targetBytes)
 	if err != nil {
 		_ = os.Remove(tempPath)
 		return ArchiveResult{BackupPath: backupPath}, fmt.Errorf("filtering log (your backup at %s is safe): %w", backupPath, err)
@@ -256,40 +268,64 @@ func ArchiveAndTrim(path string, beforeSwap func()) (ArchiveResult, error) {
 	return ArchiveResult{BackupPath: backupPath, OriginalBytes: originalSize, KeptBytes: kept}, nil
 }
 
-func backupFilename(path string) string {
+func newBackupPaths(path string) (tempPath, finalPath string, err error) {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
-	return filepath.Join(dir, fmt.Sprintf("%s.%s.bak.zip", base, time.Now().Format("2006-01-02")))
+	f, err := os.CreateTemp(dir, "."+base+"."+time.Now().Format("2006-01-02T150405")+".*.tmp")
+	if err != nil {
+		return "", "", err
+	}
+	tempPath = f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return "", "", err
+	}
+	name := strings.TrimPrefix(filepath.Base(tempPath), ".")
+	name = strings.TrimSuffix(name, ".tmp") + ".bak.zip"
+	return tempPath, filepath.Join(dir, name), nil
 }
 
-func zipFile(srcPath, destZipPath string) error {
+func zipFile(srcPath, destZipPath string) (string, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer src.Close()
 
-	out, err := os.Create(destZipPath)
+	out, err := os.OpenFile(destZipPath, os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer out.Close()
 
 	zw := zip.NewWriter(out)
 	w, err := zw.CreateHeader(&zip.FileHeader{Name: filepath.Base(srcPath), Method: zip.Deflate})
 	if err != nil {
 		_ = zw.Close()
-		return err
+		_ = out.Close()
+		return "", err
 	}
-	if _, err := io.Copy(w, src); err != nil {
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(w, h), src); err != nil {
 		_ = zw.Close()
-		return err
+		_ = out.Close()
+		return "", err
 	}
-	return zw.Close()
+	if err := zw.Close(); err != nil {
+		_ = out.Close()
+		return "", err
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func verifyZipEntry(zipPath, entryName string, wantSize int64) error {
+func verifyZipEntry(zipPath, entryName string, wantSize int64, wantHash string) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
@@ -299,6 +335,22 @@ func verifyZipEntry(zipPath, entryName string, wantSize int64) error {
 		if f.Name == entryName {
 			if int64(f.UncompressedSize64) != wantSize { //nolint:gosec // sizes here are file sizes, never near uint64 overflow territory
 				return fmt.Errorf("backup entry size %d does not match original %d", f.UncompressedSize64, wantSize)
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			h := sha256.New()
+			n, copyErr := io.Copy(h, rc)
+			closeErr := rc.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			if n != wantSize || hex.EncodeToString(h.Sum(nil)) != wantHash {
+				return fmt.Errorf("backup content hash or size does not match original")
 			}
 			return nil
 		}
@@ -312,42 +364,80 @@ func verifyZipEntry(zipPath, entryName string, wantSize int64) error {
 // Streamed rather than pq-companion's whole-file-in-memory approach — one
 // line at a time in, one line at a time out, so this doesn't need a
 // second ~1 GB buffer alongside the original file's own OS page cache.
-func writeFiltered(srcPath, destPath string) (int64, error) {
+func writeFiltered(srcPath, destPath string, mode os.FileMode, sourceSize int64, keepDays int, targetBytes int64) (int64, error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return 0, err
 	}
 	defer src.Close()
 
-	out, err := os.Create(destPath)
+	out, err := os.OpenFile(destPath, os.O_WRONLY|os.O_TRUNC, mode.Perm())
 	if err != nil {
 		return 0, err
 	}
-	w := bufio.NewWriterSize(out, 256*1024)
-
-	cutoff := time.Now().AddDate(0, 0, -KeepDays)
+	cutoff := time.Now().AddDate(0, 0, -keepDays)
 	sc := newScanner(src)
-	var kept int64
+	var offset, ageStart int64
+	sawTimestamp := false
+	ageStartSet := false
 	for sc.Scan() {
-		line := sc.Text()
-		if t, ok := lineTimestamp(line); ok && t.Before(cutoff) {
-			continue // older than the keep window — dropped from the live file, still in the backup
+		lineStart := offset
+		offset += int64(len(sc.Bytes())) + 1
+		if t, ok := lineTimestamp(sc.Text()); ok {
+			sawTimestamp = true
+			if !t.Before(cutoff) && !ageStartSet {
+				ageStart = lineStart
+				ageStartSet = true
+			}
 		}
-		n, werr := w.WriteString(line)
-		if werr == nil {
-			_, werr = w.WriteString("\n")
-		}
-		if werr != nil {
-			_ = out.Close()
-			return 0, werr
-		}
-		kept += int64(n) + 1
 	}
 	if err := sc.Err(); err != nil {
 		_ = out.Close()
 		return 0, err
 	}
-	if err := w.Flush(); err != nil {
+	if sawTimestamp && !ageStartSet {
+		ageStart = sourceSize
+	}
+	sizeStart := sourceSize - targetBytes
+	if sizeStart < 0 {
+		sizeStart = 0
+	}
+	if sizeStart > 0 {
+		if _, err := src.Seek(sizeStart, io.SeekStart); err != nil {
+			_ = out.Close()
+			return 0, err
+		}
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := src.Read(buf)
+			if i := bytes.IndexByte(buf[:n], '\n'); i >= 0 {
+				sizeStart += int64(i + 1)
+				break
+			}
+			sizeStart += int64(n)
+			if readErr != nil {
+				if readErr == io.EOF {
+					break
+				}
+				_ = out.Close()
+				return 0, readErr
+			}
+		}
+	}
+	start := ageStart
+	if sizeStart > start {
+		start = sizeStart
+	}
+	if _, err := src.Seek(start, io.SeekStart); err != nil {
+		_ = out.Close()
+		return 0, err
+	}
+	kept, err := io.CopyN(out, src, sourceSize-start)
+	if err != nil && err != io.EOF {
+		_ = out.Close()
+		return 0, err
+	}
+	if err := out.Sync(); err != nil {
 		_ = out.Close()
 		return 0, err
 	}

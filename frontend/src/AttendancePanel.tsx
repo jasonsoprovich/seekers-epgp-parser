@@ -111,6 +111,7 @@ export function AttendancePanel() {
   const [minAttendance, setMinAttendance] = useState<number | null>(null);
   const [lookbackHours, setLookbackHours] = useState<number>(loadLookback);
   const [raidName, setRaidName] = useState<string>(() => window.localStorage.getItem(RAIDNAME_KEY) ?? "");
+  const [awardEventLead, setAwardEventLead] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Pre-submit "already in the ledger?" results, keyed by capture id.
   // "checking" while the probe is in flight; absent = not checked / probe
@@ -254,6 +255,14 @@ export function AttendancePanel() {
   }
 
   const toSubmit = captures.filter((c) => c.assignment !== "" && !c.submitted);
+  const eventLeadCapture = awardEventLead
+    ? [...toSubmit]
+        .filter((c) => GATED.has(c.assignment))
+        .sort((a, b) => {
+          const rank = (c: Capture) => (c.assignment === "Raid - Start" ? 0 : c.assignment === "Event Attend" ? 1 : 2);
+          return rank(a) - rank(b) || a.occurredAt.localeCompare(b.occurredAt);
+        })[0]
+    : undefined;
   // Captures that would actually write something — not-yet-checked and
   // still-checking count as "new" so the button label isn't alarmist mid-probe.
   const dupNewCount = toSubmit.filter((c) => {
@@ -289,6 +298,12 @@ export function AttendancePanel() {
   async function doSubmit() {
     if (toSubmit.length === 0) return;
 
+    if (awardEventLead && !eventLeadCapture) {
+      setError("Event Lead requires an assigned Raid - Start, Raid - Mid, Raid - End, or Event Attend capture.");
+      setConfirmOpen(false);
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     setSubmitSummary(null);
@@ -318,7 +333,14 @@ export function AttendancePanel() {
     try {
       for (const c of toSubmit) {
         const names = c.rows.map((r) => r.name.trim()).filter(Boolean);
-        const res = await SubmitAttendance(c.assignment, c.occurredAt, names, c.zone, trimmedRaidName);
+        const res = await SubmitAttendance(
+          c.assignment,
+          c.occurredAt,
+          names,
+          c.zone,
+          trimmedRaidName,
+          c.id === eventLeadCapture?.id,
+        );
         const unmatched = res.unmatched ?? [];
         const duplicates = res.duplicates ?? [];
         const note =
@@ -327,11 +349,12 @@ export function AttendancePanel() {
         setCaptures((prev) =>
           prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: c.assignment, inserted: res.inserted, note } } : x)),
         );
-        done.push(`${c.assignment}: ${res.inserted}`);
+        done.push(`${c.assignment}: ${res.inserted}${res.eventLeadInserted ? " + Event Lead" : ""}`);
       }
       setSubmitSummary(
         `Submitted ${done.length} capture(s) — ${done.join(" · ")}${trimmedRaidName ? ` · raid "${trimmedRaidName}"` : ""}. Review the notes, then Clear all when the raid's wrapped.`,
       );
+      if (eventLeadCapture) setAwardEventLead(false);
     } catch (err) {
       setError(`Stopped after ${done.length} of ${toSubmit.length}: ${String(err)}`);
     } finally {
@@ -366,6 +389,10 @@ export function AttendancePanel() {
           style={{ minWidth: 180 }}
           title={'Names the night on the site Raids & Events page — e.g. "VT 9/8". Leave blank to name it there later.'}
         />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
+          <input type="checkbox" checked={awardEventLead} onChange={(e) => setAwardEventLead(e.target.checked)} />
+          Award Event Lead to me
+        </label>
         <button
           className="primary"
           onClick={onSubmitClick}
@@ -585,6 +612,13 @@ export function AttendancePanel() {
               </p>
             ) : (
               <p style={{ margin: 0, color: "#9ca3af" }}>No raid name — you can name it on the site later.</p>
+            )}
+            {awardEventLead && (
+              <p style={{ margin: "8px 0 0", color: eventLeadCapture ? "#fbbf24" : "#f87171" }}>
+                {eventLeadCapture
+                  ? <>Event Lead will be awarded once with <strong>{eventLeadCapture.assignment}</strong> at {fmtTime(eventLeadCapture.occurredAt)}.</>
+                  : "Event Lead requires an assigned Raid Start/Mid/End or Event Attend capture."}
+              </p>
             )}
           </>
         }

@@ -36,7 +36,7 @@ func TestGetFileInfo_SizeAndDates(t *testing.T) {
 		logLine(recent, "Osui tells the guild, 'ready'"),
 	})
 
-	info, err := GetFileInfo(path)
+	info, err := GetFileInfo(path, 100*1024*1024)
 	if err != nil {
 		t.Fatalf("GetFileInfo: %v", err)
 	}
@@ -87,7 +87,8 @@ func TestArchiveAndTrim_BacksUpEverythingKeepsRecentWindow(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "eqlog_Osui_pq.proj.txt")
 
-	tooOld := time.Now().AddDate(0, 0, -KeepDays-5)
+	const keepDays = 14
+	tooOld := time.Now().AddDate(0, 0, -keepDays-5)
 	withinWindow := time.Now().AddDate(0, 0, -5)
 	oldLine := logLine(tooOld, "You have entered EverQuest.")
 	keptLine := logLine(withinWindow, "Osui tells the guild, 'ready'")
@@ -108,7 +109,7 @@ func TestArchiveAndTrim_BacksUpEverythingKeepsRecentWindow(t *testing.T) {
 	}
 
 	var swapCalled bool
-	result, err := ArchiveAndTrim(path, func() { swapCalled = true })
+	result, err := ArchiveAndTrim(path, keepDays, 100*1024*1024, func() { swapCalled = true })
 	if err != nil {
 		t.Fatalf("ArchiveAndTrim: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestArchiveAndTrim_AbortsIfFileChangedDuringScan(t *testing.T) {
 	defer func() { testHookBeforeRecheck = nil }()
 
 	var swapCalled bool
-	_, err = ArchiveAndTrim(path, func() { swapCalled = true })
+	_, err = ArchiveAndTrim(path, 14, 100*1024*1024, func() { swapCalled = true })
 	if err == nil {
 		t.Fatal("expected an error when the file changes mid-archive, got nil")
 	}
@@ -208,7 +209,11 @@ func TestArchiveAndTrim_VerificationFailurePreventsLiveFileChange(t *testing.T) 
 	// at the exact path ArchiveAndTrim will write, but as a plain (non-
 	// zip) file — zip.OpenReader will fail on it, simulating a write
 	// that produced a bad archive.
-	backupPath := backupFilename(path)
+	backupFile, backupPath, err := newBackupPaths(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(backupFile)
 	if err := os.WriteFile(backupPath, []byte("not a zip"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -216,11 +221,44 @@ func TestArchiveAndTrim_VerificationFailurePreventsLiveFileChange(t *testing.T) 
 	// force the failure a different way: make the destination directory
 	// read-only isn't portable in CI, so directly exercise verifyZipEntry
 	// against a deliberately-wrong expected size instead.
-	if err := zipFile(path, backupPath); err != nil {
+	hash, err := zipFile(path, backupFile)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyZipEntry(backupPath, filepath.Base(path), int64(len(original)+1)); err == nil {
+	if err := verifyZipEntry(backupFile, filepath.Base(path), int64(len(original)+1), hash); err == nil {
 		t.Fatal("verifyZipEntry should reject a size mismatch")
+	}
+}
+
+func TestArchiveAndTrim_EnforcesTargetAtCompleteLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "eqlog_Osui_pq.proj.txt")
+	now := time.Now()
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = logLine(now.Add(time.Duration(i)*time.Second), strings.Repeat("x", 80))
+	}
+	writeLines(t, path, lines)
+	if err := os.Chtimes(path, now.Add(-10*time.Minute), now.Add(-10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ArchiveAndTrim(path, 14, 500, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trimmed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(len(trimmed)) > 500 {
+		t.Fatalf("trimmed size = %d, want <= 500", len(trimmed))
+	}
+	if len(trimmed) > 0 && trimmed[len(trimmed)-1] != '\n' {
+		t.Fatal("trimmed log must end on a complete line")
+	}
+	if result.KeptBytes != int64(len(trimmed)) {
+		t.Fatalf("KeptBytes = %d, actual %d", result.KeptBytes, len(trimmed))
 	}
 }
 

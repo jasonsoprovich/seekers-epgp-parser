@@ -10,10 +10,11 @@
 // first read, only ever does a seeked read of the bytes appended since
 // the previous call: the cost of a poll tick becomes proportional to how
 // much the officer's log grew since the last tick, not to the file's
-// total size. Holding the accumulated content in memory (rather than
-// re-reading it) is a deliberate trade of a bounded amount of RAM — well
-// within what a modern desktop has to spare — for eliminating repeated
-// full-file disk reads, which is what actually failed in production.
+// total size. The initial read is bounded to the newest configured bytes
+// and starts after a complete-line boundary, so opening a multi-GB log does
+// not require a multi-GB allocation. Older history remains on disk and is
+// intentionally unavailable to parsers until Archive & Trim is configured
+// with a larger target or the log is trimmed.
 package logtail
 
 import (
@@ -31,7 +32,8 @@ import (
 // the accumulated content so a caller never races the tailer's own
 // buffer.
 type Tailer struct {
-	path string
+	path             string
+	initialReadLimit int64
 
 	mu      sync.Mutex
 	file    *os.File
@@ -48,8 +50,8 @@ type Tailer struct {
 // Read call does — so constructing one for a character log that doesn't
 // exist yet (the officer hasn't logged that toon in this session) isn't
 // an error until something actually tries to read it.
-func New(path string) *Tailer {
-	return &Tailer{path: path}
+func New(path string, initialReadLimit int64) *Tailer {
+	return &Tailer{path: path, initialReadLimit: initialReadLimit}
 }
 
 // Path is the file this Tailer follows.
@@ -126,6 +128,31 @@ func (t *Tailer) Read() (string, error) {
 		// note below). Starting from nil guarantees a brand-new array.
 		t.content = nil
 		t.resets++
+		if t.initialReadLimit > 0 && info.Size() > t.initialReadLimit {
+			start := info.Size() - t.initialReadLimit
+			if _, err := t.file.Seek(start, io.SeekStart); err != nil {
+				return "", err
+			}
+			t.offset = start
+			// The seek can land in the middle of a record. Discard through
+			// the next newline in fixed-size chunks so even a malformed giant
+			// line cannot defeat the memory bound.
+			buf := make([]byte, 32*1024)
+			for {
+				n, readErr := t.file.Read(buf)
+				t.offset += int64(n)
+				if i := bytes.IndexByte(buf[:n], '\n'); i >= 0 {
+					t.offset -= int64(n - i - 1)
+					break
+				}
+				if readErr != nil {
+					if readErr == io.EOF {
+						break
+					}
+					return "", readErr
+				}
+			}
+		}
 	}
 
 	if _, err := t.file.Seek(t.offset, io.SeekStart); err != nil {
@@ -201,6 +228,9 @@ func (t *Tailer) Close() error {
 	}
 	err := t.file.Close()
 	t.file = nil
+	t.fi = nil
+	t.content = nil
+	t.offset = 0
 	return err
 }
 

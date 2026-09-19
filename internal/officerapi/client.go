@@ -258,11 +258,15 @@ type AttendanceRequest struct {
 	// carries this; a later Mid/End submit with the same value is a no-op
 	// server-side. Omitted when the officer left the field blank.
 	RaidName string `json:"raidName,omitempty"`
+	// Awards the configured Event Lead EP value to the API-key owner's
+	// current main. The site resolves the value and identity server-side.
+	AwardEventLead bool `json:"awardEventLead,omitempty"`
 }
 
 type AttendanceResponse struct {
-	Inserted  int      `json:"inserted"`
-	Unmatched []string `json:"unmatched"`
+	Inserted          int      `json:"inserted"`
+	EventLeadInserted bool     `json:"eventLeadInserted"`
+	Unmatched         []string `json:"unmatched"`
 	// Names skipped because they resolved to a player already awarded this
 	// activity/timestamp elsewhere in the submission, or already on
 	// ep_ledger from an earlier submission of the same capture (PLAN.md

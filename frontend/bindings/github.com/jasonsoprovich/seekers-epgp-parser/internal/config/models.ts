@@ -50,4 +50,11 @@ export interface Settings {
      * internal/parse/rolls.go.
      */
     "rollWinnerRule"?: string;
+
+    /**
+     * LogRetentionDays and LogTargetMB control Archive & Trim. Zero means
+     * the default so existing config files pick up safe values automatically.
+     */
+    "logRetentionDays"?: number;
+    "logTargetMB"?: number;
 }
