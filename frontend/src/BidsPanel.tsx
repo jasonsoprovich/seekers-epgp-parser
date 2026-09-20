@@ -38,6 +38,22 @@ function newClientRoundId(): string {
 // GP; the ordering only matters for Determine Winner tie-breaks.
 const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low Bid": 2, "Alt Loot": 1, "Rot (No-Drop)": 0 };
 
+// Project Quarm item links are the displayed item name wrapped in DC2 bytes,
+// with the six-digit item ID before it. Keep the link verbatim so EQ can turn
+// the pasted grats message back into a clickable item.
+const EQ_ITEM_LINK_RE = /\x12\d{6} [^\x12]+\x12/g;
+
+function linkedItemText(itemName: string, rows: CapturedBidRow[]): string {
+  const normalizedName = itemName.trim().toLocaleLowerCase();
+  for (const row of rows) {
+    for (const link of row.rawMessage.matchAll(EQ_ITEM_LINK_RE)) {
+      const text = link[0];
+      if (text.slice(8, -1).trim().toLocaleLowerCase() === normalizedName) return text;
+    }
+  }
+  return itemName;
+}
+
 // `characterName` is the resolution/submission identity — it's what gets
 // looked up against the roster and sent to the site. `displayName` is
 // frozen at capture time and always shown in the Character column, so
@@ -623,7 +639,7 @@ export function BidsPanel() {
   }
 
   function gratsMessage(winners: BidRow[]): string {
-    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${capturedItem}!`;
+    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${linkedItemText(capturedItem, rows)}!`;
   }
 
   async function onCopyGrats() {
