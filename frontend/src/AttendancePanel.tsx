@@ -111,7 +111,9 @@ export function AttendancePanel() {
   const [minAttendance, setMinAttendance] = useState<number | null>(null);
   const [lookbackHours, setLookbackHours] = useState<number>(loadLookback);
   const [raidName, setRaidName] = useState<string>(() => window.localStorage.getItem(RAIDNAME_KEY) ?? "");
-  const [awardEventLead, setAwardEventLead] = useState(false);
+  // Most captures are submitted by the actual event leader. Keep this on by
+  // default, while the existing submit confirmation makes the award explicit.
+  const [awardEventLead, setAwardEventLead] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Pre-submit "already in the ledger?" results, keyed by capture id.
   // "checking" while the probe is in flight; absent = not checked / probe
@@ -391,7 +393,7 @@ export function AttendancePanel() {
         />
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
           <input type="checkbox" checked={awardEventLead} onChange={(e) => setAwardEventLead(e.target.checked)} />
-          Award Event Lead to me
+            Award Event Lead to me (confirm before submitting)
         </label>
         <button
           className="primary"
