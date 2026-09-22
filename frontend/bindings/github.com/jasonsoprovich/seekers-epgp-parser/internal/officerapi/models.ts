@@ -17,6 +17,12 @@ export interface AttendanceCheck {
 export interface AttendanceResponse {
     "inserted": number;
     "eventLeadInserted": boolean;
+
+    /**
+     * The character Event Lead was actually awarded to (may be an alt's
+     * main, not whatever name was typed) — empty unless EventLeadInserted.
+     */
+    "eventLeadCharacterName"?: string;
     "unmatched": string[] | null;
 
     /**

@@ -136,7 +136,10 @@ export function ManualAttendanceForm() {
     try {
       // Raid naming is a raid-night concern — the Missed Attendance form is
       // for one-off player-quest timestamps, so it never names a raid.
-      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "", awardEventLead);
+      // Always awards the API key owner's own main here — this one-off
+      // form has no "someone else took attendance for me" scenario like
+      // the raid Attendance tab's confirm dialog does.
+      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "", awardEventLead, "");
       const unmatched = resp.unmatched ?? [];
       const duplicates = resp.duplicates ?? [];
       const notes: string[] = [];

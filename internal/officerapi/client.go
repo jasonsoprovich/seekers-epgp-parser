@@ -258,15 +258,26 @@ type AttendanceRequest struct {
 	// carries this; a later Mid/End submit with the same value is a no-op
 	// server-side. Omitted when the officer left the field blank.
 	RaidName string `json:"raidName,omitempty"`
-	// Awards the configured Event Lead EP value to the API-key owner's
-	// current main. The site resolves the value and identity server-side.
+	// Awards the configured Event Lead EP value when true. Goes to the
+	// API-key owner's current main unless EventLeadCharacterName names
+	// someone else — the officer taking attendance isn't always the actual
+	// raid leader.
 	AwardEventLead bool `json:"awardEventLead,omitempty"`
+	// Who Event Lead is awarded to, when AwardEventLead is true. Empty
+	// keeps the default (the API-key owner's own current main) — this
+	// only needs setting when the submitting officer isn't the leader.
+	// The site resolves it to that character's player and current main the
+	// same way any other captured name is resolved.
+	EventLeadCharacterName string `json:"eventLeadCharacterName,omitempty"`
 }
 
 type AttendanceResponse struct {
-	Inserted          int      `json:"inserted"`
-	EventLeadInserted bool     `json:"eventLeadInserted"`
-	Unmatched         []string `json:"unmatched"`
+	Inserted          int  `json:"inserted"`
+	EventLeadInserted bool `json:"eventLeadInserted"`
+	// The character Event Lead was actually awarded to (may be an alt's
+	// main, not whatever name was typed) — empty unless EventLeadInserted.
+	EventLeadCharacterName string   `json:"eventLeadCharacterName,omitempty"`
+	Unmatched              []string `json:"unmatched"`
 	// Names skipped because they resolved to a player already awarded this
 	// activity/timestamp elsewhere in the submission, or already on
 	// ep_ledger from an earlier submission of the same capture (PLAN.md

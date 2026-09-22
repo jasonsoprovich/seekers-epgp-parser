@@ -114,6 +114,13 @@ export function AttendancePanel() {
   // Most captures are submitted by the actual event leader. Keep this on by
   // default, while the existing submit confirmation makes the award explicit.
   const [awardEventLead, setAwardEventLead] = useState(true);
+  // Who Event Lead actually goes to — blank means "me" (the API key
+  // owner's own current main, the site's default). The officer taking
+  // attendance isn't always the actual raid leader (a trainee learning
+  // the app, covering for someone), so this lets them name the real leader
+  // right here instead of toggling the award off and fixing it afterward
+  // with a separate Manual Entry.
+  const [eventLeadName, setEventLeadName] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Pre-submit "already in the ledger?" results, keyed by capture id.
   // "checking" while the probe is in flight; absent = not checked / probe
@@ -342,6 +349,7 @@ export function AttendancePanel() {
           c.zone,
           trimmedRaidName,
           c.id === eventLeadCapture?.id,
+          c.id === eventLeadCapture?.id ? eventLeadName.trim() : "",
         );
         const unmatched = res.unmatched ?? [];
         const duplicates = res.duplicates ?? [];
@@ -351,12 +359,17 @@ export function AttendancePanel() {
         setCaptures((prev) =>
           prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: c.assignment, inserted: res.inserted, note } } : x)),
         );
-        done.push(`${c.assignment}: ${res.inserted}${res.eventLeadInserted ? " + Event Lead" : ""}`);
+        done.push(
+          `${c.assignment}: ${res.inserted}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}`,
+        );
       }
       setSubmitSummary(
         `Submitted ${done.length} capture(s) — ${done.join(" · ")}${trimmedRaidName ? ` · raid "${trimmedRaidName}"` : ""}. Review the notes, then Clear all when the raid's wrapped.`,
       );
-      if (eventLeadCapture) setAwardEventLead(false);
+      if (eventLeadCapture) {
+        setAwardEventLead(false);
+        setEventLeadName("");
+      }
     } catch (err) {
       setError(`Stopped after ${done.length} of ${toSubmit.length}: ${String(err)}`);
     } finally {
@@ -393,7 +406,7 @@ export function AttendancePanel() {
         />
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
           <input type="checkbox" checked={awardEventLead} onChange={(e) => setAwardEventLead(e.target.checked)} />
-            Award Event Lead to me (confirm before submitting)
+            Award Event Lead (defaults to you — pick who in the confirm dialog)
         </label>
         <button
           className="primary"
@@ -616,11 +629,36 @@ export function AttendancePanel() {
               <p style={{ margin: 0, color: "#9ca3af" }}>No raid name — you can name it on the site later.</p>
             )}
             {awardEventLead && (
-              <p style={{ margin: "8px 0 0", color: eventLeadCapture ? "#fbbf24" : "#f87171" }}>
-                {eventLeadCapture
-                  ? <>Event Lead will be awarded once with <strong>{eventLeadCapture.assignment}</strong> at {fmtTime(eventLeadCapture.occurredAt)}.</>
-                  : "Event Lead requires an assigned Raid Start/Mid/End or Event Attend capture."}
-              </p>
+              <div style={{ margin: "8px 0 0" }}>
+                <p style={{ margin: 0, color: eventLeadCapture ? "#fbbf24" : "#f87171" }}>
+                  {eventLeadCapture
+                    ? <>Event Lead will be awarded once with <strong>{eventLeadCapture.assignment}</strong> at {fmtTime(eventLeadCapture.occurredAt)}.</>
+                    : "Event Lead requires an assigned Raid Start/Mid/End or Event Attend capture."}
+                </p>
+                {eventLeadCapture && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 13 }}>
+                    Event Lead:
+                    <input
+                      type="text"
+                      list="event-lead-roster"
+                      placeholder="(you — leave blank to award yourself)"
+                      value={eventLeadName}
+                      onChange={(e) => setEventLeadName(e.target.value)}
+                      style={{ flex: 1, minWidth: 160 }}
+                    />
+                  </label>
+                )}
+                {eventLeadCapture && eventLeadName.trim() && !roster.resolve(eventLeadName.trim()).matched && (
+                  <p style={{ margin: "4px 0 0", color: "#f87171", fontSize: 12 }}>
+                    "{eventLeadName.trim()}" isn't in the roster — double-check the spelling before submitting.
+                  </p>
+                )}
+                <datalist id="event-lead-roster">
+                  {roster.characters.map((c) => (
+                    <option key={c.name} value={c.name} />
+                  ))}
+                </datalist>
+              </div>
             )}
           </>
         }
