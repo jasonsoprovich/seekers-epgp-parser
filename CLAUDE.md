@@ -55,7 +55,27 @@ does. This app only talks to `/api/officer/*` over HTTP.
   even when the app's own convention guarantees it's never actually nil —
   guard with `?? []` at the call site rather than asserting it away.
 - `internal/parse` — pure log-parsing logic, no file I/O or network,
-  tested against real sample logs in `internal/parse/testdata/`
+  tested against real sample logs in `internal/parse/testdata/`. Stays
+  free of any actual item list — `DetectAnnouncement` takes an `isItem
+  func(string) bool` callback rather than importing `internal/items`; see
+  that package below and `buildAnnouncementMatcher` in `app.go`.
+- `internal/items` — an embedded, in-memory index of every Quarm item name
+  (`//go:embed items.tsv.gz`, ~240KB gzipped, regenerated from a
+  pq-companion `quarm.db` copy by `scripts/gen-items.sh` — **not
+  filtered by expansion**, so it includes Planes of Power even though
+  pq-companion's own UI hides those at query time). Backs two things:
+  - The "send tells" announcement gate (below) — telling a real linked
+    item apart from an unrelated buff request ("SS/SP send tells").
+  - `App.ItemLink`, which renders the grats message's item as an
+    in-game clickable link (the classic Mac-era EQMacEmu/Project Quarm
+    format: DC2 0x12, 6-digit item ID, name, closing DC2 — same as
+    pq-companion's `frontend/src/lib/itemHelpers.ts`, confirmed working
+    in-game there).
+
+  `items.Match` does exact lookup first, then (for names 8+ characters)
+  a small edit-distance search, refusing to guess when two different
+  items tie. Stays a single portable exe — no side files, no new Go
+  modules — decompressed with stdlib `compress/gzip` at first use.
 - `internal/eqlogs` — pure filesystem inspection (like `internal/parse`,
   no dialogs/config/Wails): finds `eqlog_<Character>_<server>.txt` files
   under a game folder and picks the most-recently-written as the "active
@@ -105,6 +125,9 @@ wails3 package                    # -> bin/seekers-epgp-parser.app, for a real m
 go run ./cmd/simlog --dry-run       # preview a simulated bid round
 go run ./cmd/simlog                  # replay one live into ~/Downloads/EverQuest-sim/Logs/eqlog_Osui_pq.proj.txt
 go run ./cmd/simlog --who 3 --bids 0 # attendance only: 3 /who snapshots, capture the last
+
+scripts/gen-items.sh [path/to/quarm.db]   # regenerate internal/items/items.tsv.gz
+                                            # defaults to ../../pq-companion/backend/data/quarm.db
 ```
 
 `cmd/simlog` replays a realistic loot-bid round into an EQ log
@@ -169,6 +192,36 @@ or just use `wails3 build`, which does both.
   as the promise rejection; `y` vanishes from the generated
   `App.d.ts` with no error. Wrap multi-value returns in one struct
   (`PointValues`, `LedgerPage` in `app.go` are the pattern to copy).
+- **Real EQ logs never contain `\x12` (DC2) item-link bytes.** Checked
+  months of real logs across multiple characters/machines. An officer
+  pasting a linked item into chat writes out as plain visible text, not
+  the Mac-era markup pq-companion's own item-link *copy* feature
+  produces (`stripItemLinks`/`itemLinkRe` in `internal/parse/bids.go`
+  handle the copy-format case anyway, in case that ever changes, but
+  don't expect it in a real captured log). This is why the grats-link
+  feature (`App.ItemLink`) has to look the item name up in
+  `internal/items` rather than reusing a link byte sequence a bidder
+  supposedly pasted — there's nothing to reuse.
+- **Announcement trigger has no word-boundary anchors** (`bids.go`
+  `announceTriggerRe`). A real live-test miss (2026-09-21, "Denon's
+  Drums of Declivity"): the officer pasted the item link with no space
+  before typing "send tells" — `"...Declivitysend tells"` — so "send"
+  started mid-word. `\b`-anchoring the trigger (the original design)
+  can never match that. Don't re-add `\b` here; the item-plausibility
+  gate (`isItem`, next item) is what keeps this safe from over-matching
+  prose, not the trigger regex being narrow.
+- **Announcement-match mode** (`config.Settings.AnnouncementMatchMode`,
+  `App.SetAnnouncementMatch`, Settings screen): `"itemdb"` (default)
+  checks a detected candidate against `internal/items.Match` — real
+  Quarm item names, with typo tolerance — OR falls back to an *exact*
+  known-ledger-name match (`parse.ExactKnownItem`, no structural
+  guessing). `"legacy"` is `parse.IsPlausibleItem` — the original
+  Capitalized-words-only structural check, kept as a Settings fallback
+  in case the embedded index ever needs bypassing. The structural check
+  alone accepts things like "SS/SP" (a single capitalized token) — a
+  real live-test false positive ("SS/SP send tells", a buff request, not
+  a bid) that only itemdb mode actually fixes; don't assume tightening
+  `looksLikeItemName` further is the fix, the real item list is.
 - **Bid announcement window** (`internal/parse.FindAnnouncementStart`):
   groups consecutive "send tells" announcements for the same item within
   `announcementSessionGap` (10 min) into one round, anchoring the window

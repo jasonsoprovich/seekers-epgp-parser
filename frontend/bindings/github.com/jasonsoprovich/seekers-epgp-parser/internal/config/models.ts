@@ -36,6 +36,18 @@ export interface Settings {
     "autoDetectBids"?: boolean | null;
 
     /**
+     * AnnouncementMatch picks how the "send tells" watcher decides whether
+     * a detected candidate name is really an item, vs. e.g. a buff request
+     * ("SS/SP send tells"). "itemdb" (the default, empty reads as this)
+     * checks the candidate against the embedded Quarm item index
+     * (internal/items) with typo tolerance; "legacy" is the original
+     * Capitalized-words structural check (internal/parse.looksLikeItemName)
+     * kept as a manual fallback in Settings in case the embedded index
+     * ever needs to be bypassed. Read it through AnnouncementMatchMode.
+     */
+    "announcementMatch"?: string;
+
+    /**
      * SetupComplete is set once the officer has been through (or dismissed)
      * the first-run setup wizard. The wizard shows on launch while this is
      * false; Settings has a "Run setup again" button that reopens it

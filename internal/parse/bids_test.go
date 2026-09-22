@@ -13,6 +13,9 @@ var bidsSample string
 //go:embed testdata/bid_item_link_sample.txt
 var bidItemLinkSample string
 
+//go:embed testdata/announce_edge_sample.txt
+var announceEdgeSample string
+
 func TestCaptureBids_RealSample(t *testing.T) {
 	start := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.Local)
 	stop := time.Date(2026, time.August, 18, 0, 0, 0, 0, time.Local)
@@ -210,7 +213,7 @@ func TestDetectAnnouncement_RealSample(t *testing.T) {
 
 	// The newest of the log owner's own "send tells" lines wins (there are
 	// two — the opening call and the "- last call" repeat).
-	item, at, ok := DetectAnnouncement(bidsSample, before, after, nil)
+	item, at, ok := DetectAnnouncement(bidsSample, before, after, LegacyItemMatcher(nil))
 	if !ok {
 		t.Fatal("expected to detect the officer's own announcement")
 	}
@@ -230,7 +233,7 @@ func TestDetectAnnouncement_RealSample(t *testing.T) {
 	}
 
 	// Nothing new after the last own announcement.
-	if _, _, ok := DetectAnnouncement(bidsSample, wantAt, after, nil); ok {
+	if _, _, ok := DetectAnnouncement(bidsSample, wantAt, after, LegacyItemMatcher(nil)); ok {
 		t.Error("expected no detection after the last own announcement")
 	}
 }
@@ -264,14 +267,14 @@ func TestDetectAnnouncement_RejectsProseTrigger(t *testing.T) {
 	// sentence. Must NOT be detected as an announcement (it was auto-starting
 	// a junk round named after the prose and wiping the live one).
 	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, 'last call, it reset the bids on mine cause it saw send tells'\n"
-	if item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil); ok {
+	if item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), LegacyItemMatcher(nil)); ok {
 		t.Errorf("detected a prose line as an announcement: %q", item)
 	}
 }
 
 func TestDetectAnnouncement_StartBidsTrigger(t *testing.T) {
 	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, 'Mask of Piety start bids'\n"
-	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil)
+	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), LegacyItemMatcher(nil))
 	if !ok || item != "Mask of Piety" {
 		t.Errorf("DetectAnnouncement = (%q, %v), want (%q, true)", item, ok, "Mask of Piety")
 	}
@@ -284,7 +287,7 @@ func TestDetectAnnouncement_SendTellTypos(t *testing.T) {
 		"Cloak of Flames send tell",
 	} {
 		raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, '" + msg + "'\n"
-		item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil)
+		item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), LegacyItemMatcher(nil))
 		if !ok || item != "Cloak of Flames" {
 			t.Errorf("%q detected as (%q, %v), want Cloak of Flames", msg, item, ok)
 		}
@@ -300,7 +303,7 @@ func TestDetectAnnouncement_TypoToleranceStillRequiresPlausibleItem(t *testing.T
 	}
 	for _, msg := range bad {
 		raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, '" + msg + "'\n"
-		if item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil); ok {
+		if item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), LegacyItemMatcher(nil)); ok {
 			t.Errorf("detected %q as announcement %q", msg, item)
 		}
 	}
@@ -310,12 +313,89 @@ func TestDetectAnnouncement_KnownItemAcceptsLowercase(t *testing.T) {
 	// A brand-new-looking lowercase name wouldn't pass the structural check,
 	// but an exact match against the site's item list rescues it.
 	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, 'cloak of flames send tells'\n"
-	if _, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil); ok {
+	if _, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), LegacyItemMatcher(nil)); ok {
 		t.Fatal("expected lowercase prose-ish name to be rejected without a known-items hit")
 	}
-	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), []string{"Cloak of Flames"})
+	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), LegacyItemMatcher([]string{"Cloak of Flames"}))
 	if !ok || item != "cloak of flames" {
 		t.Errorf("with known items: DetectAnnouncement = (%q, %v), want (%q, true)", item, ok, "cloak of flames")
+	}
+}
+
+// --- real live-test miss (2026-09-21): "send tells" glued to the item link ---
+
+func TestDetectAnnouncement_GluedSendTells(t *testing.T) {
+	// Grimrose's actual log: the officer pasted the item link then typed
+	// "send tells" with no space before it, so the whole thing came through
+	// as one word — "Denon's Drums of Declivitysend tells" — which the old
+	// \b-anchored trigger regex could never match (no word boundary between
+	// "y" and "send"). This is what silently dropped the round.
+	before := time.Date(2026, time.September, 21, 20, 0, 0, 0, time.Local)
+	// Cutoff before the later unrelated "Send tells for SS/SP" line in this
+	// same fixture (20:54:17) — that line is a separate scenario (see
+	// TestDetectAnnouncement_LegacyGateAcceptsSlashAbbreviation) and would
+	// otherwise win as the "newest" match.
+	after := time.Date(2026, time.September, 21, 20, 30, 0, 0, time.Local)
+
+	item, at, ok := DetectAnnouncement(announceEdgeSample, before, after, LegacyItemMatcher(nil))
+	if !ok {
+		t.Fatal("expected the glued 'Declivitysend tells' line to be detected")
+	}
+	if item != "Denon's Drums of Declivity" {
+		t.Errorf("item = %q, want %q", item, "Denon's Drums of Declivity")
+	}
+	wantAt := time.Date(2026, time.September, 21, 20, 26, 51, 0, time.Local)
+	if !at.Equal(wantAt) {
+		t.Errorf("at = %v, want %v", at, wantAt)
+	}
+}
+
+func TestCaptureBids_GluedSendTellsRealSample(t *testing.T) {
+	start := time.Date(2026, time.September, 21, 20, 26, 51, 0, time.Local)
+	stop := time.Date(2026, time.September, 21, 20, 30, 0, 0, time.Local)
+
+	candidates := CaptureBids(announceEdgeSample, start, stop)
+	byName := map[string]BidCandidate{}
+	for _, c := range candidates {
+		byName[c.CharacterName] = c
+	}
+
+	wantTier := map[string]string{
+		"Ieaini":      TierMed,  // "medium"
+		"Darkclaw":    TierAlt,  // "alt-Denon's Drums of Declivity"
+		"Kildrey":     TierAlt,  // "ALT Denon's Drums of Declivity"
+		"Grokenspiel": TierHigh, // "high"
+		"Sandrian":    TierHigh, // "high"
+		"Tunedup":     TierHigh, // "high bid"
+		"Punk":        TierLow,  // "low"
+	}
+	for name, want := range wantTier {
+		c, ok := byName[name]
+		if !ok {
+			t.Errorf("expected a bid from %s, found none", name)
+			continue
+		}
+		if c.Tier != want {
+			t.Errorf("%s: tier = %q, want %q (message: %q)", name, c.Tier, want, c.RawMessage)
+		}
+	}
+}
+
+// The structural check alone (isPlausibleItem/looksLikeItemName with no
+// known-items list) accepts "SS/SP" — a single field starting with an
+// uppercase letter passes today's rule. This is exactly the real live-test
+// bug ("SS/SP send tells" auto-started a round for a buff request, not an
+// item) and it's documented here rather than "fixed" in this test, because
+// the real fix is the item-DB gate added in Phase 2 — see
+// TestDetectAnnouncement_ItemDBRejectsBuffRequest in tier.go's gate tests
+// once that lands. This test just pins today's (legacy) behavior so a
+// future change to looksLikeItemName doesn't silently alter it unnoticed.
+func TestDetectAnnouncement_LegacyGateAcceptsSlashAbbreviation(t *testing.T) {
+	before := time.Date(2026, time.September, 21, 20, 30, 0, 0, time.Local)
+	after := time.Date(2026, time.September, 21, 21, 0, 0, 0, time.Local)
+	item, _, ok := DetectAnnouncement(announceEdgeSample, before, after, LegacyItemMatcher(nil))
+	if !ok || item != "SS/SP" {
+		t.Errorf("DetectAnnouncement = (%q, %v), want (%q, true) — pinning today's legacy-gate behavior", item, ok, "SS/SP")
 	}
 }
 
@@ -323,7 +403,7 @@ func TestDetectAnnouncement_ItemLink(t *testing.T) {
 	// Officer pastes the clickable item link into the call. stripItemLinks
 	// pulls the visible name back out of the 0x12-delimited markup.
 	raw := "[Mon Aug 17 20:00:00 2026] You say to your guild, '\x12000042000000000000000000000000000000000000000000000000Cloak of Flames\x12 send tells last call'\n"
-	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), nil)
+	item, _, ok := DetectAnnouncement(raw, time.Time{}, time.Now(), LegacyItemMatcher(nil))
 	if !ok || item != "Cloak of Flames" {
 		t.Errorf("DetectAnnouncement = (%q, %v), want (%q, true)", item, ok, "Cloak of Flames")
 	}

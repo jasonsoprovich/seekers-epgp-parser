@@ -36,6 +36,15 @@ type Settings struct {
 	// file" (nil) reads as ON — the default — while an explicit false from
 	// the Settings toggle stays off. Read it through AutoDetectBidsEnabled.
 	AutoDetectBids *bool `json:"autoDetectBids,omitempty"`
+	// AnnouncementMatch picks how the "send tells" watcher decides whether
+	// a detected candidate name is really an item, vs. e.g. a buff request
+	// ("SS/SP send tells"). "itemdb" (the default, empty reads as this)
+	// checks the candidate against the embedded Quarm item index
+	// (internal/items) with typo tolerance; "legacy" is the original
+	// Capitalized-words structural check (internal/parse.looksLikeItemName)
+	// kept as a manual fallback in Settings in case the embedded index
+	// ever needs to be bypassed. Read it through AnnouncementMatchMode.
+	AnnouncementMatch string `json:"announcementMatch,omitempty"`
 	// SetupComplete is set once the officer has been through (or dismissed)
 	// the first-run setup wizard. The wizard shows on launch while this is
 	// false; Settings has a "Run setup again" button that reopens it
@@ -90,6 +99,20 @@ func (s Settings) RollWinnerRuleOrDefault() string {
 // written (nil) — see the field comment.
 func (s Settings) AutoDetectBidsEnabled() bool {
 	return s.AutoDetectBids == nil || *s.AutoDetectBids
+}
+
+const (
+	AnnouncementMatchItemDB = "itemdb"
+	AnnouncementMatchLegacy = "legacy"
+)
+
+// AnnouncementMatchMode defaults to AnnouncementMatchItemDB when never set
+// (empty string) or set to anything else unrecognized.
+func (s Settings) AnnouncementMatchMode() string {
+	if s.AnnouncementMatch == AnnouncementMatchLegacy {
+		return AnnouncementMatchLegacy
+	}
+	return AnnouncementMatchItemDB
 }
 
 func configPath() (string, error) {

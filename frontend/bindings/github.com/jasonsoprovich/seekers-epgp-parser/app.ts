@@ -283,6 +283,19 @@ export function InstallUpdate(): $CancellablePromise<void> {
 }
 
 /**
+ * ItemLink renders itemName as an in-game clickable item link (see
+ * internal/items.Link) for the Bids tab's grats message, so it pastes into
+ * guild/raid chat the same way a real linked item does instead of as plain
+ * text. Falls back to the plain name unchanged when the item can't be
+ * matched (items.Match — same typo-tolerant lookup the announcement
+ * watcher uses) — the officer still gets a usable grats line, just without
+ * the clickable link.
+ */
+export function ItemLink(itemName: string): $CancellablePromise<string> {
+    return $Call.ByID(2451796390, itemName);
+}
+
+/**
  * LinkCharacter resolves an Attendance/Bids "no match" name against the
  * site roster: pass mainCharacterID to attach it as a new alt of that
  * main, or nil to add it as a brand-new main. The returned Character gets
@@ -385,6 +398,18 @@ export function SelectLogFile(): $CancellablePromise<string> {
 
 export function SetAllowQuit(v: boolean): $CancellablePromise<void> {
     return $Call.ByID(1491183787, v);
+}
+
+/**
+ * SetAnnouncementMatch switches how startAnnouncementWatch decides whether
+ * a detected candidate is really an item — config.AnnouncementMatchItemDB
+ * (the default: internal/items, with typo tolerance) or
+ * config.AnnouncementMatchLegacy (the original Capitalized-words structural
+ * check only, kept as a Settings fallback). Persisted, and restarts the
+ * watcher immediately so the new mode applies without a relaunch.
+ */
+export function SetAnnouncementMatch(mode: string): $CancellablePromise<void> {
+    return $Call.ByID(1659922297, mode);
 }
 
 /**

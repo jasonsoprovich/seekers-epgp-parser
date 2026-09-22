@@ -6,6 +6,7 @@ import {
   EndBidRound,
   FetchKnownItems,
   GetLiveBidPushStatus,
+  ItemLink,
   ResolveNoBidRound,
   SetBidsUnsaved,
   SubmitBids,
@@ -37,22 +38,6 @@ function newClientRoundId(): string {
 // claim, never competing for a real drop. All three of Low/Alt/Rot cost 10
 // GP; the ordering only matters for Determine Winner tie-breaks.
 const TIER_RANK: Record<string, number> = { "High Bid": 4, "Medium Bid": 3, "Low Bid": 2, "Alt Loot": 1, "Rot (No-Drop)": 0 };
-
-// Project Quarm item links are the displayed item name wrapped in DC2 bytes,
-// with the six-digit item ID before it. Keep the link verbatim so EQ can turn
-// the pasted grats message back into a clickable item.
-const EQ_ITEM_LINK_RE = /\x12\d{6} [^\x12]+\x12/g;
-
-function linkedItemText(itemName: string, rows: CapturedBidRow[]): string {
-  const normalizedName = itemName.trim().toLocaleLowerCase();
-  for (const row of rows) {
-    for (const link of row.rawMessage.matchAll(EQ_ITEM_LINK_RE)) {
-      const text = link[0];
-      if (text.slice(8, -1).trim().toLocaleLowerCase() === normalizedName) return text;
-    }
-  }
-  return itemName;
-}
 
 // `characterName` is the resolution/submission identity — it's what gets
 // looked up against the roster and sent to the site. `displayName` is
@@ -638,13 +623,28 @@ export function BidsPanel() {
     setRows((prev) => prev.map((r, i) => ({ ...r, winner: winnerIndices.has(i) })));
   }
 
+  // Plain text — shown on screen (the "Winner(s): ..." preview line and the
+  // post-submit note). The actual in-game-pasteable version, with the item
+  // rendered as a clickable link, is built separately by gratsMessageLinked
+  // for the clipboard only: control characters in a link would just show as
+  // boxes/garbage if put on screen here.
   function gratsMessage(winners: BidRow[]): string {
-    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${linkedItemText(capturedItem, rows)}!`;
+    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${capturedItem}!`;
+  }
+
+  // Same message, but with the item name resolved to an in-game clickable
+  // link (Go's ItemLink -> internal/items.Match) so pasting it in guild/
+  // raid chat renders the item as a link the way a real drop announcement
+  // does, instead of as plain text. Falls back to the plain name if the
+  // item can't be matched.
+  async function gratsMessageLinked(winners: BidRow[]): Promise<string> {
+    const linkedItem = await ItemLink(capturedItem).catch(() => capturedItem);
+    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${linkedItem}!`;
   }
 
   async function onCopyGrats() {
     if (winners.length === 0) return;
-    await Clipboard.SetText(gratsMessage(winners));
+    await Clipboard.SetText(await gratsMessageLinked(winners));
     setGratsCopied(true);
   }
 
@@ -715,10 +715,10 @@ export function BidsPanel() {
       // Streamline (2026-09-09): copy the grats line automatically on a
       // successful submit — it used to be a separate button the officer had
       // to remember. Compute it before resetToIdle() clears capturedItem.
-      const grats = gratsMessage(activeWinners);
+      const grats = gratsMessage(activeWinners); // plain, for the note below
       let gratsNote = "";
       try {
-        await Clipboard.SetText(grats);
+        await Clipboard.SetText(await gratsMessageLinked(activeWinners));
         gratsNote = ` — "${grats}" copied to clipboard.`;
       } catch {
         gratsNote = ` — couldn't copy the grats line; it's: ${grats}`;
