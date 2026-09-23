@@ -20,7 +20,15 @@ var ownChatRe = regexp.MustCompile(`^You .*, '(.*)'$`)
 // the field: "<item> send tells", "<item> - send tells", "send tells <item>",
 // "<item> start bids", "<item> starting bids", "bids open <item>". Splitting
 // a message on this lets extractItemName take whichever side holds the name.
-var announceTriggerRe = regexp.MustCompile(`(?i)\b(?:sends?[\s-]+tells?|start(?:ing)?[\s-]+bids?|bids?[\s-]+open|open[\s-]+bids?)\b`)
+//
+// No \b anchors: a real live-test miss (Denon's Drums of Declivity, 2026-09-21)
+// was an officer pasting the item link with no space before "send tells" —
+// "Denon's Drums of Declivitysend tells" — so "send" starts mid-word with no
+// word boundary to its left. The send/tells gap is [\s-]* (zero or more) for
+// the same reason on the other side ("send tellsDenon's..."). This is safe to
+// loosen because isPlausibleItem still has to accept whatever's left over —
+// see DetectAnnouncement.
+var announceTriggerRe = regexp.MustCompile(`(?i)sends?[\s-]*tells?|start(?:ing)?[\s-]+bids?|bids?[\s-]+open|open[\s-]+bids?`)
 var announcementWordRe = regexp.MustCompile(`(?i)[a-z]+`)
 
 // itemLinkRe matches an EQ client item link: the visible name wrapped in
@@ -145,12 +153,39 @@ func looksLikeItemName(cand string) bool {
 	return true
 }
 
-// isPlausibleItem gates a candidate from DetectAnnouncement: accept it if
+// IsPlausibleItem gates a candidate from DetectAnnouncement: accept it if
 // it exactly matches (case-insensitively) an item the guild has looted
 // before, or if it structurally looks like an EQ item name. `known` is the
 // site's distinct gp_ledger.item_name list (may be nil — the structural
 // check still applies).
-func isPlausibleItem(name string, known []string) bool {
+//
+// Exported as the "legacy" announcement-match mode (see
+// internal/config.AnnouncementMatchLegacy) — the app's default mode
+// (internal/items) checks against real Quarm item names instead, which
+// structural guessing alone can't rule out: "SS/SP send tells" (a buff
+// request, not a bid) passes this function, since a single capitalized
+// token is indistinguishable from a short item name without a real item
+// list to check it against. See LegacyItemMatcher to use this as
+// DetectAnnouncement's isItem callback.
+func IsPlausibleItem(name string, known []string) bool {
+	if name == "" {
+		return false
+	}
+	if ExactKnownItem(name, known) {
+		return true
+	}
+	return looksLikeItemName(name)
+}
+
+// ExactKnownItem reports whether name exactly matches (case- and
+// whitespace-insensitively) one of the site's known item names — no
+// structural guessing, unlike IsPlausibleItem. Used on its own by the
+// "itemdb" announcement-match mode (see app.go's startAnnouncementWatch)
+// as a narrow fallback for a real ledger entry that isn't in the embedded
+// Quarm item index (internal/items) for some reason, without reopening
+// the door to the structural check's false positives (a buff
+// abbreviation like "SS/SP" passes looksLikeItemName).
+func ExactKnownItem(name string, known []string) bool {
 	if name == "" {
 		return false
 	}
@@ -160,7 +195,13 @@ func isPlausibleItem(name string, known []string) bool {
 			return true
 		}
 	}
-	return looksLikeItemName(name)
+	return false
+}
+
+// LegacyItemMatcher adapts IsPlausibleItem into the isItem callback
+// DetectAnnouncement expects, for the "legacy" announcement-match mode.
+func LegacyItemMatcher(known []string) func(string) bool {
+	return func(name string) bool { return IsPlausibleItem(name, known) }
 }
 
 // extractItemName pulls a probable item name out of an officer's own
@@ -228,20 +269,24 @@ func extractItemName(msg string) string {
 // owner's OWN most recent bid-round announcement strictly after `since` and
 // at or before `cutoff` — a "You ..., '<msg>'" line whose message carries a
 // trigger phrase (announceTriggerRe: "send tells", "start bids", …) AND
-// whose extracted name passes isPlausibleItem. ok is false if there's no
-// such new line.
+// whose extracted name passes isItem. ok is false if there's no such new
+// line.
 //
-// The isPlausibleItem gate is what stops a "send tells" typed inside an
-// ordinary sentence from auto-starting a junk round (first live test: a
-// prose line wiped a live round because extractItemName returned the
-// surrounding words as an "item name"). `known` is the site's distinct
-// gp_ledger.item_name list — pass nil and only the structural check
-// applies.
+// The isItem gate is what stops a "send tells" typed inside an ordinary
+// sentence — or a "send tells" for a buff, not an item — from auto-starting
+// a junk round. This package stays free of any actual item list or
+// database: pass LegacyItemMatcher(known) for the original structural-only
+// check, or a closure over internal/items.Match for the app's default
+// mode — see startAnnouncementWatch in app.go. A nil isItem rejects every
+// candidate (fails closed, never silently falls back to guessing).
 //
 // It only ever looks at the officer's own outgoing chat (ownChatRe), so a
 // *different* officer announcing a *different* item in the same channel
 // never triggers it — same guarantee CaptureBids relies on.
-func DetectAnnouncement(raw string, since, cutoff time.Time, known []string) (itemName string, at time.Time, ok bool) {
+func DetectAnnouncement(raw string, since, cutoff time.Time, isItem func(string) bool) (itemName string, at time.Time, ok bool) {
+	if isItem == nil {
+		isItem = func(string) bool { return false }
+	}
 	for _, l := range splitLogLines(raw) {
 		if !l.Time.After(since) || l.Time.After(cutoff) {
 			continue
@@ -254,7 +299,7 @@ func DetectAnnouncement(raw string, since, cutoff time.Time, known []string) (it
 			continue
 		}
 		name := extractItemName(m[1])
-		if !isPlausibleItem(name, known) {
+		if !isItem(name) {
 			continue
 		}
 		// Keep scanning — the newest matching line wins, not the first.

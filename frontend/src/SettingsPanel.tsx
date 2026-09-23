@@ -14,6 +14,7 @@ import {
   SaveSettings,
   SelectGameDir,
   SelectLogFile,
+  SetAnnouncementMatch,
   SetAutoDetectBids,
   SetLogMaintenanceSettings,
   TestConnection,
@@ -50,6 +51,11 @@ export function SettingsPanel({
   const [gameDirError, setGameDirError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [autoDetectBids, setAutoDetectBidsState] = useState(true);
+  // "itemdb" (default) checks a detected candidate against the embedded
+  // Quarm item list; "legacy" is the original Capitalized-words-only
+  // check, kept as a fallback toggle — see Go's
+  // config.Settings.AnnouncementMatchMode.
+  const [announcementMatch, setAnnouncementMatchState] = useState<"itemdb" | "legacy">("itemdb");
   const [saved, setSaved] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
@@ -86,6 +92,9 @@ export function SettingsPanel({
       // null/undefined (never set) defaults to on — mirrors the Go
       // Settings.AutoDetectBidsEnabled helper.
       setAutoDetectBidsState(s.autoDetectBids ?? true);
+      // Mirrors Go's AnnouncementMatchMode: anything other than "legacy"
+      // (including empty/never-set) reads as "itemdb".
+      setAnnouncementMatchState(s.announcementMatch === "legacy" ? "legacy" : "itemdb");
     });
     GetLogPath().then(setLogPath);
     AppVersion().then(setVersion).catch(() => {});
@@ -144,6 +153,16 @@ export function SettingsPanel({
       await SetAutoDetectBids(enabled);
     } catch {
       setAutoDetectBidsState(!enabled); // revert on failure
+    }
+  }
+
+  async function onChangeAnnouncementMatch(mode: "itemdb" | "legacy") {
+    const prev = announcementMatch;
+    setAnnouncementMatchState(mode);
+    try {
+      await SetAnnouncementMatch(mode);
+    } catch {
+      setAnnouncementMatchState(prev); // revert on failure
     }
   }
 
@@ -543,6 +562,44 @@ export function SettingsPanel({
             </span>
           </span>
         </label>
+
+        {autoDetectBids && (
+          <div className="field" style={{ marginTop: 10, marginLeft: 24 }}>
+            <span className="hint" style={{ display: "block", marginBottom: 4 }}>
+              How it tells a linked item apart from ordinary chat (e.g. a buff request like &quot;SS/SP send
+              tells&quot;):
+            </span>
+            <label className="field field-inline">
+              <input
+                type="radio"
+                name="announcementMatch"
+                checked={announcementMatch === "itemdb"}
+                onChange={() => onChangeAnnouncementMatch("itemdb")}
+              />
+              <span>
+                Item database (recommended)
+                <span className="hint" style={{ display: "block", margin: "2px 0 0" }}>
+                  Checks against every real Quarm item name, with typo tolerance.
+                </span>
+              </span>
+            </label>
+            <label className="field field-inline" style={{ marginTop: 6 }}>
+              <input
+                type="radio"
+                name="announcementMatch"
+                checked={announcementMatch === "legacy"}
+                onChange={() => onChangeAnnouncementMatch("legacy")}
+              />
+              <span>
+                Legacy name check (fallback)
+                <span className="hint" style={{ display: "block", margin: "2px 0 0" }}>
+                  Accepts anything that looks structurally like an item name — the original check,
+                  kept in case the item database ever needs to be bypassed. Less accurate.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
       </section>
 
       {/* --- Guild settings (read-only) --- */}

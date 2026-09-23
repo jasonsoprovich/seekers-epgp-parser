@@ -17,6 +17,7 @@ import (
 
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/eqlogs"
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/items"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/logmaint"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/logtail"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi"
@@ -456,6 +457,28 @@ func (a *App) SetAutoDetectBids(enabled bool) error {
 	return nil
 }
 
+// SetAnnouncementMatch switches how startAnnouncementWatch decides whether
+// a detected candidate is really an item — config.AnnouncementMatchItemDB
+// (the default: internal/items, with typo tolerance) or
+// config.AnnouncementMatchLegacy (the original Capitalized-words structural
+// check only, kept as a Settings fallback). Persisted, and restarts the
+// watcher immediately so the new mode applies without a relaunch.
+func (a *App) SetAnnouncementMatch(mode string) error {
+	if mode != config.AnnouncementMatchItemDB && mode != config.AnnouncementMatchLegacy {
+		return fmt.Errorf("unknown announcement-match mode %q", mode)
+	}
+	s, err := config.Load()
+	if err != nil {
+		s = config.Settings{}
+	}
+	s.AnnouncementMatch = mode
+	if err := config.Save(s); err != nil {
+		return err
+	}
+	a.startAnnouncementWatch()
+	return nil
+}
+
 func (a *App) SetLogMaintenanceSettings(days int, targetMB int) error {
 	if !config.ValidLogMaintenanceValues(days, targetMB) {
 		return fmt.Errorf("retention must be %d-%d days and target must be %d-%d MB",
@@ -613,6 +636,20 @@ func (a *App) FetchKnownItems() ([]string, error) {
 		return nil, err
 	}
 	return client.FetchItems(a.ctx)
+}
+
+// ItemLink renders itemName as an in-game clickable item link (see
+// internal/items.Link) for the Bids tab's grats message, so it pastes into
+// guild/raid chat the same way a real linked item does instead of as plain
+// text. Falls back to the plain name unchanged when the item can't be
+// matched (items.Match — same typo-tolerant lookup the announcement
+// watcher uses) — the officer still gets a usable grats line, just without
+// the clickable link.
+func (a *App) ItemLink(itemName string) string {
+	if it, ok := items.Match(itemName); ok {
+		return items.Link(it)
+	}
+	return itemName
 }
 
 // FetchRoster backs the Main-character and Priority columns on both the
@@ -1752,6 +1789,43 @@ func (a *App) ServiceShutdown() error {
 	return nil
 }
 
+// buildAnnouncementMatcher returns the isItem callback DetectAnnouncement
+// needs, per the officer's chosen announcement-match mode (see
+// config.Settings.AnnouncementMatchMode). knownItems is called fresh on
+// every check it's needed, not snapshotted once — refreshKnownItems keeps
+// the site's item-name list current in the background, and a newly-looted
+// item should become recognisable without restarting the watcher.
+//
+// itemdb mode (the default): an embedded Quarm item-name match
+// (internal/items.Match, with typo tolerance for longer names) OR an exact
+// match against the site's already-seen item names (parse.ExactKnownItem)
+// — kept so a real ledger entry that isn't in quarm.db for some reason can
+// still trigger, without reopening the door to a buff abbreviation like
+// "SS/SP" the way the full structural check would (that's exactly the
+// real live-test false positive this mode exists to fix). If the embedded
+// index failed to load (items.Ready() == false — shouldn't happen, but
+// fails safe rather than silently rejecting every candidate), this falls
+// back to legacy mode automatically.
+//
+// legacy mode: parse.IsPlausibleItem — the original Capitalized-words
+// structural check, kept as a Settings fallback (internal/items.md in
+// CLAUDE.md has the tradeoff).
+func buildAnnouncementMatcher(mode string, knownItems func() []string) func(string) bool {
+	legacy := func(name string) bool { return parse.IsPlausibleItem(name, knownItems()) }
+	if mode == config.AnnouncementMatchLegacy {
+		return legacy
+	}
+	return func(name string) bool {
+		if !items.Ready() {
+			return legacy(name)
+		}
+		if _, ok := items.Match(name); ok {
+			return true
+		}
+		return parse.ExactKnownItem(name, knownItems())
+	}
+}
+
 // startAnnouncementWatch (re)starts the background goroutine that polls the
 // selected log for the officer's own "<item> send tells" line and emits
 // "bids:announcement" for the frontend to auto-start a round. No-op if no
@@ -1763,9 +1837,14 @@ func (a *App) startAnnouncementWatch() {
 	if a.currentLogPath() == "" {
 		return
 	}
-	if s, err := config.Load(); err == nil && !s.AutoDetectBidsEnabled() {
-		return
+	matchMode := config.AnnouncementMatchItemDB
+	if s, err := config.Load(); err == nil {
+		if !s.AutoDetectBidsEnabled() {
+			return
+		}
+		matchMode = s.AnnouncementMatchMode()
 	}
+	isItem := buildAnnouncementMatcher(matchMode, a.snapshotKnownItems)
 
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.annMu.Lock()
@@ -1801,7 +1880,7 @@ func (a *App) startAnnouncementWatch() {
 			since := a.annLastSeen
 			a.annMu.Unlock()
 
-			item, at, ok := parse.DetectAnnouncement(raw, since, time.Now(), a.snapshotKnownItems())
+			item, at, ok := parse.DetectAnnouncement(raw, since, time.Now(), isItem)
 			if !ok {
 				continue
 			}

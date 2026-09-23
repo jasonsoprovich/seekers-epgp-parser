@@ -1,0 +1,72 @@
+[Mon Sep 21 20:26:35 2026] Aransur tells the guild, 'Denon's Drums of Declivity (2), Sanguine Gloves'
+[Mon Sep 21 20:26:35 2026] You are more alert.
+[Mon Sep 21 20:26:36 2026] You begin casting Spiritual Strength.
+[Mon Sep 21 20:26:36 2026] Yggdra's eyes tingle.
+[Mon Sep 21 20:26:37 2026] Yggdra is enveloped by an aura of fiery might.
+[Mon Sep 21 20:26:40 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:26:40 2026] Kulolan begins to cast a spell.
+[Mon Sep 21 20:26:41 2026] Ammaru begins to sweat profusely as they turn into a Water Elemental.
+[Mon Sep 21 20:26:41 2026] You feel bigger.
+[Mon Sep 21 20:26:42 2026] Kulolan's casting is interrupted!
+[Mon Sep 21 20:26:42 2026] Ammaru hit Ammaru for 450 points of non-melee damage.
+[Mon Sep 21 20:26:42 2026] Ammaru experiences a mystical transvergance.
+[Mon Sep 21 20:26:43 2026] Krayziefoo is blessed by the spirits of ancient Coldain heroes.
+[Mon Sep 21 20:26:43 2026] Kulolan begins to cast a spell.
+[Mon Sep 21 20:26:43 2026] Krayziefoo's hand is covered with a dull aura.
+[Mon Sep 21 20:26:43 2026] Krayziefoo is surrounded by an aura of battle.
+[Mon Sep 21 20:26:46 2026] Stonae has been filled with spiritual strength.
+[Mon Sep 21 20:26:46 2026] Your Blessed Coldain Prayer Shawl sparkles.
+[Mon Sep 21 20:26:46 2026] You tell Soslead:2, 'Denon's Drums of Declivity'
+[Mon Sep 21 20:26:46 2026] Kulolan's eyes sharpen with an aura of avian presence.
+[Mon Sep 21 20:26:46 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:26:47 2026] Xasik begins to cast a spell.
+[Mon Sep 21 20:26:47 2026] Margit begins to cast a spell.
+[Mon Sep 21 20:26:47 2026] Lcea's lament fades from your mind.
+[Mon Sep 21 20:26:47 2026] The shield of songs fades.
+[Mon Sep 21 20:26:47 2026] Margit's weapons gleam.
+[Mon Sep 21 20:26:51 2026] You say to your guild, 'Denon's Drums of Declivitysend tells'
+[Mon Sep 21 20:26:52 2026] Astrael begins to cast a spell.
+[Mon Sep 21 20:26:52 2026] Ammaru begins to walk faster.
+[Mon Sep 21 20:26:52 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:26:53 2026] The magical rhythm fades.
+[Mon Sep 21 20:26:53 2026] Tippy tells the raid,  'ZEALTAG | @^R^ASSIST | Thall Xundraux Diabo | 150'
+[Mon Sep 21 20:26:53 2026] Maykill begins to cast a spell.
+[Mon Sep 21 20:26:54 2026] Maykill tells the raid,  '<<<<MINDWRACK>>>> Qua Zethon Xakra'
+[Mon Sep 21 20:26:54 2026] Aransur tells the guild, 'Ancient: Shock of Sun 222'
+[Mon Sep 21 20:26:56 2026] Ieaini tells you, 'medium'
+[Mon Sep 21 20:26:58 2026] Darkclaw tells Soslead:2, 'can someone do the gloves'
+[Mon Sep 21 20:26:58 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:26:59 2026] You are no longer roused.
+[Mon Sep 21 20:27:00 2026] Glepina begins to cast a spell.
+[Mon Sep 21 20:27:01 2026] Kess tells Soslead:2, 'Sanguine Gloves'
+[Mon Sep 21 20:27:03 2026] Rizy has been infused with the power of a feral Avatar.
+[Mon Sep 21 20:27:04 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:27:07 2026] Ivorwen begins to cast a spell.
+[Mon Sep 21 20:27:08 2026] Darkclaw tells you, 'alt-Denon's Drums of Declivity'
+[Mon Sep 21 20:27:08 2026] Kildrey tells you, 'ALT Denon's Drums of Declivity'
+[Mon Sep 21 20:27:10 2026] Grokenspiel tells you, 'high'
+[Mon Sep 21 20:27:10 2026] Kess tells the guild, 'Sanguine Gloves Send tells'
+[Mon Sep 21 20:27:10 2026] Ivorwen becomes one with their weapons.
+[Mon Sep 21 20:27:10 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:27:14 2026] Astrael begins to cast a spell.
+[Mon Sep 21 20:27:16 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:27:16 2026] Stonae is blessed by the spirits of ancient Coldain heroes.
+[Mon Sep 21 20:27:17 2026] Garaldine tells Ports:1, 'Come fly Garaldine Airlines!  Now departing from most locations!  Or, if you are feeling anti-social, I can put you on a private flight  to most places!'
+[Mon Sep 21 20:27:19 2026] Fanadenie tells the raid,  'Fanadenie healing the exp bar for  [ Takkisina ]'
+[Mon Sep 21 20:27:19 2026] Ivorwen begins to cast a spell.
+[Mon Sep 21 20:27:20 2026] Fanadenie begins to cast a spell.
+[Mon Sep 21 20:27:21 2026] Uthok begins to cast a spell.
+[Mon Sep 21 20:27:22 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:27:23 2026] Sandrian tells you, 'high'
+[Mon Sep 21 20:27:24 2026] Mellisie begins to cast a spell.
+[Mon Sep 21 20:27:24 2026] Ammaru begins to walk faster.
+[Mon Sep 21 20:27:25 2026] Ivorwen's skin glows with a vibrant greenish tint.
+[Mon Sep 21 20:27:27 2026] Ivorwen is blessed by the spirits of ancient Coldain heroes.
+[Mon Sep 21 20:27:28 2026] Tunedup tells you, 'high bid'
+[Mon Sep 21 20:27:28 2026] Stonae experiences visions of grandeur.
+[Mon Sep 21 20:27:28 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:27:34 2026] Ivorwen begins to cast a spell.
+[Mon Sep 21 20:27:34 2026] Sandrian's eyes are covered by notes of solid music.
+[Mon Sep 21 20:27:36 2026] Punk tells you, 'low'
+[Mon Sep 21 20:27:37 2026] Astrael begins to cast a spell.
+[Mon Sep 21 20:54:17 2026] You tell your raid, 'Send tells for SS/SP'

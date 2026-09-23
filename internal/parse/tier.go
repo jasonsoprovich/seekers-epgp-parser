@@ -30,13 +30,18 @@ type BidSignal struct {
 	RawMessage string
 }
 
-// tokenize splits a tell's message on whitespace and hyphens (real bids
+// tokenize splits a tell's message on whitespace, hyphens (real bids
 // arrive hyphen-glued to the item name, e.g. "High-Soul Essence of Aten Ha
-// Ra"), lowercases, and strips surrounding punctuation.
+// Ra"), and parens ("(med)" is a real phrasing seen in the field),
+// lowercases, and strips surrounding punctuation. A slash-joined token
+// ("med/main") is further split into its tier words UNLESS it's a date
+// ("9/10") — see splitSlash — a real false positive from a live sample
+// ("Gone 9/1 to 9/10" was misread as a bare "10" bid once '/' first became
+// a hard split character here).
 func tokenize(msg string) []string {
 	fields := strings.FieldsFunc(msg, func(r rune) bool {
 		switch r {
-		case '-', ',', ' ', '\t':
+		case '-', ',', ' ', '\t', '(', ')':
 			return true
 		default:
 			return false
@@ -44,12 +49,46 @@ func tokenize(msg string) []string {
 	})
 	out := make([]string, 0, len(fields))
 	for _, f := range fields {
-		f = strings.ToLower(strings.Trim(f, ".:!?'\""))
-		if f != "" {
-			out = append(out, f)
+		for _, sub := range splitSlash(f) {
+			sub = strings.ToLower(strings.Trim(sub, ".:!?'\""))
+			if sub != "" {
+				out = append(out, sub)
+			}
 		}
 	}
 	return out
+}
+
+// splitSlash splits f on '/' into separate tokens ("med/main" -> "med",
+// "main") unless every '/'-separated part is purely numeric once its own
+// punctuation is trimmed, which means f is a date like "9/10" or "9/1" —
+// kept whole so it can't be misread as a bare numeric bid amount.
+func splitSlash(f string) []string {
+	if !strings.ContainsRune(f, '/') {
+		return []string{f}
+	}
+	parts := strings.Split(f, "/")
+	allNumeric := true
+	for _, p := range parts {
+		p = strings.Trim(p, ".:!?'\"")
+		if p == "" || !isAllDigits(p) {
+			allNumeric = false
+			break
+		}
+	}
+	if allNumeric {
+		return []string{f}
+	}
+	return parts
+}
+
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // DetectBidSignal looks for a bid tier anywhere in a tell's message —

@@ -40,6 +40,24 @@ func TestDetectBidSignal(t *testing.T) {
 		{"unrelated chat", "I have a zoom meeting, gotta log", "", false, false},
 		{"unrelated single word", "invite", "", false, false},
 		{"conflicting tiers", "high or low idk", TierHigh + " / " + TierLow, true, false},
+
+		// "med" variants (2026-09-21 live test: officer confirmed "med" was
+		// already working; these pin the synonym and the punctuation/
+		// slash-glued phrasings actually seen).
+		{"med bare", "med", TierMed, false, false},
+		{"med trailing period", "Med.", TierMed, false, false},
+		{"med all caps", "MED", TierMed, false, false},
+		{"main then med", "main med", TierMed, false, false},
+		{"med then bid", "med bid", TierMed, false, false},
+		{"med slash main", "med/main", TierMed, false, false},
+		{"med in parens", "(med)", TierMed, false, false},
+		{"med with please", "med please", TierMed, false, false},
+
+		// Regression: splitting on '/' for "med/main" must not turn a date
+		// into a bare numeric bid. Real sample line: "I got my vacation
+		// dates wrong on my post... Gone 9/1 to 9/10. I'll repost the
+		// correct info." — no bid signal at all.
+		{"date range is not a bid", "Gone 9/1 to 9/10. I'll repost the correct info.", "", false, false},
 	}
 
 	for _, tc := range cases {
