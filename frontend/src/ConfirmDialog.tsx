@@ -29,9 +29,19 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
+  // Focus the confirm button once, when the dialog opens — NOT on every
+  // render. This used to depend on `onCancel` too, which callers pass as a
+  // fresh inline arrow function each render; typing into an input inside
+  // `body` (e.g. Attendance's Event Lead field) re-renders the parent on
+  // every keystroke, which re-ran this effect and yanked focus back to the
+  // confirm button after every character (2026-09-23 live-test finding).
   useEffect(() => {
     if (!open) return;
     confirmRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape" && !busy) onCancel();
     }

@@ -240,7 +240,8 @@ button.danger {
 }
 
 input[type="text"],
-input[type="password"] {
+input[type="password"],
+input[type="number"] {
   background: #10151f;
   border: 1px solid #374151;
   border-radius: 6px;
