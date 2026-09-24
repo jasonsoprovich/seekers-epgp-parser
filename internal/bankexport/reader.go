@@ -100,6 +100,20 @@ func toHolding(location, name string, id, count, bagSlots int) Holding {
 	case strings.HasPrefix(name, "Spell: "):
 		category = CategorySpell
 	}
+	// Zeal writes 0 in the Count/Charges column for some real, single,
+	// non-stacking items — e.g. "Forge of Icewell Arms" (a tradeskill
+	// object, not a charge-based clicky) — not just for a genuinely empty
+	// slot (those come through as name "Empty" and are already dropped
+	// before this is called). Ported from pq-companion's reader.go, which
+	// coerces the same way — a real item's quantity is never actually
+	// zero; the server also rejects a zero/negative quantity outright, so
+	// this has to be fixed at parse time, not left for BuildSyncRows to
+	// silently mis-sync or the server to reject the whole payload.
+	// Currency is exempt: General-Coin/Bank-Coin legitimately reads 0 when
+	// a character is simply carrying/banking no coin.
+	if count == 0 && category != CategoryCurrency {
+		count = 1
+	}
 	return Holding{
 		Container: container,
 		SlotIndex: slotIndex,

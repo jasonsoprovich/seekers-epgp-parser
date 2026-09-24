@@ -8,6 +8,7 @@ General2-Slot1	Spell: Test Spell	500	1	0
 General-Coin	Currency	0	12345	0
 Bank1	Empty	0	0	0
 Bank2	Test Ore	300	10	0
+Bank3	Forge of Icewell Arms	18611	0	0
 SharedBank1	Shared Bag	400	1	8
 SharedBank1-Slot1	Shared Item A	401	2	0
 SharedBank10	Last Real Slot Item	410	1	0

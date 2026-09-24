@@ -42,6 +42,10 @@ func TestParseExport(t *testing.T) {
 		{Container: "General2", SlotIndex: 1, Category: CategorySpell, ItemName: "Spell: Test Spell", ItemID: 500, Quantity: 1},
 		{Container: "General-Coin", SlotIndex: 0, Category: CategoryCurrency, ItemName: "Currency", ItemID: 0, Quantity: 12345},
 		{Container: "Bank2", SlotIndex: 0, Category: CategoryItem, ItemName: "Test Ore", ItemID: 300, Quantity: 10},
+		// A real single/non-stacking item can legitimately read 0 in the
+		// export's Count/Charges column (e.g. "Forge of Icewell Arms", a
+		// tradeskill object) — coerced to 1, never left as 0 (§ toHolding).
+		{Container: "Bank3", SlotIndex: 0, Category: CategoryItem, ItemName: "Forge of Icewell Arms", ItemID: 18611, Quantity: 1},
 	}
 	if !reflect.DeepEqual(exp.Holdings, wantHoldings) {
 		t.Errorf("Holdings mismatch:\n got  %+v\n want %+v", exp.Holdings, wantHoldings)
