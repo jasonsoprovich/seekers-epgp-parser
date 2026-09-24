@@ -295,6 +295,28 @@ or just use `wails3 build`, which does both.
   between captures within one event (main at Raid-Start, alt at Raid-End) —
   the server dedupes by player and logs the swap (PLAN.md §4h-1). Don't
   silently drop such rows client-side; let the officer see them.
+- **Guild Bank designation and account-holder rules are re-checked
+  server-side, never trusted from this app alone** (PLAN.md §9/§11 Phase
+  8.4). `internal/bankexport.BuildSyncRows` only ever includes a container
+  actually flagged guild in `GuildBankState`, and `SetBankDesignations`
+  refuses a SharedBank container from a personal owner (and vice versa) —
+  but the real enforcement is `src/lib/bank/sync.ts`'s
+  `validateSyncPayload` on the tracker side, which independently
+  re-resolves every row against live designations at sync time. Don't
+  relax either side on the assumption the other one already caught it.
+- **A bag's own descriptor row is never a holding, only its contents are**
+  (`internal/bankexport/inventory.go`'s `buildContainers`) — told apart by
+  the export's own `Slots` column (`Holding.BagSlots`): `> 0` means this
+  row IS a bag (its `ItemName`/`ItemID` describe the bag, not something to
+  sync), `== 0` means a loose item sits directly in that top-level slot
+  with no bag at all, and the item itself is the holding. Getting this
+  backwards would sync every character's ordinary backpacks as if they
+  were guild loot.
+- **`SharedBankFingerprint` only ever suggests a grouping, never assigns
+  one** — an empty SharedBank fingerprints to `""` specifically so two
+  characters with nothing in their shared bank never look like a match.
+  The officer always confirms (or edits) a suggested `bank_eq_accounts`
+  group via `SaveBankEqAccount`; nothing is grouped automatically.
 
 ## Status
 
