@@ -4,14 +4,19 @@
 /**
  * AttendanceCheck is the result of the pre-submit "is this capture already
  * in the ledger?" probe — GET /api/officer/attendance?activity=&occurredAt=.
- * Count is the number of matching `source='parse'` ep_ledger rows; Exists
- * is Count > 0. A capture whose (activity, occurredAt) already has rows
- * would submit to zero inserts (the POST route dedupes on exactly that
- * key), so the app warns before the officer commits.
+ * Count is the number of matching `source='parse'` ep_ledger rows within a
+ * ±60 min window of occurredAt (2026-09-23 — was an exact match, which
+ * missed a second officer's own capture of the same raid); Exists is
+ * Count > 0. EnteredBy/OccurredAt describe the earliest matching row, and
+ * EventLead is set when this raid moment already has one, so the app can
+ * name who beat this officer to it instead of just showing a count.
  */
 export interface AttendanceCheck {
     "exists": boolean;
     "count": number;
+    "enteredBy"?: string;
+    "occurredAt"?: string;
+    "eventLead"?: EventLeadInfo | null;
 }
 
 export interface AttendanceResponse {
@@ -33,6 +38,14 @@ export interface AttendanceResponse {
      * Unmatched.
      */
     "duplicates": string[] | null;
+
+    /**
+     * Set when awardEventLead was true but this raid moment (±60 min, any
+     * recipient) already had one — 2026-09-23, the two-officers-one-raid
+     * bug. The attendance rows above still land; only the SECOND award was
+     * skipped.
+     */
+    "eventLeadSkipped"?: EventLeadInfo | null;
 }
 
 export interface BidEntry {
@@ -73,6 +86,16 @@ export interface Character {
     "status": string;
     "mainCharacterName": string | null;
     "priorityRating": number | null;
+}
+
+/**
+ * EventLeadInfo names who already holds Event Lead for a raid moment —
+ * returned by both the pre-submit probe (AttendanceCheck.EventLead) and the
+ * submit response (AttendanceResponse.EventLeadSkipped).
+ */
+export interface EventLeadInfo {
+    "recipientName": string;
+    "enteredByName"?: string;
 }
 
 /**

@@ -133,6 +133,21 @@ export function ClearAllRolls(): $CancellablePromise<void> {
 }
 
 /**
+ * CurrentLogCharacter returns the character name the currently-watched log
+ * file belongs to (from its eqlog_<Character>_<server>.txt filename), or ""
+ * if no log is selected yet. Same helper startLiveBidPush already uses for
+ * "collected by" on the live-bids board — exposed here so the Attendance
+ * tab can prefill the Event Lead field with "probably you" instead of
+ * leaving it blank and only explaining the default in a tooltip
+ * (post-live-test-1 feedback, 2026-09-23: an officer wasn't sure where to
+ * set it). Still just a prefill — the officer can change or clear it, and
+ * the site's own default (the API key owner's current main) is unaffected.
+ */
+export function CurrentLogCharacter(): $CancellablePromise<string> {
+    return $Call.ByID(2012932359);
+}
+
+/**
  * DetectedLogs re-scans the configured game folder — backs the Settings
  * character list's Refresh button. Empty (not an error) if no game folder
  * is set yet.

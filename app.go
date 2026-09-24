@@ -795,6 +795,19 @@ func (a *App) currentLogPath() string {
 	return a.logPath
 }
 
+// CurrentLogCharacter returns the character name the currently-watched log
+// file belongs to (from its eqlog_<Character>_<server>.txt filename), or ""
+// if no log is selected yet. Same helper startLiveBidPush already uses for
+// "collected by" on the live-bids board — exposed here so the Attendance
+// tab can prefill the Event Lead field with "probably you" instead of
+// leaving it blank and only explaining the default in a tooltip
+// (post-live-test-1 feedback, 2026-09-23: an officer wasn't sure where to
+// set it). Still just a prefill — the officer can change or clear it, and
+// the site's own default (the API key owner's current main) is unaffected.
+func (a *App) CurrentLogCharacter() string {
+	return eqlogs.CharacterFromPath(a.currentLogPath())
+}
+
 // readLog returns the followed log's full content so far. Backed by
 // a.tailer (remediation plan Phase 2): after the first call, this only
 // costs a seeked read of whatever the EQ client appended since the

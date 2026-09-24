@@ -284,6 +284,19 @@ type AttendanceResponse struct {
 	// §4h-1) — surfaced rather than silently dropped, same reasoning as
 	// Unmatched.
 	Duplicates []string `json:"duplicates"`
+	// Set when awardEventLead was true but this raid moment (±60 min, any
+	// recipient) already had one — 2026-09-23, the two-officers-one-raid
+	// bug. The attendance rows above still land; only the SECOND award was
+	// skipped.
+	EventLeadSkipped *EventLeadInfo `json:"eventLeadSkipped,omitempty"`
+}
+
+// EventLeadInfo names who already holds Event Lead for a raid moment —
+// returned by both the pre-submit probe (AttendanceCheck.EventLead) and the
+// submit response (AttendanceResponse.EventLeadSkipped).
+type EventLeadInfo struct {
+	RecipientName string `json:"recipientName"`
+	EnteredByName string `json:"enteredByName,omitempty"`
 }
 
 func (c *Client) SubmitAttendance(ctx context.Context, req AttendanceRequest) (AttendanceResponse, error) {
@@ -294,13 +307,18 @@ func (c *Client) SubmitAttendance(ctx context.Context, req AttendanceRequest) (A
 
 // AttendanceCheck is the result of the pre-submit "is this capture already
 // in the ledger?" probe — GET /api/officer/attendance?activity=&occurredAt=.
-// Count is the number of matching `source='parse'` ep_ledger rows; Exists
-// is Count > 0. A capture whose (activity, occurredAt) already has rows
-// would submit to zero inserts (the POST route dedupes on exactly that
-// key), so the app warns before the officer commits.
+// Count is the number of matching `source='parse'` ep_ledger rows within a
+// ±60 min window of occurredAt (2026-09-23 — was an exact match, which
+// missed a second officer's own capture of the same raid); Exists is
+// Count > 0. EnteredBy/OccurredAt describe the earliest matching row, and
+// EventLead is set when this raid moment already has one, so the app can
+// name who beat this officer to it instead of just showing a count.
 type AttendanceCheck struct {
-	Exists bool `json:"exists"`
-	Count  int  `json:"count"`
+	Exists     bool           `json:"exists"`
+	Count      int            `json:"count"`
+	EnteredBy  string         `json:"enteredBy,omitempty"`
+	OccurredAt string         `json:"occurredAt,omitempty"`
+	EventLead  *EventLeadInfo `json:"eventLead,omitempty"`
 }
 
 func (c *Client) CheckAttendance(ctx context.Context, activity, occurredAt string) (AttendanceCheck, error) {
