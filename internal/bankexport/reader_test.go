@@ -37,7 +37,7 @@ func TestParseExport(t *testing.T) {
 
 	wantHoldings := []Holding{
 		{Container: "Primary", SlotIndex: 0, Category: CategoryItem, ItemName: "Test Sword", ItemID: 100, Quantity: 1},
-		{Container: "General1", SlotIndex: 0, Category: CategoryItem, ItemName: "Small Pouch", ItemID: 200, Quantity: 1},
+		{Container: "General1", SlotIndex: 0, Category: CategoryItem, ItemName: "Small Pouch", ItemID: 200, Quantity: 1, BagSlots: 4},
 		{Container: "General1", SlotIndex: 1, Category: CategoryItem, ItemName: "Health Potion", ItemID: 201, Quantity: 5},
 		{Container: "General2", SlotIndex: 1, Category: CategorySpell, ItemName: "Spell: Test Spell", ItemID: 500, Quantity: 1},
 		{Container: "General-Coin", SlotIndex: 0, Category: CategoryCurrency, ItemName: "Currency", ItemID: 0, Quantity: 12345},
@@ -51,7 +51,7 @@ func TestParseExport(t *testing.T) {
 	// (SharedBank11/SharedBank11-Slot3 both carry real names in the
 	// fixture, specifically to prove they still get dropped).
 	wantSharedBank := []Holding{
-		{Container: "SharedBank1", SlotIndex: 0, Category: CategoryItem, ItemName: "Shared Bag", ItemID: 400, Quantity: 1},
+		{Container: "SharedBank1", SlotIndex: 0, Category: CategoryItem, ItemName: "Shared Bag", ItemID: 400, Quantity: 1, BagSlots: 8},
 		{Container: "SharedBank1", SlotIndex: 1, Category: CategoryItem, ItemName: "Shared Item A", ItemID: 401, Quantity: 2},
 		{Container: "SharedBank10", SlotIndex: 0, Category: CategoryItem, ItemName: "Last Real Slot Item", ItemID: 410, Quantity: 1},
 		{Container: "Bank-Coin", SlotIndex: 0, Category: CategoryCurrency, ItemName: "Currency", ItemID: 0, Quantity: 999999},

@@ -40,6 +40,15 @@ type Holding struct {
 	// export has no item ID for coin, since it isn't an item).
 	ItemID   int
 	Quantity int
+	// BagSlots is the export's own "Slots" column — the bag's capacity
+	// when this row IS a bag sitting in a top-level container slot (0 for
+	// a row inside a bag, or a loose item sitting directly in a top-level
+	// slot with no bag at all). This is what tells BuildInventory apart a
+	// bag descriptor row (Container/SlotIndex 0, BagSlots > 0 — its
+	// contents are the real holdings, the bag itself is never synced)
+	// from a loose item occupying that same top-level slot directly
+	// (BagSlots == 0 — the item itself is the holding).
+	BagSlots int
 }
 
 // Export is the full parsed state of one character's inventory/bank

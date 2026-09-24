@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +17,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 
+	"github.com/jasonsoprovich/seekers-epgp-parser/internal/bankexport"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/config"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/eqlogs"
 	"github.com/jasonsoprovich/seekers-epgp-parser/internal/items"
@@ -756,6 +759,416 @@ func (a *App) FetchTotals(query string) ([]officerapi.TotalsRow, error) {
 		return nil, err
 	}
 	return client.FetchTotals(a.ctx, query)
+}
+
+// --- Guild Bank (PLAN.md §9/§11 Phase 8.4) ---
+//
+// This section is the only place that turns a Zeal inventory export into
+// something the site's guild bank sees. The rule that "personal items are
+// never uploaded" is enforced twice, independently: here (BuildSyncRows
+// only ever includes a container the officer has actually flagged guild
+// on the website) and again on the server (validateSyncPayload re-checks
+// every row against the live designation config) — this side is a
+// convenience, not the guarantee.
+
+// BankItem is one item inside a BankContainer, JSON-shaped for the
+// frontend (mirrors bankexport.SlotItem).
+type BankItem struct {
+	SlotIndex int    `json:"slotIndex"`
+	Category  string `json:"category"`
+	ItemName  string `json:"itemName"`
+	ItemID    int    `json:"itemId"`
+	Quantity  int    `json:"quantity"`
+}
+
+// BankContainer is one top-level bag/bank slot, with Guild reflecting
+// whatever the website currently has designated for it — the toggle the
+// Guild Bank tab renders is just this field, read-modify-write via
+// SetBankDesignations.
+type BankContainer struct {
+	Container string     `json:"container"`
+	Kind      string     `json:"kind"`
+	Number    int        `json:"number"`
+	BagName   string     `json:"bagName"`
+	Capacity  int        `json:"capacity"`
+	Loose     bool       `json:"loose"`
+	Items     []BankItem `json:"items"`
+	Guild     bool       `json:"guild"`
+}
+
+type BankEquipped struct {
+	Location string `json:"location"`
+	ItemName string `json:"itemName"`
+}
+
+// BankCharacterExport is one discovered export file, parsed and matched
+// against the roster + the site's current designation config.
+type BankCharacterExport struct {
+	Character  string          `json:"character"`
+	SourceFile string          `json:"sourceFile"`
+	ExportedAt string          `json:"exportedAt"`
+	Equipped   []BankEquipped  `json:"equipped"`
+	Bags       []BankContainer `json:"bags"`
+	Bank       []BankContainer `json:"bank"`
+	SharedBank []BankContainer `json:"sharedBank"`
+	// SharedBankFingerprint is "" when this export's SharedBank is empty
+	// (bankexport.SharedBankFingerprint) — used client-side only for the
+	// account-grouping UI, not sent anywhere.
+	SharedBankFingerprint string `json:"sharedBankFingerprint"`
+	// RosterCharacterID is nil when no roster character matches this
+	// export's filename — the Guild Bank tab offers "Create mule" for
+	// these instead of showing containers to toggle.
+	RosterCharacterID *int   `json:"rosterCharacterId"`
+	RosterCharType    string `json:"rosterCharType"`
+	EqAccountID       *int   `json:"eqAccountId"`
+	// IsSharedBankHolder is true when this character is its account
+	// group's designated SharedBank holder — only its SharedBank
+	// containers can ever be flagged guild (SetBankDesignations rejects
+	// the attempt otherwise, same rule the server enforces).
+	IsSharedBankHolder bool                       `json:"isSharedBankHolder"`
+	LastImport         *officerapi.BankImportInfo `json:"lastImport"`
+}
+
+// BankSuggestedGroup is an auto-detected "these characters look like the
+// same EQ account" suggestion (matching, non-empty SharedBank
+// fingerprints) for characters not already in a saved account group. The
+// officer confirms or ignores it via SaveBankEqAccount — nothing is
+// grouped automatically.
+type BankSuggestedGroup struct {
+	CharacterNames []string `json:"characterNames"`
+}
+
+type GuildBankState struct {
+	GameDir         string                     `json:"gameDir"`
+	Exports         []BankCharacterExport      `json:"exports"`
+	Accounts        []officerapi.BankEqAccount `json:"accounts"`
+	SuggestedGroups []BankSuggestedGroup       `json:"suggestedGroups"`
+	// Unmatched names a real export was found for but no roster character
+	// matches — surfaced separately so the UI can offer "Create mule"
+	// without cluttering Exports with an entry that has nothing to toggle.
+	UnmatchedCharacters []string `json:"unmatchedCharacters"`
+}
+
+// bankScanContext is what every Guild Bank operation needs: the exports on
+// disk, the roster (by lowercased name), the site's current designation
+// config, and which account (if any) each roster character belongs to.
+// Centralized so ScanGuildBank and buildBankSyncHolders can't drift into
+// resolving "which account is this character in" two different ways.
+type bankScanContext struct {
+	files           []bankexport.ExportFile
+	rosterByName    map[string]officerapi.Character
+	cfg             officerapi.BankConfig
+	accountByCharID map[int]officerapi.BankEqAccount
+}
+
+func (a *App) loadBankScanContext(client *officerapi.Client, gameDir string) (bankScanContext, error) {
+	files, err := bankexport.Discover(gameDir)
+	if err != nil {
+		return bankScanContext{}, err
+	}
+
+	roster, err := client.FetchCharacters(a.ctx)
+	if err != nil {
+		return bankScanContext{}, err
+	}
+	rosterByName := make(map[string]officerapi.Character, len(roster))
+	for _, c := range roster {
+		rosterByName[strings.ToLower(c.Name)] = c
+	}
+
+	cfg, err := client.FetchBankConfig(a.ctx)
+	if err != nil {
+		return bankScanContext{}, err
+	}
+	accountByCharID := map[int]officerapi.BankEqAccount{}
+	for _, acc := range cfg.Accounts {
+		for _, cid := range acc.CharacterIDs {
+			accountByCharID[cid] = acc
+		}
+	}
+
+	return bankScanContext{files: files, rosterByName: rosterByName, cfg: cfg, accountByCharID: accountByCharID}, nil
+}
+
+func guildSetFor(cfg officerapi.BankConfig, byMap map[string][]string, key int) map[string]bool {
+	set := map[string]bool{}
+	for _, c := range byMap[strconv.Itoa(key)] {
+		set[c] = true
+	}
+	return set
+}
+
+func toBankItems(items []bankexport.SlotItem) []BankItem {
+	out := make([]BankItem, len(items))
+	for i, it := range items {
+		out[i] = BankItem{SlotIndex: it.SlotIndex, Category: string(it.Category), ItemName: it.ItemName, ItemID: it.ItemID, Quantity: it.Quantity}
+	}
+	return out
+}
+
+func toBankContainers(containers []bankexport.Container, guildSet map[string]bool) []BankContainer {
+	out := make([]BankContainer, len(containers))
+	for i, c := range containers {
+		out[i] = BankContainer{
+			Container: c.Container,
+			Kind:      string(c.Kind),
+			Number:    c.Number,
+			BagName:   c.BagName,
+			Capacity:  c.Capacity,
+			Loose:     c.Loose,
+			Items:     toBankItems(c.Items),
+			Guild:     guildSet[c.Container],
+		}
+	}
+	return out
+}
+
+// ScanGuildBank discovers every Zeal inventory export in the configured
+// EverQuest folder, parses each, and matches it against the roster and
+// the site's current guild/personal designations — everything the Guild
+// Bank tab needs to render. Never caches between calls: a fresh scan is
+// cheap (local files + two small API calls) and always reflects the
+// latest export off disk and the latest designations another officer may
+// have just saved.
+func (a *App) ScanGuildBank() (GuildBankState, error) {
+	s, err := config.Load()
+	if err != nil {
+		return GuildBankState{}, err
+	}
+	if s.GameDir == "" {
+		return GuildBankState{}, errors.New("set your EverQuest folder in Settings first")
+	}
+	client, err := a.officerClient()
+	if err != nil {
+		return GuildBankState{}, err
+	}
+
+	sc, err := a.loadBankScanContext(client, s.GameDir)
+	if err != nil {
+		return GuildBankState{}, err
+	}
+
+	exports := make([]BankCharacterExport, 0, len(sc.files))
+	unmatched := []string{}
+	// fingerprint -> character names, only for characters not already in
+	// a saved account group — an already-grouped character never needs a
+	// suggestion.
+	fingerprintGroups := map[string][]string{}
+
+	for _, f := range sc.files {
+		exp, parseErr := bankexport.ParseExport(f.Path)
+		if parseErr != nil {
+			continue // an unreadable/corrupt export shouldn't fail the whole scan
+		}
+		inv := bankexport.BuildInventory(exp)
+		fp := bankexport.SharedBankFingerprint(exp)
+
+		rc, matched := sc.rosterByName[strings.ToLower(inv.Character)]
+		if !matched {
+			unmatched = append(unmatched, inv.Character)
+			continue
+		}
+
+		personalGuild := guildSetFor(sc.cfg, sc.cfg.PersonalDesignations, rc.ID)
+		sharedGuild := map[string]bool{}
+		var eqAccountID *int
+		isHolder := false
+		if acc, ok := sc.accountByCharID[rc.ID]; ok {
+			id := acc.ID
+			eqAccountID = &id
+			isHolder = acc.SharedBankHolderCharacterID == rc.ID
+			sharedGuild = guildSetFor(sc.cfg, sc.cfg.SharedDesignations, acc.ID)
+		} else if fp != "" {
+			fingerprintGroups[fp] = append(fingerprintGroups[fp], inv.Character)
+		}
+
+		var lastImport *officerapi.BankImportInfo
+		if info, ok := sc.cfg.LastImports[strconv.Itoa(rc.ID)]; ok {
+			li := info
+			lastImport = &li
+		}
+
+		exports = append(exports, BankCharacterExport{
+			Character:             inv.Character,
+			SourceFile:            filepath.Base(f.Path),
+			ExportedAt:            f.ModifiedAt.Format(time.RFC3339),
+			Equipped:              toBankEquipped(inv.Equipped),
+			Bags:                  toBankContainers(inv.Bags, personalGuild),
+			Bank:                  toBankContainers(inv.Bank, personalGuild),
+			SharedBank:            toBankContainers(inv.SharedBank, sharedGuild),
+			SharedBankFingerprint: fp,
+			RosterCharacterID:     &rc.ID,
+			RosterCharType:        rc.CharType,
+			EqAccountID:           eqAccountID,
+			IsSharedBankHolder:    isHolder,
+			LastImport:            lastImport,
+		})
+	}
+
+	suggested := []BankSuggestedGroup{}
+	for _, names := range fingerprintGroups {
+		if len(names) < 2 {
+			continue
+		}
+		sort.Strings(names)
+		suggested = append(suggested, BankSuggestedGroup{CharacterNames: names})
+	}
+	sort.Slice(suggested, func(i, j int) bool { return suggested[i].CharacterNames[0] < suggested[j].CharacterNames[0] })
+	sort.Slice(exports, func(i, j int) bool { return exports[i].Character < exports[j].Character })
+	sort.Strings(unmatched)
+
+	return GuildBankState{
+		GameDir:             s.GameDir,
+		Exports:             exports,
+		Accounts:            sc.cfg.Accounts,
+		SuggestedGroups:     suggested,
+		UnmatchedCharacters: unmatched,
+	}, nil
+}
+
+func toBankEquipped(items []bankexport.EquippedItem) []BankEquipped {
+	out := make([]BankEquipped, len(items))
+	for i, it := range items {
+		out[i] = BankEquipped{Location: it.Location, ItemName: it.ItemName}
+	}
+	return out
+}
+
+// SetBankDesignations replaces the full set of guild-flagged containers
+// for one character (personal Bank/General slots) or one EQ account
+// (SharedBank slots) — pass exactly one of characterID/eqAccountID
+// non-zero, mirroring the site route's own "exactly one owner" rule.
+func (a *App) SetBankDesignations(characterID, eqAccountID int, containers []string) error {
+	client, err := a.officerClient()
+	if err != nil {
+		return err
+	}
+	if containers == nil {
+		containers = []string{}
+	}
+	return client.PutBankDesignations(a.ctx, characterID, eqAccountID, containers)
+}
+
+// SaveBankEqAccount creates or updates a "these characters share a real
+// EQ account" group — confirming (or overriding) one of ScanGuildBank's
+// SuggestedGroups, or a manual grouping.
+func (a *App) SaveBankEqAccount(req officerapi.SaveBankAccountRequest) (int, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return 0, err
+	}
+	return client.SaveBankAccount(a.ctx, req)
+}
+
+func (a *App) DeleteBankEqAccount(id int) error {
+	client, err := a.officerClient()
+	if err != nil {
+		return err
+	}
+	return client.DeleteBankAccount(a.ctx, id)
+}
+
+// CreateBankMule creates a brand-new mule character, attached to the
+// calling officer's own account server-side — for an export whose
+// filename matches no roster character yet.
+func (a *App) CreateBankMule(name string) (officerapi.Character, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return officerapi.Character{}, err
+	}
+	return client.CreateCharacter(a.ctx, officerapi.CreateCharacterRequest{Name: name, CharType: "mule"})
+}
+
+// buildBankSyncHolders is the ONLY path that turns a scan into an upload
+// payload — shared by PreviewBankSync and SubmitBankSync so a preview and
+// the sync it previews can never build different rows. Every roster-
+// matched export becomes a holder, even one with zero guild-flagged
+// containers right now (so clearing every flag on a previously-synced
+// character still reaches the server and empties it there, rather than
+// silently leaving stale rows behind).
+func (a *App) buildBankSyncHolders(client *officerapi.Client, gameDir string) ([]officerapi.BankSyncHolder, error) {
+	sc, err := a.loadBankScanContext(client, gameDir)
+	if err != nil {
+		return nil, err
+	}
+
+	holders := []officerapi.BankSyncHolder{}
+	for _, f := range sc.files {
+		rc, matched := sc.rosterByName[strings.ToLower(f.Character)]
+		if !matched {
+			continue
+		}
+		exp, parseErr := bankexport.ParseExport(f.Path)
+		if parseErr != nil {
+			continue
+		}
+		inv := bankexport.BuildInventory(exp)
+
+		guildContainers := guildSetFor(sc.cfg, sc.cfg.PersonalDesignations, rc.ID)
+		includeShared := false
+		if acc, ok := sc.accountByCharID[rc.ID]; ok && acc.SharedBankHolderCharacterID == rc.ID {
+			includeShared = true
+			for c := range guildSetFor(sc.cfg, sc.cfg.SharedDesignations, acc.ID) {
+				guildContainers[c] = true
+			}
+		}
+
+		rows := bankexport.BuildSyncRows(inv, guildContainers, includeShared)
+		syncRows := make([]officerapi.BankSyncRow, len(rows))
+		for i, r := range rows {
+			syncRows[i] = officerapi.BankSyncRow{
+				Container: r.Container,
+				SlotIndex: r.SlotIndex,
+				Category:  string(r.Category),
+				ItemName:  r.ItemName,
+				ItemID:    r.ItemID,
+				Quantity:  r.Quantity,
+			}
+		}
+
+		holders = append(holders, officerapi.BankSyncHolder{
+			CharacterID:       rc.ID,
+			SourceFile:        filepath.Base(f.Path),
+			ReportsSharedBank: includeShared,
+			Rows:              syncRows,
+		})
+	}
+	return holders, nil
+}
+
+func (a *App) runBankSync(dryRun bool) ([]officerapi.BankSyncDiff, error) {
+	s, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	if s.GameDir == "" {
+		return nil, errors.New("set your EverQuest folder in Settings first")
+	}
+	client, err := a.officerClient()
+	if err != nil {
+		return nil, err
+	}
+
+	holders, err := a.buildBankSyncHolders(client, s.GameDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(holders) == 0 {
+		return nil, errors.New("no roster character matches any inventory export in your EverQuest folder")
+	}
+
+	return client.SyncBank(a.ctx, dryRun, holders)
+}
+
+// PreviewBankSync shows what a real sync would change, without writing
+// anything — same payload SubmitBankSync sends, just with dryRun=true.
+func (a *App) PreviewBankSync() ([]officerapi.BankSyncDiff, error) {
+	return a.runBankSync(true)
+}
+
+// SubmitBankSync actually applies the sync.
+func (a *App) SubmitBankSync() ([]officerapi.BankSyncDiff, error) {
+	return a.runBankSync(false)
 }
 
 // setLogPath is the only place a.logPath should be assigned once the app

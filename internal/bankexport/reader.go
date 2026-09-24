@@ -70,7 +70,7 @@ func ParseExport(path string) (*Export, error) {
 			}
 		}
 
-		location, name, id, count, ok := parseLine(line)
+		location, name, id, count, bagSlots, ok := parseLine(line)
 		if !ok || name == "" || name == "Empty" {
 			continue
 		}
@@ -79,9 +79,9 @@ func ParseExport(path string) (*Export, error) {
 		case sharedBankDead:
 			continue // this server never populates slots 11-30 — not real data
 		case sharedBankReal:
-			exp.SharedBank = append(exp.SharedBank, toHolding(location, name, id, count))
+			exp.SharedBank = append(exp.SharedBank, toHolding(location, name, id, count, bagSlots))
 		default:
-			exp.Holdings = append(exp.Holdings, toHolding(location, name, id, count))
+			exp.Holdings = append(exp.Holdings, toHolding(location, name, id, count, bagSlots))
 		}
 	}
 
@@ -91,7 +91,7 @@ func ParseExport(path string) (*Export, error) {
 // toHolding builds a Holding from one parsed row, classifying a "-Coin"
 // location as currency (id is always 0 for these — coin isn't an item)
 // and a "Spell: " name as a spell, else a plain item.
-func toHolding(location, name string, id, count int) Holding {
+func toHolding(location, name string, id, count, bagSlots int) Holding {
 	container, slotIndex := decomposeLocation(location)
 	category := CategoryItem
 	switch {
@@ -107,24 +107,31 @@ func toHolding(location, name string, id, count int) Holding {
 		ItemName:  name,
 		ItemID:    id,
 		Quantity:  count,
+		BagSlots:  bagSlots,
 	}
 }
 
 // parseLine parses one tab-delimited inventory row:
-// Location\tName\tID\tCount/Charges\tSlots (only the first four columns
-// matter here — bag capacity isn't part of a bank_holdings row).
-func parseLine(line string) (location, name string, id, count int, ok bool) {
+// Location\tName\tID\tCount/Charges\tSlots. bagSlots (column 5, the bag's
+// own capacity) is optional — a row with only 4 columns still parses,
+// bagSlots just comes back 0 (indistinguishable from "not a bag", which is
+// the same thing a genuinely non-bag row means).
+func parseLine(line string) (location, name string, id, count, bagSlots int, ok bool) {
 	parts := strings.Split(line, "\t")
 	if len(parts) < 4 {
-		return "", "", 0, 0, false
+		return "", "", 0, 0, 0, false
 	}
 
 	itemID, err := strconv.Atoi(strings.TrimSpace(parts[2]))
 	if err != nil {
-		return "", "", 0, 0, false
+		return "", "", 0, 0, 0, false
 	}
 
 	c, _ := strconv.Atoi(strings.TrimSpace(parts[3]))
+	var slots int
+	if len(parts) >= 5 {
+		slots, _ = strconv.Atoi(strings.TrimSpace(parts[4]))
+	}
 
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), itemID, c, true
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), itemID, c, slots, true
 }

@@ -221,6 +221,12 @@ func (c *Client) FetchCharacters(ctx context.Context) ([]Character, error) {
 type CreateCharacterRequest struct {
 	Name            string `json:"name"`
 	MainCharacterID *int   `json:"mainCharacterId,omitempty"`
+	// CharType is "mule" for a guild-bank mule created from the Guild Bank
+	// tab (PLAN.md §11 Phase 8.4) — omitted for the ordinary Attendance/
+	// Bids "no match" flow, which always creates a main or an alt. A mule
+	// attaches straight to the calling officer's own account server-side,
+	// never nests under a main the way an alt does.
+	CharType string `json:"charType,omitempty"`
 }
 
 func (c *Client) CreateCharacter(ctx context.Context, req CreateCharacterRequest) (Character, error) {
@@ -684,4 +690,142 @@ func (c *Client) FetchTotals(ctx context.Context, query string) ([]TotalsRow, er
 		return nil, err
 	}
 	return out.Totals, nil
+}
+
+// --- Guild bank (PLAN.md §9/§11 Phase 8.4) ---
+
+// BankEqAccount is one "these characters share a real EQ login" group
+// (bank_eq_accounts) — see src/lib/bank/sync.ts on the site.
+type BankEqAccount struct {
+	ID                          int    `json:"id"`
+	Label                       string `json:"label"`
+	SharedBankHolderCharacterID int    `json:"sharedBankHolderCharacterId"`
+	CharacterIDs                []int  `json:"characterIds"`
+}
+
+// BankImportInfo is the last sync recorded for one holder character.
+type BankImportInfo struct {
+	CharacterID       int    `json:"characterId"`
+	SourceFile        string `json:"sourceFile"`
+	RowCount          int    `json:"rowCount"`
+	ReportsSharedBank bool   `json:"reportsSharedBank"`
+	UploadedByName    string `json:"uploadedByName"`
+	CreatedAt         string `json:"createdAt"`
+}
+
+// BankConfig is GET /api/officer/bank/config's response — every
+// designation, every EQ-account group, and each holder's last sync.
+// PersonalDesignations/SharedDesignations are keyed by characterId/
+// eqAccountId as a string (JSON object keys are always strings; the app
+// re-parses them to int on receipt).
+type BankConfig struct {
+	PersonalDesignations map[string][]string       `json:"personalDesignations"`
+	SharedDesignations   map[string][]string       `json:"sharedDesignations"`
+	Accounts             []BankEqAccount           `json:"accounts"`
+	LastImports          map[string]BankImportInfo `json:"lastImports"`
+}
+
+func (c *Client) FetchBankConfig(ctx context.Context) (BankConfig, error) {
+	var out BankConfig
+	err := c.do(ctx, http.MethodGet, "/api/officer/bank/config", nil, &out)
+	return out, err
+}
+
+// PutBankDesignations replaces the FULL set of guild-flagged containers
+// for one owner — pass exactly one of characterID/eqAccountID (the other
+// zero), matching the site's own "exactly one owner" validation.
+func (c *Client) PutBankDesignations(ctx context.Context, characterID, eqAccountID int, containers []string) error {
+	body := map[string]any{"containers": containers}
+	if eqAccountID != 0 {
+		body["eqAccountId"] = eqAccountID
+	} else {
+		body["characterId"] = characterID
+	}
+	return c.do(ctx, http.MethodPut, "/api/officer/bank/designations", body, nil)
+}
+
+// SaveBankAccountRequest creates (ID zero) or updates (ID set) an EQ
+// account group.
+type SaveBankAccountRequest struct {
+	ID                          int    `json:"id,omitempty"`
+	Label                       string `json:"label"`
+	CharacterIDs                []int  `json:"characterIds"`
+	SharedBankHolderCharacterID int    `json:"sharedBankHolderCharacterId"`
+}
+
+func (c *Client) SaveBankAccount(ctx context.Context, req SaveBankAccountRequest) (int, error) {
+	var out struct {
+		ID int `json:"id"`
+	}
+	err := c.do(ctx, http.MethodPut, "/api/officer/bank/accounts", req, &out)
+	return out.ID, err
+}
+
+func (c *Client) DeleteBankAccount(ctx context.Context, id int) error {
+	return c.do(ctx, http.MethodDelete, "/api/officer/bank/accounts", map[string]int{"id": id}, nil)
+}
+
+// BankSyncRow is one physical stack in a sync payload — shaped exactly
+// like bankexport.Holding, kept as its own type here so this package
+// doesn't take a dependency on bankexport just for a JSON shape.
+type BankSyncRow struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+	Category  string `json:"category"`
+	ItemName  string `json:"itemName"`
+	ItemID    int    `json:"itemId"`
+	Quantity  int    `json:"quantity"`
+}
+
+// BankSyncHolder is one character's rows in a sync payload.
+type BankSyncHolder struct {
+	CharacterID       int           `json:"characterId"`
+	SourceFile        string        `json:"sourceFile,omitempty"`
+	ReportsSharedBank bool          `json:"reportsSharedBank"`
+	Rows              []BankSyncRow `json:"rows"`
+}
+
+type bankSyncRequest struct {
+	DryRun  bool             `json:"dryRun"`
+	Holders []BankSyncHolder `json:"holders"`
+}
+
+// BankSyncDiffRow is one row of a diff — added/removed/changed.
+type BankSyncDiffRow struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+	ItemName  string `json:"itemName"`
+	Quantity  int    `json:"quantity"`
+}
+
+// BankSyncDiff is one holder's result — what changed for a real sync, or
+// what would change for a dry-run preview.
+type BankSyncDiff struct {
+	CharacterID int               `json:"characterId"`
+	Added       []BankSyncDiffRow `json:"added"`
+	Removed     []BankSyncDiffRow `json:"removed"`
+	Changed     []struct {
+		Before BankSyncDiffRow `json:"before"`
+		After  BankSyncDiffRow `json:"after"`
+	} `json:"changed"`
+	Unchanged int `json:"unchanged"`
+}
+
+type bankSyncResponse struct {
+	Applied bool           `json:"applied"`
+	Diffs   []BankSyncDiff `json:"diffs"`
+}
+
+// SyncBank posts a sync payload — dryRun true previews (writes nothing),
+// dryRun false actually applies it. The server independently re-validates
+// every row against the live designation config (never trusts this app's
+// own filtering alone) — a 422 here means a designation changed out from
+// under this sync, not a bug in what was sent.
+func (c *Client) SyncBank(ctx context.Context, dryRun bool, holders []BankSyncHolder) ([]BankSyncDiff, error) {
+	if holders == nil {
+		holders = []BankSyncHolder{}
+	}
+	var out bankSyncResponse
+	err := c.do(ctx, http.MethodPost, "/api/officer/bank/sync", bankSyncRequest{DryRun: dryRun, Holders: holders}, &out)
+	return out.Diffs, err
 }

@@ -29,6 +29,90 @@ export interface AttendanceResult {
 }
 
 /**
+ * BankCharacterExport is one discovered export file, parsed and matched
+ * against the roster + the site's current designation config.
+ */
+export interface BankCharacterExport {
+    "character": string;
+    "sourceFile": string;
+    "exportedAt": string;
+    "equipped": BankEquipped[] | null;
+    "bags": BankContainer[] | null;
+    "bank": BankContainer[] | null;
+    "sharedBank": BankContainer[] | null;
+
+    /**
+     * SharedBankFingerprint is "" when this export's SharedBank is empty
+     * (bankexport.SharedBankFingerprint) — used client-side only for the
+     * account-grouping UI, not sent anywhere.
+     */
+    "sharedBankFingerprint": string;
+
+    /**
+     * RosterCharacterID is nil when no roster character matches this
+     * export's filename — the Guild Bank tab offers "Create mule" for
+     * these instead of showing containers to toggle.
+     */
+    "rosterCharacterId": number | null;
+    "rosterCharType": string;
+    "eqAccountId": number | null;
+
+    /**
+     * IsSharedBankHolder is true when this character is its account
+     * group's designated SharedBank holder — only its SharedBank
+     * containers can ever be flagged guild (SetBankDesignations rejects
+     * the attempt otherwise, same rule the server enforces).
+     */
+    "isSharedBankHolder": boolean;
+    "lastImport": officerapi$0.BankImportInfo | null;
+}
+
+/**
+ * BankContainer is one top-level bag/bank slot, with Guild reflecting
+ * whatever the website currently has designated for it — the toggle the
+ * Guild Bank tab renders is just this field, read-modify-write via
+ * SetBankDesignations.
+ */
+export interface BankContainer {
+    "container": string;
+    "kind": string;
+    "number": number;
+    "bagName": string;
+    "capacity": number;
+    "loose": boolean;
+    "items": BankItem[] | null;
+    "guild": boolean;
+}
+
+export interface BankEquipped {
+    "location": string;
+    "itemName": string;
+}
+
+/**
+ * BankItem is one item inside a BankContainer, JSON-shaped for the
+ * frontend (mirrors bankexport.SlotItem).
+ */
+export interface BankItem {
+    "slotIndex": number;
+    "category": string;
+    "itemName": string;
+    "itemId": number;
+    "quantity": number;
+}
+
+/**
+ * BankSuggestedGroup is an auto-detected "these characters look like the
+ * same EQ account" suggestion (matching, non-empty SharedBank
+ * fingerprints) for characters not already in a saved account group. The
+ * officer confirms or ignores it via SaveBankEqAccount — nothing is
+ * grouped automatically.
+ */
+export interface BankSuggestedGroup {
+    "characterNames": string[] | null;
+}
+
+/**
  * BidRound is the state of one bid round the Bids tab renders. While Live
  * is true the poller re-emits this on "bids:round" every few seconds as
  * tells arrive; End Round & Review (EndBidRound) freezes it (Live false)
@@ -97,6 +181,20 @@ export interface GameDirInfo {
     "activePath": string;
     "activeChar": string;
     "activeServer": string;
+}
+
+export interface GuildBankState {
+    "gameDir": string;
+    "exports": BankCharacterExport[] | null;
+    "accounts": officerapi$0.BankEqAccount[] | null;
+    "suggestedGroups": BankSuggestedGroup[] | null;
+
+    /**
+     * Unmatched names a real export was found for but no roster character
+     * matches — surfaced separately so the UI can offer "Create mule"
+     * without cluttering Exports with an entry that has nothing to toggle.
+     */
+    "unmatchedCharacters": string[] | null;
 }
 
 /**

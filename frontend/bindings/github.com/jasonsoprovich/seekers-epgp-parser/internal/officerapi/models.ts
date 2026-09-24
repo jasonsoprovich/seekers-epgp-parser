@@ -48,6 +48,51 @@ export interface AttendanceResponse {
     "eventLeadSkipped"?: EventLeadInfo | null;
 }
 
+/**
+ * BankEqAccount is one "these characters share a real EQ login" group
+ * (bank_eq_accounts) — see src/lib/bank/sync.ts on the site.
+ */
+export interface BankEqAccount {
+    "id": number;
+    "label": string;
+    "sharedBankHolderCharacterId": number;
+    "characterIds": number[] | null;
+}
+
+/**
+ * BankImportInfo is the last sync recorded for one holder character.
+ */
+export interface BankImportInfo {
+    "characterId": number;
+    "sourceFile": string;
+    "rowCount": number;
+    "reportsSharedBank": boolean;
+    "uploadedByName": string;
+    "createdAt": string;
+}
+
+/**
+ * BankSyncDiff is one holder's result — what changed for a real sync, or
+ * what would change for a dry-run preview.
+ */
+export interface BankSyncDiff {
+    "characterId": number;
+    "added": BankSyncDiffRow[] | null;
+    "removed": BankSyncDiffRow[] | null;
+    "changed": {"before": BankSyncDiffRow, "after": BankSyncDiffRow}[] | null;
+    "unchanged": number;
+}
+
+/**
+ * BankSyncDiffRow is one row of a diff — added/removed/changed.
+ */
+export interface BankSyncDiffRow {
+    "container": string;
+    "slotIndex": number;
+    "itemName": string;
+    "quantity": number;
+}
+
 export interface BidEntry {
     "characterName": string;
     "tier": string;
@@ -138,6 +183,17 @@ export interface ManualEntryRequest {
 export interface PointValue {
     "activity": string;
     "points": number;
+}
+
+/**
+ * SaveBankAccountRequest creates (ID zero) or updates (ID set) an EQ
+ * account group.
+ */
+export interface SaveBankAccountRequest {
+    "id"?: number;
+    "label": string;
+    "characterIds": number[] | null;
+    "sharedBankHolderCharacterId": number;
 }
 
 /**

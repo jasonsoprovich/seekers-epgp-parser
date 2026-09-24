@@ -133,6 +133,15 @@ export function ClearAllRolls(): $CancellablePromise<void> {
 }
 
 /**
+ * CreateBankMule creates a brand-new mule character, attached to the
+ * calling officer's own account server-side — for an export whose
+ * filename matches no roster character yet.
+ */
+export function CreateBankMule(name: string): $CancellablePromise<officerapi$0.Character> {
+    return $Call.ByID(3757296726, name);
+}
+
+/**
  * CurrentLogCharacter returns the character name the currently-watched log
  * file belongs to (from its eqlog_<Character>_<server>.txt filename), or ""
  * if no log is selected yet. Same helper startLiveBidPush already uses for
@@ -145,6 +154,10 @@ export function ClearAllRolls(): $CancellablePromise<void> {
  */
 export function CurrentLogCharacter(): $CancellablePromise<string> {
     return $Call.ByID(2012932359);
+}
+
+export function DeleteBankEqAccount(id: number): $CancellablePromise<void> {
+    return $Call.ByID(2002968089, id);
 }
 
 /**
@@ -373,6 +386,14 @@ export function ParseAttendanceText(raw: string): $CancellablePromise<$models.At
 }
 
 /**
+ * PreviewBankSync shows what a real sync would change, without writing
+ * anything — same payload SubmitBankSync sends, just with dryRun=true.
+ */
+export function PreviewBankSync(): $CancellablePromise<officerapi$0.BankSyncDiff[] | null> {
+    return $Call.ByID(1954047010);
+}
+
+/**
  * RemoveRollSession hides one session from the Rolls tab entirely (a test
  * /random, or a range that wasn't actually a loot roll) and, like Stop,
  * forces the next roll in the same range to start fresh rather than
@@ -391,8 +412,30 @@ export function ResolveNoBidRound(itemName: string, roundID: string): $Cancellab
     return $Call.ByID(2519945105, itemName, roundID);
 }
 
+/**
+ * SaveBankEqAccount creates or updates a "these characters share a real
+ * EQ account" group — confirming (or overriding) one of ScanGuildBank's
+ * SuggestedGroups, or a manual grouping.
+ */
+export function SaveBankEqAccount(req: officerapi$0.SaveBankAccountRequest): $CancellablePromise<number> {
+    return $Call.ByID(2236179599, req);
+}
+
 export function SaveSettings(apiKey: string): $CancellablePromise<void> {
     return $Call.ByID(1949631069, apiKey);
+}
+
+/**
+ * ScanGuildBank discovers every Zeal inventory export in the configured
+ * EverQuest folder, parses each, and matches it against the roster and
+ * the site's current guild/personal designations — everything the Guild
+ * Bank tab needs to render. Never caches between calls: a fresh scan is
+ * cheap (local files + two small API calls) and always reflects the
+ * latest export off disk and the latest designations another officer may
+ * have just saved.
+ */
+export function ScanGuildBank(): $CancellablePromise<$models.GuildBankState> {
+    return $Call.ByID(4047222393);
 }
 
 /**
@@ -443,6 +486,16 @@ export function SetAttendanceUnsaved(v: boolean): $CancellablePromise<void> {
  */
 export function SetAutoDetectBids(enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(737290635, enabled);
+}
+
+/**
+ * SetBankDesignations replaces the full set of guild-flagged containers
+ * for one character (personal Bank/General slots) or one EQ account
+ * (SharedBank slots) — pass exactly one of characterID/eqAccountID
+ * non-zero, mirroring the site route's own "exactly one owner" rule.
+ */
+export function SetBankDesignations(characterID: number, eqAccountID: number, containers: string[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3238434313, characterID, eqAccountID, containers);
 }
 
 export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
@@ -500,6 +553,13 @@ export function StopRollSession(id: string): $CancellablePromise<$models.RollSes
  */
 export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string, awardEventLead: boolean, eventLeadCharacterName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
     return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName, awardEventLead, eventLeadCharacterName);
+}
+
+/**
+ * SubmitBankSync actually applies the sync.
+ */
+export function SubmitBankSync(): $CancellablePromise<officerapi$0.BankSyncDiff[] | null> {
+    return $Call.ByID(709946232);
 }
 
 /**
