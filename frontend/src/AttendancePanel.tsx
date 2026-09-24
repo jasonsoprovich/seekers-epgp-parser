@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Clipboard } from "@wailsio/runtime";
 import {
   CheckAttendanceRecorded,
+  CurrentLogCharacter,
   FetchGuildSettings,
   ListAttendanceSnapshots,
   SetAttendanceUnsaved,
   SubmitAttendance,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import type { EventLeadInfo } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
@@ -54,6 +56,11 @@ const UNIQUE_ASSIGNMENTS = new Set<Assignment>(["Raid - Start", "Raid - Mid", "R
 const GATED = new Set<Assignment>(["Raid - Start", "Raid - Mid", "Raid - End", "Event Attend"]);
 
 type SubmittedInfo = { activity: string; inserted: number; note: string };
+
+// Pre-submit probe result for one capture (GET /api/officer/attendance).
+// enteredBy/eventLead only come back when count > 0 — see route.ts's GET
+// handler on the site.
+type DupCheck = { count: number; enteredBy?: string; eventLead?: EventLeadInfo | null };
 
 // One /who snapshot the officer has captured. `id` is the block's
 // occurredAt — stable and unique, so re-capturing merges instead of
@@ -125,8 +132,25 @@ export function AttendancePanel() {
   // Pre-submit "already in the ledger?" results, keyed by capture id.
   // "checking" while the probe is in flight; absent = not checked / probe
   // failed (no warning shown, submit still allowed).
-  const [dupChecks, setDupChecks] = useState<Record<string, { count: number } | "checking">>({});
+  const [dupChecks, setDupChecks] = useState<Record<string, DupCheck | "checking">>({});
   const roster = useRoster();
+
+  // 2026-09-23 (post-live-test-1 feedback): an officer wasn't sure where to
+  // change the Event Lead recipient because the toggle's text just said it
+  // "defaults to you" with nothing to act on. Prefill this field once, from
+  // whichever character's log is being watched — a real guess, not just a
+  // tooltip explaining an invisible default — and let the officer edit or
+  // clear it right here, before Submit, instead of only in the confirm
+  // dialog. Runs once on mount only; never overwrites a name the officer
+  // already typed.
+  useEffect(() => {
+    CurrentLogCharacter()
+      .then((name) => {
+        if (name) setEventLeadName((prev) => prev || name);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => saveCaptures(captures), [captures]);
   useEffect(() => {
@@ -292,7 +316,7 @@ export function AttendancePanel() {
       toSubmit.map(async (c) => {
         try {
           const res = await CheckAttendanceRecorded(c.assignment, c.occurredAt);
-          setDupChecks((prev) => ({ ...prev, [c.id]: { count: res.count } }));
+          setDupChecks((prev) => ({ ...prev, [c.id]: { count: res.count, enteredBy: res.enteredBy, eventLead: res.eventLead } }));
         } catch {
           setDupChecks((prev) => {
             const next = { ...prev };
@@ -353,14 +377,16 @@ export function AttendancePanel() {
         );
         const unmatched = res.unmatched ?? [];
         const duplicates = res.duplicates ?? [];
+        const skipped = res.eventLeadSkipped;
         const note =
           (unmatched.length ? ` no match: ${unmatched.join(", ")};` : "") +
-          (duplicates.length ? ` already recorded: ${duplicates.join(", ")};` : "");
+          (duplicates.length ? ` already recorded: ${duplicates.join(", ")};` : "") +
+          (skipped ? ` Event Lead already awarded to ${skipped.recipientName}${skipped.enteredByName ? ` (by ${skipped.enteredByName})` : ""} — not awarded again;` : "");
         setCaptures((prev) =>
           prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: c.assignment, inserted: res.inserted, note } } : x)),
         );
         done.push(
-          `${c.assignment}: ${res.inserted}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}`,
+          `${c.assignment}: ${res.inserted}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}${skipped ? ` (Event Lead already went to ${skipped.recipientName})` : ""}`,
         );
       }
       setSubmitSummary(
@@ -406,8 +432,22 @@ export function AttendancePanel() {
         />
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
           <input type="checkbox" checked={awardEventLead} onChange={(e) => setAwardEventLead(e.target.checked)} />
-            Award Event Lead (defaults to you — pick who in the confirm dialog)
+          Award Event Lead
         </label>
+        {awardEventLead && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
+            to
+            <input
+              type="text"
+              list="event-lead-roster"
+              placeholder="(you)"
+              value={eventLeadName}
+              onChange={(e) => setEventLeadName(e.target.value)}
+              style={{ minWidth: 140 }}
+              title="Prefilled from whichever character's log is being watched — change it, or clear it to award yourself, before Submit. Still changeable on the confirm dialog too."
+            />
+          </label>
+        )}
         <button
           className="primary"
           onClick={onSubmitClick}
@@ -419,6 +459,15 @@ export function AttendancePanel() {
           Clear all
         </button>
       </div>
+      {/* Shared by the toolbar's Event Lead input and the confirm dialog's —
+          one <datalist>, referenced by id from both, rather than a second
+          copy nested in the dialog (which wouldn't exist in the DOM until
+          the dialog opens anyway). */}
+      <datalist id="event-lead-roster">
+        {roster.characters.map((c) => (
+          <option key={c.name} value={c.name} />
+        ))}
+      </datalist>
 
       {error && <div className="error">{error}</div>}
       {submitSummary && <div className="success">{submitSummary}</div>}
@@ -608,17 +657,29 @@ export function AttendancePanel() {
                     {n < effectiveMin ? <span style={{ color: "#fbbf24" }}> · under {effectiveMin}</span> : null}
                     {check === "checking" && <span style={{ color: "#9ca3af" }}> · checking…</span>}
                     {check && check !== "checking" && check.count > 0 && (
-                      <span style={{ color: "#fbbf24" }}> · ⚠ already recorded ({check.count} rows) — this would be a no-op</span>
+                      <span style={{ color: "#fbbf24" }}>
+                        {" "}
+                        · ⚠ already recorded ({check.count} row{check.count === 1 ? "" : "s"}
+                        {check.enteredBy ? ` by ${check.enteredBy}` : ""}) — only new names here will be credited
+                      </span>
                     )}
                     {check && check !== "checking" && check.count === 0 && <span style={{ color: "#10b981" }}> · new</span>}
+                    {check && check !== "checking" && check.eventLead && (
+                      <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 2 }}>
+                        Event Lead already awarded to <strong>{check.eventLead.recipientName}</strong>
+                        {check.eventLead.enteredByName ? ` (by ${check.eventLead.enteredByName})` : ""} — this submit
+                        won't award it again.
+                      </div>
+                    )}
                   </li>
                 );
               })}
             </ul>
             {dupNewCount === 0 && Object.keys(dupChecks).length > 0 && (
               <p style={{ margin: "0 0 8px", color: "#fbbf24" }}>
-                Every capture here is already in the database. Submitting again writes nothing (the site dedupes by
-                player + activity + time). Only do this if you deliberately reversed the raid first.
+                Every name in these captures is already recorded within an hour of this timestamp. Submitting again
+                writes nothing new (the site dedupes by player + activity + a ±60 min window). Only do this if you
+                deliberately reversed the raid first.
               </p>
             )}
             {raidName.trim() ? (
@@ -653,11 +714,6 @@ export function AttendancePanel() {
                     "{eventLeadName.trim()}" isn't in the roster — double-check the spelling before submitting.
                   </p>
                 )}
-                <datalist id="event-lead-roster">
-                  {roster.characters.map((c) => (
-                    <option key={c.name} value={c.name} />
-                  ))}
-                </datalist>
               </div>
             )}
           </>

@@ -7,6 +7,7 @@ export type {
     BidEntry,
     BidsResponse,
     Character,
+    EventLeadInfo,
     LedgerRow,
     ManualEntryRequest,
     PointValue,
