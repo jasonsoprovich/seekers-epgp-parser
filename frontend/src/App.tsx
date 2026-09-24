@@ -14,12 +14,13 @@ import type { UpdateInfo } from "../bindings/github.com/jasonsoprovich/seekers-e
 import { AttendancePanel } from "./AttendancePanel";
 import { BidsPanel } from "./BidsPanel";
 import { BrowsePanel } from "./BrowsePanel";
+import { GuildBankPanel } from "./GuildBankPanel";
 import { ManualEntryPanel } from "./ManualEntryPanel";
 import { RollsPanel } from "./RollsPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { SetupWizard } from "./SetupWizard";
 
-type Tab = "attendance" | "bids" | "rolls" | "manual" | "browse" | "settings";
+type Tab = "attendance" | "bids" | "rolls" | "manual" | "bank" | "browse" | "settings";
 
 function App() {
   const [tab, setTab] = useState<Tab>("attendance");
@@ -174,6 +175,9 @@ function App() {
           <button className={`nav-button ${tab === "manual" ? "active" : ""}`} onClick={() => setTab("manual")}>
             Manual Entry
           </button>
+          <button className={`nav-button ${tab === "bank" ? "active" : ""}`} onClick={() => setTab("bank")}>
+            Guild Bank
+          </button>
           <button className={`nav-button ${tab === "browse" ? "active" : ""}`} onClick={() => setTab("browse")}>
             Browse
           </button>
@@ -205,6 +209,9 @@ function App() {
           </div>
           <div hidden={tab !== "manual"}>
             <ManualEntryPanel />
+          </div>
+          <div hidden={tab !== "bank"}>
+            <GuildBankPanel />
           </div>
           <div hidden={tab !== "browse"}>
             <BrowsePanel />
