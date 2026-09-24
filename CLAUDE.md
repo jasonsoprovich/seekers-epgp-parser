@@ -317,6 +317,29 @@ or just use `wails3 build`, which does both.
   characters with nothing in their shared bank never look like a match.
   The officer always confirms (or edits) a suggested `bank_eq_accounts`
   group via `SaveBankEqAccount`; nothing is grouped automatically.
+- **A real item's `Count/Charges` can legitimately be `0`** (found
+  2026-09-24 via a real click-through against Darkclaw's export — two
+  "Forge of Icewell Arms" rows). Not every non-stacking item is
+  charge-based, and Zeal writes `0` there regardless — `toHolding`
+  (`reader.go`) coerces any non-currency `count == 0` to `1`, same as
+  pq-companion's own reader.go this package was ported from. Don't
+  "simplify" this away — the server rejects a zero/negative quantity
+  outright, so a regression here breaks Preview Sync on any real
+  character carrying one of these.
+- **A designation is tied to the SLOT, not the bag object in it — moving
+  a guild bag elsewhere is NOT detected.** Real open limitation, found
+  2026-09-24, not yet resolved: if an officer moves a guild-flagged bag
+  from Bank3 to Bank7 in-game, Bank3 stays flagged (now holding whatever
+  replaced it, or nothing) and Bank7 isn't. There's no reliable way to
+  tell "this bag moved" apart from "this bag was emptied and something
+  else put here" from the export alone — two bags of the same type are
+  indistinguishable. Current mitigation is UI-only (a persistent warning
+  note + an "empty — bag moved?" badge that's exempt from "Hide empty
+  bags"), not a real fix. See the status page
+  (https://claude.ai/artifact/TxQZM3baZsEeKDHBe15fZb, also linked from
+  PLAN.md §9) for the candidate fixes and what officer input is needed
+  before picking one — don't build a fix here without checking that page
+  first, a decision may already have been made in a later session.
 
 ## Status
 
