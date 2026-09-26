@@ -182,7 +182,8 @@ export function GuildBankPanel() {
   // smaller blast radius than a whole bag.
   type PendingConfirm =
     | { kind: "toggleContainer"; exp: BankCharacterExport; isShared: boolean; container: BankContainer }
-    | { kind: "markAll"; exp: BankCharacterExport; scope: "bank" | "bags" };
+    | { kind: "markAll"; exp: BankCharacterExport; scope: "bank" | "bags" }
+    | { kind: "clearAllPersonal"; exp: BankCharacterExport };
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
 
@@ -270,8 +271,10 @@ export function GuildBankPanel() {
     try {
       if (pendingConfirm.kind === "toggleContainer") {
         await performToggleContainer(pendingConfirm.exp, pendingConfirm.isShared, pendingConfirm.container);
-      } else {
+      } else if (pendingConfirm.kind === "markAll") {
         await performMarkAll(pendingConfirm.exp, pendingConfirm.scope);
+      } else {
+        await performClearAllPersonal(pendingConfirm.exp);
       }
     } finally {
       setConfirmBusy(false);
@@ -279,7 +282,7 @@ export function GuildBankPanel() {
     }
   }
 
-  async function clearAllPersonal(exp: BankCharacterExport) {
+  async function performClearAllPersonal(exp: BankCharacterExport) {
     if (exp.rosterCharacterId === null) return;
     setSavingKey(`${exp.character}:__bulk`);
     setError(null);
@@ -291,6 +294,15 @@ export function GuildBankPanel() {
     } finally {
       setSavingKey(null);
     }
+  }
+
+  function clearAllPersonal(exp: BankCharacterExport) {
+    if (exp.rosterCharacterId === null) return;
+    // Always confirm — same bulk-blast-radius reasoning as markAll, just
+    // in the opposite (unflagging) direction: a mis-click here silently
+    // drops every personal Bank/Bags designation this character has,
+    // with no undo besides re-flagging each one by hand.
+    setPendingConfirm({ kind: "clearAllPersonal", exp });
   }
 
   // Resolving a warning: "move" the flag to the suggested/picked position,
@@ -714,8 +726,8 @@ export function GuildBankPanel() {
 
       <ConfirmDialog
         open={pendingConfirm !== null}
-        title="Flag as guild property?"
-        confirmLabel={confirmBusy ? "Saving…" : "Flag it"}
+        title={pendingConfirm?.kind === "clearAllPersonal" ? "Clear all personal designations?" : "Flag as guild property?"}
+        confirmLabel={confirmBusy ? "Saving…" : pendingConfirm?.kind === "clearAllPersonal" ? "Clear all" : "Flag it"}
         busy={confirmBusy}
         onCancel={() => !confirmBusy && setPendingConfirm(null)}
         onConfirm={confirmPendingAction}
@@ -834,13 +846,26 @@ function PreviewBody({
 }
 
 function pendingConfirmBody(pending: {
-  kind: "toggleContainer" | "markAll";
+  kind: "toggleContainer" | "markAll" | "clearAllPersonal";
   exp: BankCharacterExport;
   isShared?: boolean;
   container?: BankContainer;
   scope?: "bank" | "bags";
 }) {
   const { exp } = pending;
+  if (pending.kind === "clearAllPersonal") {
+    const containers = [...(exp.bags ?? []), ...(exp.bank ?? [])];
+    const flaggedContainers = containers.filter((c) => c.guild).length;
+    const flaggedItems = containers.flatMap((c) => c.items ?? []).filter((i) => i.guild).length;
+    const total = flaggedContainers + flaggedItems;
+    return (
+      <span>
+        Clear all {total} personal (Bank/Bags) designation{total === 1 ? "" : "s"} on <strong>{exp.character}</strong>?
+        This unflags every whole-bag and per-item guild designation on this character — Shared Bank designations are
+        untouched. There&apos;s no undo besides re-flagging each one by hand.
+      </span>
+    );
+  }
   if (pending.kind === "toggleContainer" && pending.isShared) {
     return (
       <span>
