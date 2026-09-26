@@ -326,20 +326,43 @@ or just use `wails3 build`, which does both.
   "simplify" this away — the server rejects a zero/negative quantity
   outright, so a regression here breaks Preview Sync on any real
   character carrying one of these.
-- **A designation is tied to the SLOT, not the bag object in it — moving
-  a guild bag elsewhere is NOT detected.** Real open limitation, found
-  2026-09-24, not yet resolved: if an officer moves a guild-flagged bag
-  from Bank3 to Bank7 in-game, Bank3 stays flagged (now holding whatever
-  replaced it, or nothing) and Bank7 isn't. There's no reliable way to
-  tell "this bag moved" apart from "this bag was emptied and something
-  else put here" from the export alone — two bags of the same type are
-  indistinguishable. Current mitigation is UI-only (a persistent warning
-  note + an "empty — bag moved?" badge that's exempt from "Hide empty
-  bags"), not a real fix. See the status page
-  (https://claude.ai/artifact/TxQZM3baZsEeKDHBe15fZb, also linked from
-  PLAN.md §9) for the candidate fixes and what officer input is needed
-  before picking one — don't build a fix here without checking that page
-  first, a decision may already have been made in a later session.
+- **A designation being tied to the SLOT is now DETECTED, not silently
+  missed — resolved 2026-09-25** (was an open limitation found
+  2026-09-24). `internal/bankexport.DetectMoves` compares every
+  designated position's `expected_item_id`/`ExpectedItemName` (the
+  officerapi `DesignationSlot`'s own baseline, refreshed on every real
+  sync via `occupantsFor`) against a fresh scan. A mismatch is still
+  genuinely ambiguous when two bags of the same type exist — real
+  Darkclaw data has five identical "Hand Made Backpack" bags — so
+  `DetectMoves` never guesses at a single match in that case; it returns
+  every plausible `Candidates` entry and leaves `HasSuggestion` false,
+  and the UI offers a pick list instead of a wrong auto-move. A
+  character with ANY unresolved warning is excluded from Preview/Submit
+  Sync entirely (`buildBankSyncHolders`/`BankSyncBlocked`) until the
+  officer resolves it via `ResolveBankMove` (move/keep/unflag — always
+  one remove-then-add designations call, same primitive the ordinary
+  checkboxes use). The old "empty — bag moved?" badge is now the
+  fallback shown only when DetectMoves found zero candidates at all; a
+  real warning with a suggestion or pick list gets its own card instead.
+  See the status page (https://claude.ai/artifact/TxQZM3baZsEeKDHBe15fZb,
+  also linked from PLAN.md §9) for the full design writeup — it's kept
+  current, re-read it before touching this again.
+- **Per-item (not just whole-bag) designation, added 2026-09-25.**
+  `officerapi.DesignationSlot`/`RemoveSlot` carry a `slotIndex` (0 =
+  whole container, 1..N = one item inside a bag); `BuildSyncRows` takes
+  BOTH a whole-container set and a per-slot-per-container set, and syncs
+  an item if either covers it. `SetBankDesignations` is GONE — replaced
+  by `ToggleBankContainer`/`ToggleBankItem` (single-position add/remove,
+  never a wholesale replace — this is what actually fixed the
+  "designation tied to the slot" framing's deeper bug: every OLD toggle
+  PUT the full rebuilt set from the current scan, silently dropping a
+  flag on any container missing from that scan, e.g. a moved bag's now-
+  empty old slot) plus `MarkAllContainersGuild`/`ClearAllBankDesignations`
+  for the bulk actions. `officerapi.UpdateBankDesignations` is the one
+  client method all of them call — its `set` param is a `*[]...` pointer
+  specifically so a genuine "clear everything" survives Go's JSON
+  `omitempty` (a plain slice can't tell "empty" apart from "field not
+  present").
 
 ## Status
 
