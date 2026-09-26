@@ -430,9 +430,11 @@ export function RemoveRollSession(id: string): $CancellablePromise<void> {
  * ResolveBankMove acts on one warning ScanGuildBank surfaced: "move" the
  * flag to where the bag/item was found (TargetContainer/TargetSlotIndex —
  * the warning's own SuggestedContainer/SuggestedSlotIndex, or an officer's
- * manual pick among Candidates), "keep" the flag where it is and accept
- * the current occupant as the new expected baseline (the officer decided
- * this position is correct as-is), or "unflag" it entirely. All three are
+ * manual pick among Candidates), carrying the CHASED identity
+ * (ExpectedItemID/Name) forward as the new position's baseline; "keep" the
+ * flag where it is and accept the CURRENT occupant there
+ * (FoundItemID/Name) as the new expected baseline (the officer decided
+ * this position is correct as-is); or "unflag" it entirely. All three are
  * one remove-then-add designations call — the same call the checkbox
  * toggles use — so a warning is always resolved through the ordinary
  * designation path, never a special one.

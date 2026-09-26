@@ -348,8 +348,16 @@ export interface PointValues {
  * ResolveBankMoveInput describes what to do about one detected bag/item
  * move — see internal/bankexport/moves.go's own doc comment for how a
  * warning is found in the first place, and BankMoveWarning for the shape
- * ScanGuildBank returns (FoundItemID/FoundItemName from that warning are
- * what the frontend should pass back here unchanged).
+ * ScanGuildBank returns. ExpectedItemID/ExpectedItemName and
+ * FoundItemID/FoundItemName should both come from that same warning,
+ * unchanged — they mean different things and "move" got this wrong until
+ * a real click-through session (2026-09-25) caught it: Expected is the
+ * identity being CHASED (what the flag is actually tracking, e.g. "Deluxe
+ * Toolbox"), Found is what's sitting at the OLD, now-abandoned position
+ * (e.g. a different bag that happens to be there now, or nothing). A
+ * "move" needs Expected as the new position's baseline — Found belongs to
+ * a slot this action is walking away from, and seeding the new position
+ * with it would silently start tracking the wrong item.
  */
 export interface ResolveBankMoveInput {
     "characterId": number;
@@ -363,6 +371,8 @@ export interface ResolveBankMoveInput {
     "action": string;
     "targetContainer": string;
     "targetSlotIndex": number;
+    "expectedItemId": number;
+    "expectedItemName": string;
     "foundItemId": number;
     "foundItemName": string;
 }

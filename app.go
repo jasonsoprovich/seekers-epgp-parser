@@ -1233,26 +1233,38 @@ func (a *App) ClearAllBankDesignations(characterID, eqAccountID int) error {
 // ResolveBankMoveInput describes what to do about one detected bag/item
 // move — see internal/bankexport/moves.go's own doc comment for how a
 // warning is found in the first place, and BankMoveWarning for the shape
-// ScanGuildBank returns (FoundItemID/FoundItemName from that warning are
-// what the frontend should pass back here unchanged).
+// ScanGuildBank returns. ExpectedItemID/ExpectedItemName and
+// FoundItemID/FoundItemName should both come from that same warning,
+// unchanged — they mean different things and "move" got this wrong until
+// a real click-through session (2026-09-25) caught it: Expected is the
+// identity being CHASED (what the flag is actually tracking, e.g. "Deluxe
+// Toolbox"), Found is what's sitting at the OLD, now-abandoned position
+// (e.g. a different bag that happens to be there now, or nothing). A
+// "move" needs Expected as the new position's baseline — Found belongs to
+// a slot this action is walking away from, and seeding the new position
+// with it would silently start tracking the wrong item.
 type ResolveBankMoveInput struct {
-	CharacterID     int    `json:"characterId"`
-	EqAccountID     int    `json:"eqAccountId"`
-	Container       string `json:"container"`
-	SlotIndex       int    `json:"slotIndex"`
-	Action          string `json:"action"` // "move" | "keep" | "unflag"
-	TargetContainer string `json:"targetContainer"`
-	TargetSlotIndex int    `json:"targetSlotIndex"`
-	FoundItemID     int    `json:"foundItemId"`
-	FoundItemName   string `json:"foundItemName"`
+	CharacterID      int    `json:"characterId"`
+	EqAccountID      int    `json:"eqAccountId"`
+	Container        string `json:"container"`
+	SlotIndex        int    `json:"slotIndex"`
+	Action           string `json:"action"` // "move" | "keep" | "unflag"
+	TargetContainer  string `json:"targetContainer"`
+	TargetSlotIndex  int    `json:"targetSlotIndex"`
+	ExpectedItemID   int    `json:"expectedItemId"`
+	ExpectedItemName string `json:"expectedItemName"`
+	FoundItemID      int    `json:"foundItemId"`
+	FoundItemName    string `json:"foundItemName"`
 }
 
 // ResolveBankMove acts on one warning ScanGuildBank surfaced: "move" the
 // flag to where the bag/item was found (TargetContainer/TargetSlotIndex —
 // the warning's own SuggestedContainer/SuggestedSlotIndex, or an officer's
-// manual pick among Candidates), "keep" the flag where it is and accept
-// the current occupant as the new expected baseline (the officer decided
-// this position is correct as-is), or "unflag" it entirely. All three are
+// manual pick among Candidates), carrying the CHASED identity
+// (ExpectedItemID/Name) forward as the new position's baseline; "keep" the
+// flag where it is and accept the CURRENT occupant there
+// (FoundItemID/Name) as the new expected baseline (the officer decided
+// this position is correct as-is); or "unflag" it entirely. All three are
 // one remove-then-add designations call — the same call the checkbox
 // toggles use — so a warning is always resolved through the ordinary
 // designation path, never a special one.
@@ -1273,7 +1285,7 @@ func (a *App) ResolveBankMove(input ResolveBankMoveInput) error {
 		if input.TargetContainer == "" {
 			return errors.New("no target position given")
 		}
-		add = []officerapi.DesignationSlot{{Container: input.TargetContainer, SlotIndex: input.TargetSlotIndex, ExpectedItemID: input.FoundItemID, ExpectedItemName: input.FoundItemName}}
+		add = []officerapi.DesignationSlot{{Container: input.TargetContainer, SlotIndex: input.TargetSlotIndex, ExpectedItemID: input.ExpectedItemID, ExpectedItemName: input.ExpectedItemName}}
 	default:
 		return fmt.Errorf("unknown action %q", input.Action)
 	}

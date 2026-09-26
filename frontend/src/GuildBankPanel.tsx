@@ -314,6 +314,14 @@ export function GuildBankPanel() {
         action,
         targetContainer: target?.container ?? w.suggestedContainer,
         targetSlotIndex: target?.slotIndex ?? w.suggestedSlotIndex,
+        // Expected is the identity being CHASED ("Deluxe Toolbox") — what
+        // a "move" should seed the new position with. Found is whatever's
+        // sitting at the OLD, abandoned position right now — what "keep"
+        // uses instead. Passing Found for "move" was a real bug caught by
+        // clicking through this exact flow (2026-09-25): it seeded the
+        // new slot's baseline with the wrong item entirely.
+        expectedItemId: w.expectedItemId,
+        expectedItemName: w.expectedItemName,
         foundItemId: w.foundItemId,
         foundItemName: w.foundItemName,
       });
