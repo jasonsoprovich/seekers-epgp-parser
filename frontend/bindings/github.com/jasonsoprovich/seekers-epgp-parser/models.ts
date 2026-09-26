@@ -60,28 +60,48 @@ export interface BankCharacterExport {
     /**
      * IsSharedBankHolder is true when this character is its account
      * group's designated SharedBank holder — only its SharedBank
-     * containers can ever be flagged guild (SetBankDesignations rejects
-     * the attempt otherwise, same rule the server enforces).
+     * containers can ever be flagged guild (a designation update on a
+     * non-holder is refused server-side, same rule the server enforces).
      */
     "isSharedBankHolder": boolean;
     "lastImport": officerapi$0.BankImportInfo | null;
+
+    /**
+     * MoveWarnings is every detected bag/item move for this character —
+     * empty when nothing looks moved. A non-empty list blocks this
+     * character from Preview/Submit Sync until each one is resolved.
+     */
+    "moveWarnings": BankMoveWarning[] | null;
 }
 
 /**
  * BankContainer is one top-level bag/bank slot, with Guild reflecting
- * whatever the website currently has designated for it — the toggle the
- * Guild Bank tab renders is just this field, read-modify-write via
- * SetBankDesignations.
+ * whether the WHOLE container is currently flagged on the website — the
+ * bag-level checkbox the Guild Bank tab renders. A container can also
+ * have some items individually flagged without Guild being true; see
+ * BankItem.Guild.
  */
 export interface BankContainer {
     "container": string;
     "kind": string;
     "number": number;
     "bagName": string;
+    "bagItemId": number;
     "capacity": number;
     "loose": boolean;
     "items": BankItem[] | null;
     "guild": boolean;
+}
+
+/**
+ * BankContainerSeed is one container to flag guild in bulk, carrying its
+ * current occupant along so the baseline is seeded immediately (see
+ * ToggleBankContainer).
+ */
+export interface BankContainerSeed {
+    "container": string;
+    "expectedItemId": number;
+    "expectedItemName": string;
 }
 
 export interface BankEquipped {
@@ -91,7 +111,11 @@ export interface BankEquipped {
 
 /**
  * BankItem is one item inside a BankContainer, JSON-shaped for the
- * frontend (mirrors bankexport.SlotItem).
+ * frontend (mirrors bankexport.SlotItem). Guild is this item's OWN
+ * effective flag — true either because the whole container is flagged
+ * (BankContainer.Guild) or because this specific slot is individually
+ * flagged (2026-09-25: finer-grained per-item designation, for a bag
+ * whose guild items are spread among personal ones).
  */
 export interface BankItem {
     "slotIndex": number;
@@ -99,6 +123,37 @@ export interface BankItem {
     "itemName": string;
     "itemId": number;
     "quantity": number;
+    "guild": boolean;
+}
+
+/**
+ * BankMoveCandidate is one plausible match for where a moved bag/item
+ * ended up (mirrors bankexport.MoveCandidate).
+ */
+export interface BankMoveCandidate {
+    "container": string;
+    "slotIndex": number;
+}
+
+/**
+ * BankMoveWarning is one designated position whose current occupant
+ * doesn't match what was expected — mirrors bankexport.MoveWarning. See
+ * that package's own doc comment for how this is detected and the status
+ * artifact linked from CLAUDE.md for the design rationale. A character
+ * with any unresolved warning is left out of a sync entirely (see
+ * buildBankSyncHolders) until the officer resolves it via ResolveBankMove.
+ */
+export interface BankMoveWarning {
+    "container": string;
+    "slotIndex": number;
+    "expectedItemId": number;
+    "expectedItemName": string;
+    "foundItemId": number;
+    "foundItemName": string;
+    "hasSuggestion": boolean;
+    "suggestedContainer": string;
+    "suggestedSlotIndex": number;
+    "candidates": BankMoveCandidate[] | null;
 }
 
 /**
@@ -110,6 +165,25 @@ export interface BankItem {
  */
 export interface BankSuggestedGroup {
     "characterNames": string[] | null;
+}
+
+/**
+ * BankSyncBlocked is one character excluded from a sync because it still
+ * has an unresolved bag/item-move warning — see ResolveBankMove.
+ */
+export interface BankSyncBlocked {
+    "character": string;
+    "warnings": number;
+}
+
+/**
+ * BankSyncResult wraps both return values PreviewBankSync/SubmitBankSync
+ * need into one struct — a Wails-bound method only carries one return
+ * value plus a trailing error (see CLAUDE.md's own gotcha about this).
+ */
+export interface BankSyncResult {
+    "diffs": officerapi$0.BankSyncDiff[] | null;
+    "blocked": BankSyncBlocked[] | null;
 }
 
 /**
@@ -268,6 +342,29 @@ export interface LogTailStatus {
 export interface PointValues {
     "ep": officerapi$0.PointValue[] | null;
     "gp": officerapi$0.PointValue[] | null;
+}
+
+/**
+ * ResolveBankMoveInput describes what to do about one detected bag/item
+ * move — see internal/bankexport/moves.go's own doc comment for how a
+ * warning is found in the first place, and BankMoveWarning for the shape
+ * ScanGuildBank returns (FoundItemID/FoundItemName from that warning are
+ * what the frontend should pass back here unchanged).
+ */
+export interface ResolveBankMoveInput {
+    "characterId": number;
+    "eqAccountId": number;
+    "container": string;
+    "slotIndex": number;
+
+    /**
+     * "move" | "keep" | "unflag"
+     */
+    "action": string;
+    "targetContainer": string;
+    "targetSlotIndex": number;
+    "foundItemId": number;
+    "foundItemName": string;
 }
 
 /**
