@@ -52,9 +52,9 @@ var sharedBankNumRe = regexp.MustCompile(`^SharedBank(\d+)`)
 type sharedBankClass int
 
 const (
-	notSharedBank sharedBankClass = iota
-	sharedBankReal                // real slot (1-10) or Bank-Coin — keep
-	sharedBankDead                // slot 11-30 — this server never populates it, drop
+	notSharedBank  sharedBankClass = iota
+	sharedBankReal                 // real slot (1-10) or Bank-Coin — keep
+	sharedBankDead                 // slot 11-30 — this server never populates it, drop
 )
 
 func classifySharedBank(location string) sharedBankClass {

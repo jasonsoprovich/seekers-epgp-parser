@@ -29,6 +29,164 @@ export interface AttendanceResult {
 }
 
 /**
+ * BankCharacterExport is one discovered export file, parsed and matched
+ * against the roster + the site's current designation config.
+ */
+export interface BankCharacterExport {
+    "character": string;
+    "sourceFile": string;
+    "exportedAt": string;
+    "equipped": BankEquipped[] | null;
+    "bags": BankContainer[] | null;
+    "bank": BankContainer[] | null;
+    "sharedBank": BankContainer[] | null;
+
+    /**
+     * SharedBankFingerprint is "" when this export's SharedBank is empty
+     * (bankexport.SharedBankFingerprint) — used client-side only for the
+     * account-grouping UI, not sent anywhere.
+     */
+    "sharedBankFingerprint": string;
+
+    /**
+     * RosterCharacterID is nil when no roster character matches this
+     * export's filename — the Guild Bank tab offers "Create mule" for
+     * these instead of showing containers to toggle.
+     */
+    "rosterCharacterId": number | null;
+    "rosterCharType": string;
+    "eqAccountId": number | null;
+
+    /**
+     * IsSharedBankHolder is true when this character is its account
+     * group's designated SharedBank holder — only its SharedBank
+     * containers can ever be flagged guild (a designation update on a
+     * non-holder is refused server-side, same rule the server enforces).
+     */
+    "isSharedBankHolder": boolean;
+    "lastImport": officerapi$0.BankImportInfo | null;
+
+    /**
+     * MoveWarnings is every detected bag/item move for this character —
+     * empty when nothing looks moved. A non-empty list blocks this
+     * character from Preview/Submit Sync until each one is resolved.
+     */
+    "moveWarnings": BankMoveWarning[] | null;
+}
+
+/**
+ * BankContainer is one top-level bag/bank slot, with Guild reflecting
+ * whether the WHOLE container is currently flagged on the website — the
+ * bag-level checkbox the Guild Bank tab renders. A container can also
+ * have some items individually flagged without Guild being true; see
+ * BankItem.Guild.
+ */
+export interface BankContainer {
+    "container": string;
+    "kind": string;
+    "number": number;
+    "bagName": string;
+    "bagItemId": number;
+    "capacity": number;
+    "loose": boolean;
+    "items": BankItem[] | null;
+    "guild": boolean;
+}
+
+/**
+ * BankContainerSeed is one container to flag guild in bulk, carrying its
+ * current occupant along so the baseline is seeded immediately (see
+ * ToggleBankContainer).
+ */
+export interface BankContainerSeed {
+    "container": string;
+    "expectedItemId": number;
+    "expectedItemName": string;
+}
+
+export interface BankEquipped {
+    "location": string;
+    "itemName": string;
+}
+
+/**
+ * BankItem is one item inside a BankContainer, JSON-shaped for the
+ * frontend (mirrors bankexport.SlotItem). Guild is this item's OWN
+ * effective flag — true either because the whole container is flagged
+ * (BankContainer.Guild) or because this specific slot is individually
+ * flagged (2026-09-25: finer-grained per-item designation, for a bag
+ * whose guild items are spread among personal ones).
+ */
+export interface BankItem {
+    "slotIndex": number;
+    "category": string;
+    "itemName": string;
+    "itemId": number;
+    "quantity": number;
+    "guild": boolean;
+}
+
+/**
+ * BankMoveCandidate is one plausible match for where a moved bag/item
+ * ended up (mirrors bankexport.MoveCandidate).
+ */
+export interface BankMoveCandidate {
+    "container": string;
+    "slotIndex": number;
+}
+
+/**
+ * BankMoveWarning is one designated position whose current occupant
+ * doesn't match what was expected — mirrors bankexport.MoveWarning. See
+ * that package's own doc comment for how this is detected and the status
+ * artifact linked from CLAUDE.md for the design rationale. A character
+ * with any unresolved warning is left out of a sync entirely (see
+ * buildBankSyncHolders) until the officer resolves it via ResolveBankMove.
+ */
+export interface BankMoveWarning {
+    "container": string;
+    "slotIndex": number;
+    "expectedItemId": number;
+    "expectedItemName": string;
+    "foundItemId": number;
+    "foundItemName": string;
+    "hasSuggestion": boolean;
+    "suggestedContainer": string;
+    "suggestedSlotIndex": number;
+    "candidates": BankMoveCandidate[] | null;
+}
+
+/**
+ * BankSuggestedGroup is an auto-detected "these characters look like the
+ * same EQ account" suggestion (matching, non-empty SharedBank
+ * fingerprints) for characters not already in a saved account group. The
+ * officer confirms or ignores it via SaveBankEqAccount — nothing is
+ * grouped automatically.
+ */
+export interface BankSuggestedGroup {
+    "characterNames": string[] | null;
+}
+
+/**
+ * BankSyncBlocked is one character excluded from a sync because it still
+ * has an unresolved bag/item-move warning — see ResolveBankMove.
+ */
+export interface BankSyncBlocked {
+    "character": string;
+    "warnings": number;
+}
+
+/**
+ * BankSyncResult wraps both return values PreviewBankSync/SubmitBankSync
+ * need into one struct — a Wails-bound method only carries one return
+ * value plus a trailing error (see CLAUDE.md's own gotcha about this).
+ */
+export interface BankSyncResult {
+    "diffs": officerapi$0.BankSyncDiff[] | null;
+    "blocked": BankSyncBlocked[] | null;
+}
+
+/**
  * BidRound is the state of one bid round the Bids tab renders. While Live
  * is true the poller re-emits this on "bids:round" every few seconds as
  * tells arrive; End Round & Review (EndBidRound) freezes it (Live false)
@@ -97,6 +255,20 @@ export interface GameDirInfo {
     "activePath": string;
     "activeChar": string;
     "activeServer": string;
+}
+
+export interface GuildBankState {
+    "gameDir": string;
+    "exports": BankCharacterExport[] | null;
+    "accounts": officerapi$0.BankEqAccount[] | null;
+    "suggestedGroups": BankSuggestedGroup[] | null;
+
+    /**
+     * Unmatched names a real export was found for but no roster character
+     * matches — surfaced separately so the UI can offer "Create mule"
+     * without cluttering Exports with an entry that has nothing to toggle.
+     */
+    "unmatchedCharacters": string[] | null;
 }
 
 /**
@@ -170,6 +342,39 @@ export interface LogTailStatus {
 export interface PointValues {
     "ep": officerapi$0.PointValue[] | null;
     "gp": officerapi$0.PointValue[] | null;
+}
+
+/**
+ * ResolveBankMoveInput describes what to do about one detected bag/item
+ * move — see internal/bankexport/moves.go's own doc comment for how a
+ * warning is found in the first place, and BankMoveWarning for the shape
+ * ScanGuildBank returns. ExpectedItemID/ExpectedItemName and
+ * FoundItemID/FoundItemName should both come from that same warning,
+ * unchanged — they mean different things and "move" got this wrong until
+ * a real click-through session (2026-09-25) caught it: Expected is the
+ * identity being CHASED (what the flag is actually tracking, e.g. "Deluxe
+ * Toolbox"), Found is what's sitting at the OLD, now-abandoned position
+ * (e.g. a different bag that happens to be there now, or nothing). A
+ * "move" needs Expected as the new position's baseline — Found belongs to
+ * a slot this action is walking away from, and seeding the new position
+ * with it would silently start tracking the wrong item.
+ */
+export interface ResolveBankMoveInput {
+    "characterId": number;
+    "eqAccountId": number;
+    "container": string;
+    "slotIndex": number;
+
+    /**
+     * "move" | "keep" | "unflag"
+     */
+    "action": string;
+    "targetContainer": string;
+    "targetSlotIndex": number;
+    "expectedItemId": number;
+    "expectedItemName": string;
+    "foundItemId": number;
+    "foundItemName": string;
 }
 
 /**

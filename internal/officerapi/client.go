@@ -221,6 +221,12 @@ func (c *Client) FetchCharacters(ctx context.Context) ([]Character, error) {
 type CreateCharacterRequest struct {
 	Name            string `json:"name"`
 	MainCharacterID *int   `json:"mainCharacterId,omitempty"`
+	// CharType is "mule" for a guild-bank mule created from the Guild Bank
+	// tab (PLAN.md §11 Phase 8.4) — omitted for the ordinary Attendance/
+	// Bids "no match" flow, which always creates a main or an alt. A mule
+	// attaches straight to the calling officer's own account server-side,
+	// never nests under a main the way an alt does.
+	CharType string `json:"charType,omitempty"`
 }
 
 func (c *Client) CreateCharacter(ctx context.Context, req CreateCharacterRequest) (Character, error) {
@@ -684,4 +690,203 @@ func (c *Client) FetchTotals(ctx context.Context, query string) ([]TotalsRow, er
 		return nil, err
 	}
 	return out.Totals, nil
+}
+
+// --- Guild bank (PLAN.md §9/§11 Phase 8.4) ---
+
+// BankEqAccount is one "these characters share a real EQ login" group
+// (bank_eq_accounts) — see src/lib/bank/sync.ts on the site.
+type BankEqAccount struct {
+	ID                          int    `json:"id"`
+	Label                       string `json:"label"`
+	SharedBankHolderCharacterID int    `json:"sharedBankHolderCharacterId"`
+	CharacterIDs                []int  `json:"characterIds"`
+}
+
+// BankImportInfo is the last sync recorded for one holder character.
+type BankImportInfo struct {
+	CharacterID       int    `json:"characterId"`
+	SourceFile        string `json:"sourceFile"`
+	RowCount          int    `json:"rowCount"`
+	ReportsSharedBank bool   `json:"reportsSharedBank"`
+	UploadedByName    string `json:"uploadedByName"`
+	CreatedAt         string `json:"createdAt"`
+}
+
+// DesignationSlot is one flagged position — SlotIndex 0 flags the WHOLE
+// top-level container (the bag and everything in it, or a loose item
+// sitting directly in the slot); 1..N flags only that one item inside a
+// bag (2026-09-25 officer feedback: finer-grained than whole-bag-only).
+// ExpectedItemID/ExpectedItemName is what was actually occupying this
+// position the last time it was flagged or synced — the baseline
+// internal/bankexport.DetectMoves compares a fresh scan against. Both
+// zero/"" until the first scan/sync sets them (mirrors the site's own
+// nullable columns — Go's encoding/json leaves a non-pointer field at its
+// zero value on a JSON `null`, so a plain int/string here is fine).
+type DesignationSlot struct {
+	Container        string `json:"container"`
+	SlotIndex        int    `json:"slotIndex"`
+	ExpectedItemID   int    `json:"expectedItemId"`
+	ExpectedItemName string `json:"expectedItemName"`
+}
+
+// RemoveSlot identifies one designated position to remove — just enough
+// to match a bank_slot_designations row, no expected-item baggage.
+type RemoveSlot struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+}
+
+// SyncedOccupant is what actually landed at one (container, slotIndex) on
+// a holder's most recent real sync — the config's broader "does this look
+// different since last sync" baseline, distinct from a DesignationSlot's
+// own expected occupant (which is scoped to a flagged position and
+// refreshed on every scan, not just a sync).
+type SyncedOccupant struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+	ItemID    int    `json:"itemId"`
+	ItemName  string `json:"itemName"`
+}
+
+// BankConfig is GET /api/officer/bank/config's response — every
+// designation, every EQ-account group, each holder's last sync, and each
+// holder's last-synced contents. PersonalDesignations/SharedDesignations/
+// SyncedContents are keyed by characterId/eqAccountId as a string (JSON
+// object keys are always strings; the app re-parses them to int on
+// receipt).
+type BankConfig struct {
+	PersonalDesignations map[string][]DesignationSlot `json:"personalDesignations"`
+	SharedDesignations   map[string][]DesignationSlot `json:"sharedDesignations"`
+	Accounts             []BankEqAccount              `json:"accounts"`
+	LastImports          map[string]BankImportInfo    `json:"lastImports"`
+	SyncedContents       map[string][]SyncedOccupant  `json:"syncedContents"`
+}
+
+func (c *Client) FetchBankConfig(ctx context.Context) (BankConfig, error) {
+	var out BankConfig
+	err := c.do(ctx, http.MethodGet, "/api/officer/bank/config", nil, &out)
+	return out, err
+}
+
+type updateDesignationsRequest struct {
+	CharacterID int `json:"characterId,omitempty"`
+	EqAccountID int `json:"eqAccountId,omitempty"`
+	// Set is a pointer so a genuine "clear everything" (`*set = []`) can be
+	// told apart from "not touching `set` at all" (`set == nil`) — a plain
+	// slice can't: Go's `omitempty` drops an empty slice exactly the same
+	// as a nil one, which would silently turn "Clear all personal
+	// designations" into a no-op request.
+	Set    *[]DesignationSlot `json:"set,omitempty"`
+	Add    []DesignationSlot  `json:"add,omitempty"`
+	Remove []RemoveSlot       `json:"remove,omitempty"`
+}
+
+// UpdateBankDesignations mutates one owner's guild-flagged positions —
+// pass exactly one of characterID/eqAccountID (the other zero), matching
+// the site's own "exactly one owner" validation. set replaces the WHOLE
+// list ("Mark all Bank slots guild" / "Clear all personal designations");
+// add/remove touch only the listed positions, leaving every other flag
+// untouched — this is what an individual checkbox toggle uses, and what
+// fixes the pre-2026-09-25 bug where every toggle PUT the whole rebuilt
+// set, silently dropping a flag on a container missing from the current
+// scan (e.g. a moved bag's now-empty old slot). Pass nil for any of
+// set/add/remove not being used.
+func (c *Client) UpdateBankDesignations(ctx context.Context, characterID, eqAccountID int, set *[]DesignationSlot, add []DesignationSlot, remove []RemoveSlot) error {
+	body := updateDesignationsRequest{CharacterID: characterID, EqAccountID: eqAccountID, Set: set, Add: add, Remove: remove}
+	return c.do(ctx, http.MethodPut, "/api/officer/bank/designations", body, nil)
+}
+
+// SaveBankAccountRequest creates (ID zero) or updates (ID set) an EQ
+// account group.
+type SaveBankAccountRequest struct {
+	ID                          int    `json:"id,omitempty"`
+	Label                       string `json:"label"`
+	CharacterIDs                []int  `json:"characterIds"`
+	SharedBankHolderCharacterID int    `json:"sharedBankHolderCharacterId"`
+}
+
+func (c *Client) SaveBankAccount(ctx context.Context, req SaveBankAccountRequest) (int, error) {
+	var out struct {
+		ID int `json:"id"`
+	}
+	err := c.do(ctx, http.MethodPut, "/api/officer/bank/accounts", req, &out)
+	return out.ID, err
+}
+
+func (c *Client) DeleteBankAccount(ctx context.Context, id int) error {
+	return c.do(ctx, http.MethodDelete, "/api/officer/bank/accounts", map[string]int{"id": id}, nil)
+}
+
+// BankSyncRow is one physical stack in a sync payload — shaped exactly
+// like bankexport.Holding, kept as its own type here so this package
+// doesn't take a dependency on bankexport just for a JSON shape.
+type BankSyncRow struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+	Category  string `json:"category"`
+	ItemName  string `json:"itemName"`
+	ItemID    int    `json:"itemId"`
+	Quantity  int    `json:"quantity"`
+}
+
+// BankSyncHolder is one character's rows in a sync payload. Occupants
+// tells the server what's currently sitting at each of this holder's
+// designated positions, so it can refresh each designation's expected_*
+// baseline for next time (src/lib/bank/sync.ts's applySync) — distinct
+// from Rows, which is only the items inside a FLAGGED container/slot; a
+// designation's own position (the bag itself, at SlotIndex 0) is never a
+// Row, so without Occupants the server would have nothing to compare a
+// bag's identity against on the next scan.
+type BankSyncHolder struct {
+	CharacterID       int              `json:"characterId"`
+	SourceFile        string           `json:"sourceFile,omitempty"`
+	ReportsSharedBank bool             `json:"reportsSharedBank"`
+	Rows              []BankSyncRow    `json:"rows"`
+	Occupants         []SyncedOccupant `json:"occupants"`
+}
+
+type bankSyncRequest struct {
+	DryRun  bool             `json:"dryRun"`
+	Holders []BankSyncHolder `json:"holders"`
+}
+
+// BankSyncDiffRow is one row of a diff — added/removed/changed.
+type BankSyncDiffRow struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+	ItemName  string `json:"itemName"`
+	Quantity  int    `json:"quantity"`
+}
+
+// BankSyncDiff is one holder's result — what changed for a real sync, or
+// what would change for a dry-run preview.
+type BankSyncDiff struct {
+	CharacterID int               `json:"characterId"`
+	Added       []BankSyncDiffRow `json:"added"`
+	Removed     []BankSyncDiffRow `json:"removed"`
+	Changed     []struct {
+		Before BankSyncDiffRow `json:"before"`
+		After  BankSyncDiffRow `json:"after"`
+	} `json:"changed"`
+	Unchanged int `json:"unchanged"`
+}
+
+type bankSyncResponse struct {
+	Applied bool           `json:"applied"`
+	Diffs   []BankSyncDiff `json:"diffs"`
+}
+
+// SyncBank posts a sync payload — dryRun true previews (writes nothing),
+// dryRun false actually applies it. The server independently re-validates
+// every row against the live designation config (never trusts this app's
+// own filtering alone) — a 422 here means a designation changed out from
+// under this sync, not a bug in what was sent.
+func (c *Client) SyncBank(ctx context.Context, dryRun bool, holders []BankSyncHolder) ([]BankSyncDiff, error) {
+	if holders == nil {
+		holders = []BankSyncHolder{}
+	}
+	var out bankSyncResponse
+	err := c.do(ctx, http.MethodPost, "/api/officer/bank/sync", bankSyncRequest{DryRun: dryRun, Holders: holders}, &out)
+	return out.Diffs, err
 }

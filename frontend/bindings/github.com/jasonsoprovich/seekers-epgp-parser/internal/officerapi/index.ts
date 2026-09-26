@@ -4,6 +4,10 @@
 export type {
     AttendanceCheck,
     AttendanceResponse,
+    BankEqAccount,
+    BankImportInfo,
+    BankSyncDiff,
+    BankSyncDiffRow,
     BidEntry,
     BidsResponse,
     Character,
@@ -11,6 +15,7 @@ export type {
     LedgerRow,
     ManualEntryRequest,
     PointValue,
+    SaveBankAccountRequest,
     Settings,
     TotalsRow
 } from "./models.js";

@@ -295,6 +295,89 @@ or just use `wails3 build`, which does both.
   between captures within one event (main at Raid-Start, alt at Raid-End) —
   the server dedupes by player and logs the swap (PLAN.md §4h-1). Don't
   silently drop such rows client-side; let the officer see them.
+- **Guild Bank designation and account-holder rules are re-checked
+  server-side, never trusted from this app alone** (PLAN.md §9/§11 Phase
+  8.4). `internal/bankexport.BuildSyncRows` only ever includes a container
+  actually flagged guild in `GuildBankState`, and `SetBankDesignations`
+  refuses a SharedBank container from a personal owner (and vice versa) —
+  but the real enforcement is `src/lib/bank/sync.ts`'s
+  `validateSyncPayload` on the tracker side, which independently
+  re-resolves every row against live designations at sync time. Don't
+  relax either side on the assumption the other one already caught it.
+- **A bag's own descriptor row is never a holding, only its contents are**
+  (`internal/bankexport/inventory.go`'s `buildContainers`) — told apart by
+  the export's own `Slots` column (`Holding.BagSlots`): `> 0` means this
+  row IS a bag (its `ItemName`/`ItemID` describe the bag, not something to
+  sync), `== 0` means a loose item sits directly in that top-level slot
+  with no bag at all, and the item itself is the holding. Getting this
+  backwards would sync every character's ordinary backpacks as if they
+  were guild loot.
+- **`SharedBankFingerprint` only ever suggests a grouping, never assigns
+  one** — an empty SharedBank fingerprints to `""` specifically so two
+  characters with nothing in their shared bank never look like a match.
+  The officer always confirms (or edits) a suggested `bank_eq_accounts`
+  group via `SaveBankEqAccount`; nothing is grouped automatically.
+- **A real item's `Count/Charges` can legitimately be `0`** (found
+  2026-09-24 via a real click-through against Darkclaw's export — two
+  "Forge of Icewell Arms" rows). Not every non-stacking item is
+  charge-based, and Zeal writes `0` there regardless — `toHolding`
+  (`reader.go`) coerces any non-currency `count == 0` to `1`, same as
+  pq-companion's own reader.go this package was ported from. Don't
+  "simplify" this away — the server rejects a zero/negative quantity
+  outright, so a regression here breaks Preview Sync on any real
+  character carrying one of these.
+- **A designation being tied to the SLOT is now DETECTED, not silently
+  missed — resolved 2026-09-25** (was an open limitation found
+  2026-09-24). `internal/bankexport.DetectMoves` compares every
+  designated position's `expected_item_id`/`ExpectedItemName` (the
+  officerapi `DesignationSlot`'s own baseline, refreshed on every real
+  sync via `occupantsFor`) against a fresh scan. A mismatch is still
+  genuinely ambiguous when two bags of the same type exist — real
+  Darkclaw data has five identical "Hand Made Backpack" bags — so
+  `DetectMoves` never guesses at a single match in that case; it returns
+  every plausible `Candidates` entry and leaves `HasSuggestion` false,
+  and the UI offers a pick list instead of a wrong auto-move. A
+  character with ANY unresolved warning is excluded from Preview/Submit
+  Sync entirely (`buildBankSyncHolders`/`BankSyncBlocked`) until the
+  officer resolves it via `ResolveBankMove` (move/keep/unflag — always
+  one remove-then-add designations call, same primitive the ordinary
+  checkboxes use). The old "empty — bag moved?" badge is now the
+  fallback shown only when DetectMoves found zero candidates at all; a
+  real warning with a suggestion or pick list gets its own card instead.
+  See the status page (https://claude.ai/artifact/TxQZM3baZsEeKDHBe15fZb,
+  also linked from PLAN.md §9) for the full design writeup — it's kept
+  current, re-read it before touching this again.
+- **"Move flag" must seed the new position with the CHASED identity, not
+  the old slot's current occupant — real bug, found 2026-09-25 by
+  actually clicking through the flow above** (fixed same day,
+  `ResolveBankMove`). It's easy to get this backwards: a warning's
+  `FoundItemID`/`FoundItemName` is what's sitting at the OLD, abandoned
+  position right now (correct for "keep", which re-baselines that SAME
+  position) — but "move" needs `ExpectedItemID`/`ExpectedItemName`, the
+  identity the flag is actually tracking, as the NEW position's baseline.
+  Passing Found for a move silently starts tracking the wrong item and
+  immediately produces a second bogus warning on the very next scan. If
+  you touch `ResolveBankMove` or `resolveWarning` again, re-verify with a
+  real simulated move (flag a container, edit an export file's Location
+  columns to relabel two containers, rescan, resolve, rescan again and
+  confirm zero warnings) — this is exactly the kind of thing unit tests
+  over synthetic fixtures don't catch, only a real end-to-end pass does.
+- **Per-item (not just whole-bag) designation, added 2026-09-25.**
+  `officerapi.DesignationSlot`/`RemoveSlot` carry a `slotIndex` (0 =
+  whole container, 1..N = one item inside a bag); `BuildSyncRows` takes
+  BOTH a whole-container set and a per-slot-per-container set, and syncs
+  an item if either covers it. `SetBankDesignations` is GONE — replaced
+  by `ToggleBankContainer`/`ToggleBankItem` (single-position add/remove,
+  never a wholesale replace — this is what actually fixed the
+  "designation tied to the slot" framing's deeper bug: every OLD toggle
+  PUT the full rebuilt set from the current scan, silently dropping a
+  flag on any container missing from that scan, e.g. a moved bag's now-
+  empty old slot) plus `MarkAllContainersGuild`/`ClearAllBankDesignations`
+  for the bulk actions. `officerapi.UpdateBankDesignations` is the one
+  client method all of them call — its `set` param is a `*[]...` pointer
+  specifically so a genuine "clear everything" survives Go's JSON
+  `omitempty` (a plain slice can't tell "empty" apart from "field not
+  present").
 
 ## Status
 

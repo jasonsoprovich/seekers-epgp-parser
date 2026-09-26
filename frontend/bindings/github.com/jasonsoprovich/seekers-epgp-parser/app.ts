@@ -124,12 +124,31 @@ export function CheckForUpdate(): $CancellablePromise<$models.UpdateInfo> {
 }
 
 /**
+ * ClearAllBankDesignations wholesale-clears an owner's designations — the
+ * one bulk action that's a real "replace with nothing" rather than
+ * add/remove, since "clear everything" has no "leave other flags alone"
+ * nuance to preserve.
+ */
+export function ClearAllBankDesignations(characterID: number, eqAccountID: number): $CancellablePromise<void> {
+    return $Call.ByID(3085203971, characterID, eqAccountID);
+}
+
+/**
  * ClearAllRolls hides every currently-tracked roll session — a fresh
  * /random anywhere starts a brand-new one. Nothing is deleted from the
  * log itself; this only affects what the Rolls tab shows.
  */
 export function ClearAllRolls(): $CancellablePromise<void> {
     return $Call.ByID(2552100915);
+}
+
+/**
+ * CreateBankMule creates a brand-new mule character, attached to the
+ * calling officer's own account server-side — for an export whose
+ * filename matches no roster character yet.
+ */
+export function CreateBankMule(name: string): $CancellablePromise<officerapi$0.Character> {
+    return $Call.ByID(3757296726, name);
 }
 
 /**
@@ -145,6 +164,10 @@ export function ClearAllRolls(): $CancellablePromise<void> {
  */
 export function CurrentLogCharacter(): $CancellablePromise<string> {
     return $Call.ByID(2012932359);
+}
+
+export function DeleteBankEqAccount(id: number): $CancellablePromise<void> {
+    return $Call.ByID(2002968089, id);
 }
 
 /**
@@ -336,6 +359,19 @@ export function ListAttendanceSnapshots(lookbackHours: number): $CancellableProm
 }
 
 /**
+ * MarkAllContainersGuild flags every listed container at once — "Mark all
+ * Bank slots guild" / "Mark all Bags guild". Always uses add, never a
+ * wholesale replace, so existing flags for OTHER containers (any kind,
+ * any sub-item flags) are left alone — this is what fixes the
+ * pre-2026-09-25 bug where a full-set replace silently dropped a flag on
+ * a container missing from the current scan (e.g. a moved bag's now-empty
+ * old slot).
+ */
+export function MarkAllContainersGuild(characterID: number, eqAccountID: number, containers: $models.BankContainerSeed[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2285521906, characterID, eqAccountID, containers);
+}
+
+/**
  * OpenAppKeyPage opens the site's app-key generation page in the
  * officer's default browser, so getting set up is "click this, paste the
  * key back in" rather than typing a URL by hand.
@@ -373,6 +409,14 @@ export function ParseAttendanceText(raw: string): $CancellablePromise<$models.At
 }
 
 /**
+ * PreviewBankSync shows what a real sync would change, without writing
+ * anything — same payload SubmitBankSync sends, just with dryRun=true.
+ */
+export function PreviewBankSync(): $CancellablePromise<$models.BankSyncResult> {
+    return $Call.ByID(1954047010);
+}
+
+/**
  * RemoveRollSession hides one session from the Rolls tab entirely (a test
  * /random, or a range that wasn't actually a loot roll) and, like Stop,
  * forces the next roll in the same range to start fresh rather than
@@ -380,6 +424,23 @@ export function ParseAttendanceText(raw: string): $CancellablePromise<$models.At
  */
 export function RemoveRollSession(id: string): $CancellablePromise<void> {
     return $Call.ByID(1084244466, id);
+}
+
+/**
+ * ResolveBankMove acts on one warning ScanGuildBank surfaced: "move" the
+ * flag to where the bag/item was found (TargetContainer/TargetSlotIndex —
+ * the warning's own SuggestedContainer/SuggestedSlotIndex, or an officer's
+ * manual pick among Candidates), carrying the CHASED identity
+ * (ExpectedItemID/Name) forward as the new position's baseline; "keep" the
+ * flag where it is and accept the CURRENT occupant there
+ * (FoundItemID/Name) as the new expected baseline (the officer decided
+ * this position is correct as-is); or "unflag" it entirely. All three are
+ * one remove-then-add designations call — the same call the checkbox
+ * toggles use — so a warning is always resolved through the ordinary
+ * designation path, never a special one.
+ */
+export function ResolveBankMove(input: $models.ResolveBankMoveInput): $CancellablePromise<void> {
+    return $Call.ByID(1979867280, input);
 }
 
 /**
@@ -391,8 +452,30 @@ export function ResolveNoBidRound(itemName: string, roundID: string): $Cancellab
     return $Call.ByID(2519945105, itemName, roundID);
 }
 
+/**
+ * SaveBankEqAccount creates or updates a "these characters share a real
+ * EQ account" group — confirming (or overriding) one of ScanGuildBank's
+ * SuggestedGroups, or a manual grouping.
+ */
+export function SaveBankEqAccount(req: officerapi$0.SaveBankAccountRequest): $CancellablePromise<number> {
+    return $Call.ByID(2236179599, req);
+}
+
 export function SaveSettings(apiKey: string): $CancellablePromise<void> {
     return $Call.ByID(1949631069, apiKey);
+}
+
+/**
+ * ScanGuildBank discovers every Zeal inventory export in the configured
+ * EverQuest folder, parses each, and matches it against the roster and
+ * the site's current guild/personal designations — everything the Guild
+ * Bank tab needs to render, including any detected bag/item moves. Never
+ * caches between calls: a fresh scan is cheap (local files + two small
+ * API calls) and always reflects the latest export off disk and the
+ * latest designations another officer may have just saved.
+ */
+export function ScanGuildBank(): $CancellablePromise<$models.GuildBankState> {
+    return $Call.ByID(4047222393);
 }
 
 /**
@@ -503,6 +586,13 @@ export function SubmitAttendance(activity: string, occurredAt: string, names: st
 }
 
 /**
+ * SubmitBankSync actually applies the sync.
+ */
+export function SubmitBankSync(): $CancellablePromise<$models.BankSyncResult> {
+    return $Call.ByID(709946232);
+}
+
+/**
  * SubmitBids records every remaining row from the Bids tab as a bid (won
  * or lost) and charges GP to whichever one is flagged as the winner —
  * exactly one entry must have IsWinner set, which the frontend's
@@ -571,4 +661,27 @@ export function SwitchBidRound(nextItem: string, announcedAt: string): $Cancella
  */
 export function TestConnection(): $CancellablePromise<number> {
     return $Call.ByID(1257240193);
+}
+
+/**
+ * ToggleBankContainer flags/unflags an ENTIRE top-level container (the bag
+ * and everything in it) for one character's personal Bank/General slots,
+ * or (eqAccountID set instead) an EQ account's SharedBank slots — pass
+ * exactly one of characterID/eqAccountID, mirroring the site's own
+ * "exactly one owner" rule. expectedItemID/expectedItemName seed the
+ * move-detection baseline immediately from the current scan when flagging
+ * on, rather than waiting for the first sync to set it.
+ */
+export function ToggleBankContainer(characterID: number, eqAccountID: number, container: string, guild: boolean, expectedItemID: number, expectedItemName: string): $CancellablePromise<void> {
+    return $Call.ByID(2973327450, characterID, eqAccountID, container, guild, expectedItemID, expectedItemName);
+}
+
+/**
+ * ToggleBankItem flags/unflags ONE item inside a bag — finer-grained than
+ * ToggleBankContainer (2026-09-25 officer feedback: "the ability to check
+ * off the individual items within each bag in case things are spread
+ * around"). Same owner/argument shape as ToggleBankContainer.
+ */
+export function ToggleBankItem(characterID: number, eqAccountID: number, container: string, slotIndex: number, guild: boolean, itemID: number, itemName: string): $CancellablePromise<void> {
+    return $Call.ByID(2917885368, characterID, eqAccountID, container, slotIndex, guild, itemID, itemName);
 }

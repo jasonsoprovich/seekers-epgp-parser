@@ -661,3 +661,252 @@ tr.leading td {
   font-size: 11px;
   margin: 20px 0 0;
 }
+
+/* --- Guild Bank tab (PLAN.md §9/§11 Phase 8.4) --- */
+
+.bank-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.bank-sidebar {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bank-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bank-sidebar-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  margin-bottom: 2px;
+}
+
+.bank-char-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #10151f;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.bank-char-row:hover {
+  border-color: #374151;
+}
+
+.bank-char-row-active {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.bank-char-row-unmatched {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.bank-char-row-name {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+}
+
+.bank-char-row-meta {
+  color: #6b7280;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.bank-account-card {
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #10151f;
+}
+
+.bank-account-card-suggested {
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.bank-account-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.bank-account-card-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.bank-detail {
+  flex: 1;
+  min-width: 0;
+}
+
+.bank-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.bank-section {
+  margin-top: 16px;
+}
+
+.bank-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #d1d5db;
+  margin-bottom: 8px;
+}
+
+.bank-section summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d1d5db;
+}
+
+.bank-container-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.bank-container-card {
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #10151f;
+}
+
+.bank-container-card-guild {
+  border-color: rgba(251, 191, 36, 0.5);
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.bank-container-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bank-container-toggle-open {
+  background: none;
+  border: none;
+  color: #d1d5db;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.bank-guild-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #9ca3af;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bank-item-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bank-item {
+  font-size: 12px;
+  color: #9ca3af;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bank-item-qty {
+  color: #6b7280;
+}
+
+.bank-item-empty {
+  font-size: 12px;
+  color: #4b5563;
+  font-style: italic;
+}
+
+.bank-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.bank-modal {
+  background: #131a26;
+  border: 1px solid #2a3550;
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 480px;
+  width: calc(100% - 48px);
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.bank-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #9ca3af;
+  margin-bottom: 14px;
+}
+
+.bank-modal-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.bank-modal-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d1d5db;
+  cursor: pointer;
+}
