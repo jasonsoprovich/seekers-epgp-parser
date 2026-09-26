@@ -196,23 +196,30 @@ func SharedBankFingerprint(exp *Export) string {
 
 // BuildSyncRows is the ONLY path that turns an Inventory into upload rows
 // — everything else (the Guild Bank tab's toggles, the preview modal) is
-// display. guildContainers is the set of container names ("Bank12",
-// "SharedBank2") the officer has flagged guild on the website for this
-// character (personal) or its EQ account group (shared); a container not
-// in that set is never synced, full stop — this is the local half of the
-// "personal items never uploaded" guarantee (the server re-validates the
-// same rule independently, never trusting this filtering alone). A bag's
-// own descriptor row is never included — only its contents (or, for a
-// loose top-level item, that one item).
-func BuildSyncRows(inv *Inventory, guildContainers map[string]bool, includeSharedBank bool) []Holding {
+// display. wholeContainers is the set of container names ("Bank12",
+// "SharedBank2") flagged guild in their ENTIRETY on the website (the bag
+// and everything in it); subSlots is, per container, the set of
+// individual item slot indexes flagged guild on their own — finer-grained
+// per-item designation, added 2026-09-25 for a bag whose guild items are
+// spread among personal ones. An item is synced if its container is
+// whole-flagged OR its own slot is sub-flagged; nothing else is, full
+// stop — this is the local half of the "personal items never uploaded"
+// guarantee (the server re-validates the same rule independently, never
+// trusting this filtering alone). A bag's own descriptor row is never
+// included — only its contents (or, for a loose top-level item, that one
+// item, always via a whole-container flag since a loose slot has no
+// sub-slots to flag individually).
+func BuildSyncRows(inv *Inventory, wholeContainers map[string]bool, subSlots map[string]map[int]bool, includeSharedBank bool) []Holding {
 	var out []Holding
 
 	appendFrom := func(containers []Container) {
 		for _, c := range containers {
-			if !guildContainers[c.Container] {
-				continue
-			}
+			whole := wholeContainers[c.Container]
+			sub := subSlots[c.Container]
 			for _, item := range c.Items {
+				if !whole && !sub[item.SlotIndex] {
+					continue
+				}
 				out = append(out, Holding{
 					Container: c.Container,
 					SlotIndex: item.SlotIndex,

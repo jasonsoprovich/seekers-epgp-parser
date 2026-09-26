@@ -116,9 +116,11 @@ func TestBuildSyncRows(t *testing.T) {
 		t.Fatalf("ParseExport: %v", err)
 	}
 	inv := BuildInventory(exp)
+	noSubSlots := map[string]map[int]bool{}
 
-	// Only General1 designated guild — Bank2 and SharedBank1 must not appear.
-	rows := BuildSyncRows(inv, map[string]bool{"General1": true}, false)
+	// Only General1 designated guild (whole-container) — Bank2 and
+	// SharedBank1 must not appear.
+	rows := BuildSyncRows(inv, map[string]bool{"General1": true}, noSubSlots, false)
 	if len(rows) != 1 || rows[0].ItemName != "Health Potion" {
 		t.Errorf("rows = %+v, want just Health Potion from General1", rows)
 	}
@@ -129,25 +131,25 @@ func TestBuildSyncRows(t *testing.T) {
 	}
 
 	// Bank2 (loose item, no bag) designated guild: the item itself syncs.
-	rows = BuildSyncRows(inv, map[string]bool{"Bank2": true}, false)
+	rows = BuildSyncRows(inv, map[string]bool{"Bank2": true}, noSubSlots, false)
 	if len(rows) != 1 || rows[0].ItemName != "Test Ore" {
 		t.Errorf("rows = %+v, want just Test Ore from Bank2", rows)
 	}
 
 	// SharedBank1 designated but includeSharedBank=false: nothing syncs.
-	rows = BuildSyncRows(inv, map[string]bool{"SharedBank1": true}, false)
+	rows = BuildSyncRows(inv, map[string]bool{"SharedBank1": true}, noSubSlots, false)
 	if len(rows) != 0 {
 		t.Errorf("rows = %+v, want none — includeSharedBank was false", rows)
 	}
 
 	// Same designation with includeSharedBank=true: the bag's contents sync.
-	rows = BuildSyncRows(inv, map[string]bool{"SharedBank1": true}, true)
+	rows = BuildSyncRows(inv, map[string]bool{"SharedBank1": true}, noSubSlots, true)
 	if len(rows) != 1 || rows[0].ItemName != "Shared Item A" {
 		t.Errorf("rows = %+v, want just Shared Item A from SharedBank1", rows)
 	}
 
 	// Nothing designated: nothing syncs, and the result is never nil.
-	rows = BuildSyncRows(inv, map[string]bool{}, true)
+	rows = BuildSyncRows(inv, map[string]bool{}, noSubSlots, true)
 	if rows == nil {
 		t.Error("BuildSyncRows must never return a nil slice")
 	}
@@ -156,8 +158,22 @@ func TestBuildSyncRows(t *testing.T) {
 	}
 
 	// Currency is never syncable even if its container is somehow flagged.
-	rows = BuildSyncRows(inv, map[string]bool{"General-Coin": true, "Bank-Coin": true}, true)
+	rows = BuildSyncRows(inv, map[string]bool{"General-Coin": true, "Bank-Coin": true}, noSubSlots, true)
 	if len(rows) != 0 {
 		t.Errorf("currency containers produced rows: %+v", rows)
+	}
+
+	// 2026-09-25: a sub-slot-only designation (General1's bag NOT
+	// whole-flagged, just its one item) syncs only that item.
+	rows = BuildSyncRows(inv, map[string]bool{}, map[string]map[int]bool{"General1": {1: true}}, false)
+	if len(rows) != 1 || rows[0].ItemName != "Health Potion" || rows[0].SlotIndex != 1 {
+		t.Errorf("rows = %+v, want just the sub-flagged Health Potion at slot 1", rows)
+	}
+
+	// A whole-container flag implies every sub-slot regardless of what the
+	// (empty, in this case) subSlots map says for it.
+	rows = BuildSyncRows(inv, map[string]bool{"General1": true}, map[string]map[int]bool{"Bank2": {1: true}}, false)
+	if len(rows) != 1 || rows[0].ItemName != "Health Potion" {
+		t.Errorf("rows = %+v, want General1's whole-container flag to still cover its item", rows)
 	}
 }
