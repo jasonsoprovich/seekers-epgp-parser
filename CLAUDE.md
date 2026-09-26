@@ -347,6 +347,21 @@ or just use `wails3 build`, which does both.
   See the status page (https://claude.ai/artifact/TxQZM3baZsEeKDHBe15fZb,
   also linked from PLAN.md §9) for the full design writeup — it's kept
   current, re-read it before touching this again.
+- **"Move flag" must seed the new position with the CHASED identity, not
+  the old slot's current occupant — real bug, found 2026-09-25 by
+  actually clicking through the flow above** (fixed same day,
+  `ResolveBankMove`). It's easy to get this backwards: a warning's
+  `FoundItemID`/`FoundItemName` is what's sitting at the OLD, abandoned
+  position right now (correct for "keep", which re-baselines that SAME
+  position) — but "move" needs `ExpectedItemID`/`ExpectedItemName`, the
+  identity the flag is actually tracking, as the NEW position's baseline.
+  Passing Found for a move silently starts tracking the wrong item and
+  immediately produces a second bogus warning on the very next scan. If
+  you touch `ResolveBankMove` or `resolveWarning` again, re-verify with a
+  real simulated move (flag a container, edit an export file's Location
+  columns to relabel two containers, rescan, resolve, rescan again and
+  confirm zero warnings) — this is exactly the kind of thing unit tests
+  over synthetic fixtures don't catch, only a real end-to-end pass does.
 - **Per-item (not just whole-bag) designation, added 2026-09-25.**
   `officerapi.DesignationSlot`/`RemoveSlot` carry a `slotIndex` (0 =
   whole container, 1..N = one item inside a bag); `BuildSyncRows` takes
