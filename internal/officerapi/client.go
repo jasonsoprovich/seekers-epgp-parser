@@ -713,16 +713,54 @@ type BankImportInfo struct {
 	CreatedAt         string `json:"createdAt"`
 }
 
+// DesignationSlot is one flagged position — SlotIndex 0 flags the WHOLE
+// top-level container (the bag and everything in it, or a loose item
+// sitting directly in the slot); 1..N flags only that one item inside a
+// bag (2026-09-25 officer feedback: finer-grained than whole-bag-only).
+// ExpectedItemID/ExpectedItemName is what was actually occupying this
+// position the last time it was flagged or synced — the baseline
+// internal/bankexport.DetectMoves compares a fresh scan against. Both
+// zero/"" until the first scan/sync sets them (mirrors the site's own
+// nullable columns — Go's encoding/json leaves a non-pointer field at its
+// zero value on a JSON `null`, so a plain int/string here is fine).
+type DesignationSlot struct {
+	Container        string `json:"container"`
+	SlotIndex        int    `json:"slotIndex"`
+	ExpectedItemID   int    `json:"expectedItemId"`
+	ExpectedItemName string `json:"expectedItemName"`
+}
+
+// RemoveSlot identifies one designated position to remove — just enough
+// to match a bank_slot_designations row, no expected-item baggage.
+type RemoveSlot struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+}
+
+// SyncedOccupant is what actually landed at one (container, slotIndex) on
+// a holder's most recent real sync — the config's broader "does this look
+// different since last sync" baseline, distinct from a DesignationSlot's
+// own expected occupant (which is scoped to a flagged position and
+// refreshed on every scan, not just a sync).
+type SyncedOccupant struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+	ItemID    int    `json:"itemId"`
+	ItemName  string `json:"itemName"`
+}
+
 // BankConfig is GET /api/officer/bank/config's response — every
-// designation, every EQ-account group, and each holder's last sync.
-// PersonalDesignations/SharedDesignations are keyed by characterId/
-// eqAccountId as a string (JSON object keys are always strings; the app
-// re-parses them to int on receipt).
+// designation, every EQ-account group, each holder's last sync, and each
+// holder's last-synced contents. PersonalDesignations/SharedDesignations/
+// SyncedContents are keyed by characterId/eqAccountId as a string (JSON
+// object keys are always strings; the app re-parses them to int on
+// receipt).
 type BankConfig struct {
-	PersonalDesignations map[string][]string       `json:"personalDesignations"`
-	SharedDesignations   map[string][]string       `json:"sharedDesignations"`
-	Accounts             []BankEqAccount           `json:"accounts"`
-	LastImports          map[string]BankImportInfo `json:"lastImports"`
+	PersonalDesignations map[string][]DesignationSlot `json:"personalDesignations"`
+	SharedDesignations   map[string][]DesignationSlot `json:"sharedDesignations"`
+	Accounts             []BankEqAccount              `json:"accounts"`
+	LastImports          map[string]BankImportInfo    `json:"lastImports"`
+	SyncedContents       map[string][]SyncedOccupant  `json:"syncedContents"`
 }
 
 func (c *Client) FetchBankConfig(ctx context.Context) (BankConfig, error) {
@@ -731,16 +769,31 @@ func (c *Client) FetchBankConfig(ctx context.Context) (BankConfig, error) {
 	return out, err
 }
 
-// PutBankDesignations replaces the FULL set of guild-flagged containers
-// for one owner — pass exactly one of characterID/eqAccountID (the other
-// zero), matching the site's own "exactly one owner" validation.
-func (c *Client) PutBankDesignations(ctx context.Context, characterID, eqAccountID int, containers []string) error {
-	body := map[string]any{"containers": containers}
-	if eqAccountID != 0 {
-		body["eqAccountId"] = eqAccountID
-	} else {
-		body["characterId"] = characterID
-	}
+type updateDesignationsRequest struct {
+	CharacterID int `json:"characterId,omitempty"`
+	EqAccountID int `json:"eqAccountId,omitempty"`
+	// Set is a pointer so a genuine "clear everything" (`*set = []`) can be
+	// told apart from "not touching `set` at all" (`set == nil`) — a plain
+	// slice can't: Go's `omitempty` drops an empty slice exactly the same
+	// as a nil one, which would silently turn "Clear all personal
+	// designations" into a no-op request.
+	Set    *[]DesignationSlot `json:"set,omitempty"`
+	Add    []DesignationSlot  `json:"add,omitempty"`
+	Remove []RemoveSlot       `json:"remove,omitempty"`
+}
+
+// UpdateBankDesignations mutates one owner's guild-flagged positions —
+// pass exactly one of characterID/eqAccountID (the other zero), matching
+// the site's own "exactly one owner" validation. set replaces the WHOLE
+// list ("Mark all Bank slots guild" / "Clear all personal designations");
+// add/remove touch only the listed positions, leaving every other flag
+// untouched — this is what an individual checkbox toggle uses, and what
+// fixes the pre-2026-09-25 bug where every toggle PUT the whole rebuilt
+// set, silently dropping a flag on a container missing from the current
+// scan (e.g. a moved bag's now-empty old slot). Pass nil for any of
+// set/add/remove not being used.
+func (c *Client) UpdateBankDesignations(ctx context.Context, characterID, eqAccountID int, set *[]DesignationSlot, add []DesignationSlot, remove []RemoveSlot) error {
+	body := updateDesignationsRequest{CharacterID: characterID, EqAccountID: eqAccountID, Set: set, Add: add, Remove: remove}
 	return c.do(ctx, http.MethodPut, "/api/officer/bank/designations", body, nil)
 }
 
@@ -777,12 +830,20 @@ type BankSyncRow struct {
 	Quantity  int    `json:"quantity"`
 }
 
-// BankSyncHolder is one character's rows in a sync payload.
+// BankSyncHolder is one character's rows in a sync payload. Occupants
+// tells the server what's currently sitting at each of this holder's
+// designated positions, so it can refresh each designation's expected_*
+// baseline for next time (src/lib/bank/sync.ts's applySync) — distinct
+// from Rows, which is only the items inside a FLAGGED container/slot; a
+// designation's own position (the bag itself, at SlotIndex 0) is never a
+// Row, so without Occupants the server would have nothing to compare a
+// bag's identity against on the next scan.
 type BankSyncHolder struct {
-	CharacterID       int           `json:"characterId"`
-	SourceFile        string        `json:"sourceFile,omitempty"`
-	ReportsSharedBank bool          `json:"reportsSharedBank"`
-	Rows              []BankSyncRow `json:"rows"`
+	CharacterID       int              `json:"characterId"`
+	SourceFile        string           `json:"sourceFile,omitempty"`
+	ReportsSharedBank bool             `json:"reportsSharedBank"`
+	Rows              []BankSyncRow    `json:"rows"`
+	Occupants         []SyncedOccupant `json:"occupants"`
 }
 
 type bankSyncRequest struct {
