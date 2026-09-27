@@ -46,6 +46,11 @@ func TestParseExport(t *testing.T) {
 		// export's Count/Charges column (e.g. "Forge of Icewell Arms", a
 		// tradeskill object) — coerced to 1, never left as 0 (§ toHolding).
 		{Container: "Bank3", SlotIndex: 0, Category: CategoryItem, ItemName: "Forge of Icewell Arms", ItemID: 18611, Quantity: 1},
+		// Bard songs and Kunark "Ancient:" spells are spell-type items under
+		// a different naming convention than "Spell: " — must classify as
+		// CategorySpell too, not fall through to CategoryItem.
+		{Container: "Bank4", SlotIndex: 0, Category: CategorySpell, ItemName: "Song: Test Song", ItemID: 501, Quantity: 1},
+		{Container: "Bank5", SlotIndex: 0, Category: CategorySpell, ItemName: "Ancient: Test Ancient", ItemID: 502, Quantity: 1},
 	}
 	if !reflect.DeepEqual(exp.Holdings, wantHoldings) {
 		t.Errorf("Holdings mismatch:\n got  %+v\n want %+v", exp.Holdings, wantHoldings)

@@ -90,14 +90,17 @@ func ParseExport(path string) (*Export, error) {
 
 // toHolding builds a Holding from one parsed row, classifying a "-Coin"
 // location as currency (id is always 0 for these — coin isn't an item)
-// and a "Spell: " name as a spell, else a plain item.
+// and a "Spell: "/"Song: "/"Ancient: " name as a spell (bard songs and
+// Kunark "Ancient:" language spells are spell-type scrolls same as any
+// other "Spell: " item, just under a different naming convention), else
+// a plain item.
 func toHolding(location, name string, id, count, bagSlots int) Holding {
 	container, slotIndex := decomposeLocation(location)
 	category := CategoryItem
 	switch {
 	case strings.HasSuffix(location, "-Coin"):
 		category = CategoryCurrency
-	case strings.HasPrefix(name, "Spell: "):
+	case strings.HasPrefix(name, "Spell: "), strings.HasPrefix(name, "Song: "), strings.HasPrefix(name, "Ancient: "):
 		category = CategorySpell
 	}
 	// Zeal writes 0 in the Count/Charges column for some real, single,
