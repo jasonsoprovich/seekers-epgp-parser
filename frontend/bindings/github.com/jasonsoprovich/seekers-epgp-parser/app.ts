@@ -685,3 +685,23 @@ export function ToggleBankContainer(characterID: number, eqAccountID: number, co
 export function ToggleBankItem(characterID: number, eqAccountID: number, container: string, slotIndex: number, guild: boolean, itemID: number, itemName: string): $CancellablePromise<void> {
     return $Call.ByID(2917885368, characterID, eqAccountID, container, slotIndex, guild, itemID, itemName);
 }
+
+/**
+ * UpdateBankSlotFlags applies an add+remove of guild designations in one
+ * call — used where unflagging/flagging a single position must
+ * simultaneously touch others so nothing silently loses its flag:
+ *   - Unchecking one item inside a whole-container-flagged bag: removes
+ *     the container's SlotIndex-0 flag and adds an individual flag for
+ *     every OTHER item in the bag, so they stay flagged while only the
+ *     unchecked one comes off.
+ *   - Checking the last unflagged item in a bag (every item now
+ *     individually flagged): removes each item's individual flag and adds
+ *     one SlotIndex-0 whole-container flag instead, collapsing back to the
+ *     simpler form.
+ * 
+ * Same owner/argument shape as ToggleBankContainer/ToggleBankItem — pass
+ * exactly one of characterID/eqAccountID.
+ */
+export function UpdateBankSlotFlags(characterID: number, eqAccountID: number, add: $models.BankSlotSeed[] | null, remove: $models.BankRemoveSlot[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2132533345, characterID, eqAccountID, add, remove);
+}

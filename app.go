@@ -1189,6 +1189,53 @@ func (a *App) ToggleBankItem(characterID, eqAccountID int, container string, slo
 	return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, nil, remove)
 }
 
+// BankSlotSeed is one position (a whole container, SlotIndex 0, or one
+// item inside a bag, SlotIndex 1..N) to flag guild as part of an atomic
+// add+remove update — see UpdateBankSlotFlags.
+type BankSlotSeed struct {
+	Container        string `json:"container"`
+	SlotIndex        int    `json:"slotIndex"`
+	ExpectedItemID   int    `json:"expectedItemId"`
+	ExpectedItemName string `json:"expectedItemName"`
+}
+
+// BankRemoveSlot is one position to unflag as part of an atomic add+remove
+// update — see UpdateBankSlotFlags.
+type BankRemoveSlot struct {
+	Container string `json:"container"`
+	SlotIndex int    `json:"slotIndex"`
+}
+
+// UpdateBankSlotFlags applies an add+remove of guild designations in one
+// call — used where unflagging/flagging a single position must
+// simultaneously touch others so nothing silently loses its flag:
+//   - Unchecking one item inside a whole-container-flagged bag: removes
+//     the container's SlotIndex-0 flag and adds an individual flag for
+//     every OTHER item in the bag, so they stay flagged while only the
+//     unchecked one comes off.
+//   - Checking the last unflagged item in a bag (every item now
+//     individually flagged): removes each item's individual flag and adds
+//     one SlotIndex-0 whole-container flag instead, collapsing back to the
+//     simpler form.
+//
+// Same owner/argument shape as ToggleBankContainer/ToggleBankItem — pass
+// exactly one of characterID/eqAccountID.
+func (a *App) UpdateBankSlotFlags(characterID, eqAccountID int, add []BankSlotSeed, remove []BankRemoveSlot) error {
+	client, err := a.officerClient()
+	if err != nil {
+		return err
+	}
+	addSlots := make([]officerapi.DesignationSlot, len(add))
+	for i, s := range add {
+		addSlots[i] = officerapi.DesignationSlot{Container: s.Container, SlotIndex: s.SlotIndex, ExpectedItemID: s.ExpectedItemID, ExpectedItemName: s.ExpectedItemName}
+	}
+	removeSlots := make([]officerapi.RemoveSlot, len(remove))
+	for i, r := range remove {
+		removeSlots[i] = officerapi.RemoveSlot{Container: r.Container, SlotIndex: r.SlotIndex}
+	}
+	return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, addSlots, removeSlots)
+}
+
 // BankContainerSeed is one container to flag guild in bulk, carrying its
 // current occupant along so the baseline is seeded immediately (see
 // ToggleBankContainer).

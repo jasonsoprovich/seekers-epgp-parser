@@ -157,6 +157,27 @@ export interface BankMoveWarning {
 }
 
 /**
+ * BankRemoveSlot is one position to unflag as part of an atomic add+remove
+ * update — see UpdateBankSlotFlags.
+ */
+export interface BankRemoveSlot {
+    "container": string;
+    "slotIndex": number;
+}
+
+/**
+ * BankSlotSeed is one position (a whole container, SlotIndex 0, or one
+ * item inside a bag, SlotIndex 1..N) to flag guild as part of an atomic
+ * add+remove update — see UpdateBankSlotFlags.
+ */
+export interface BankSlotSeed {
+    "container": string;
+    "slotIndex": number;
+    "expectedItemId": number;
+    "expectedItemName": string;
+}
+
+/**
  * BankSuggestedGroup is an auto-detected "these characters look like the
  * same EQ account" suggestion (matching, non-empty SharedBank
  * fingerprints) for characters not already in a saved account group. The

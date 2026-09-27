@@ -16,6 +16,8 @@ export type {
     BankItem,
     BankMoveCandidate,
     BankMoveWarning,
+    BankRemoveSlot,
+    BankSlotSeed,
     BankSuggestedGroup,
     BankSyncBlocked,
     BankSyncResult,

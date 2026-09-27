@@ -11,6 +11,7 @@ import {
   SubmitBankSync,
   ToggleBankContainer,
   ToggleBankItem,
+  UpdateBankSlotFlags,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type {
   BankCharacterExport,
@@ -172,14 +173,15 @@ export function GuildBankPanel() {
   const totalWarnings = exports.reduce((sum, e) => sum + (e.moveWarnings ?? []).length, 0);
 
   // Flagging something guild is the risky direction (unflagging just stops
-  // it being uploaded next sync — always safe). Two cases get a
-  // confirmation first, since a mistake here means the wrong thing looks
-  // like guild property: a SharedBank container (affects every character
-  // sharing the EQ account, not just this one) and a personal container on
-  // a character that isn't a mule (a played main/alt's own bank, not a
-  // dedicated guild-bank holder — easy to flag your own gear by accident).
-  // Per-item toggles are deliberately NOT confirmed — one item is a much
-  // smaller blast radius than a whole bag.
+  // it being uploaded next sync — always safe). Only a SharedBank
+  // container is confirmed first — it affects every character sharing the
+  // EQ account, not just this one, so a mis-click there reaches further
+  // than the current character. An ordinary personal container is NOT
+  // confirmed (2026-09-26 officer feedback: confirming every single toggle
+  // on a non-mule test character made routine bag-by-bag flagging
+  // unusable) — same reasoning per-item toggles already used: one bag on
+  // one character is a small, easily-reversible blast radius, same as one
+  // item.
   type PendingConfirm =
     | { kind: "toggleContainer"; exp: BankCharacterExport; isShared: boolean; container: BankContainer }
     | { kind: "markAll"; exp: BankCharacterExport; scope: "bank" | "bags" }
@@ -212,24 +214,53 @@ export function GuildBankPanel() {
     if (isShared && (!exp.isSharedBankHolder || exp.eqAccountId === null)) return;
 
     const turningOn = !container.guild;
-    if (turningOn && (isShared || exp.rosterCharType !== "mule")) {
+    if (turningOn && isShared) {
       setPendingConfirm({ kind: "toggleContainer", exp, isShared, container });
       return;
     }
     void performToggleContainer(exp, isShared, container);
   }
 
+  // Unlike toggleContainer, per-item toggles must sometimes reconcile the
+  // whole-container flag rather than just touching their own position:
+  //   - Unchecking an item while the whole bag is flagged ("guild") would
+  //     otherwise do nothing visible — every item's checked state comes
+  //     from `whole || sub[slot]`, and removing a sub-flag that was never
+  //     set can't turn an item off while `whole` is still true. Instead,
+  //     split: drop the whole-container flag and add an individual flag
+  //     for every OTHER item, so they stay flagged and only this one
+  //     comes off.
+  //   - Checking the last individually-unflagged item makes every item in
+  //     the bag flagged — collapse back to one whole-container flag
+  //     instead of leaving N separate per-item rows around.
+  // Both go through the one atomic UpdateBankSlotFlags call so the bag
+  // never passes through an inconsistent intermediate state.
   async function toggleItem(exp: BankCharacterExport, isShared: boolean, container: BankContainer, slotIndex: number, currentGuild: boolean, itemId: number, itemName: string) {
     if (exp.rosterCharacterId === null) return;
     if (isShared && (!exp.isSharedBankHolder || exp.eqAccountId === null)) return;
     const key = `${exp.character}:${container.container}:${slotIndex}`;
     setSavingKey(key);
     setError(null);
+    const nextGuild = !currentGuild;
+    const items = container.items ?? [];
+    const characterId = isShared ? 0 : exp.rosterCharacterId;
+    const eqAccountId = isShared ? exp.eqAccountId! : 0;
     try {
-      if (isShared) {
-        await ToggleBankItem(0, exp.eqAccountId!, container.container, slotIndex, !currentGuild, itemId, itemName);
+      if (!nextGuild && container.guild) {
+        const add = items
+          .filter((it) => it.slotIndex !== slotIndex)
+          .map((it) => ({ container: container.container, slotIndex: it.slotIndex, expectedItemId: it.itemId, expectedItemName: it.itemName }));
+        const remove = [{ container: container.container, slotIndex: 0 }];
+        await UpdateBankSlotFlags(characterId, eqAccountId, add, remove);
+      } else if (nextGuild && !container.guild && items.length > 0 && items.every((it) => it.slotIndex === slotIndex || it.guild)) {
+        const seed = containerSeed(container);
+        const add = [{ container: container.container, slotIndex: 0, expectedItemId: seed.itemId, expectedItemName: seed.itemName }];
+        const remove = items.map((it) => ({ container: container.container, slotIndex: it.slotIndex }));
+        await UpdateBankSlotFlags(characterId, eqAccountId, add, remove);
+      } else if (isShared) {
+        await ToggleBankItem(0, exp.eqAccountId!, container.container, slotIndex, nextGuild, itemId, itemName);
       } else {
-        await ToggleBankItem(exp.rosterCharacterId, 0, container.container, slotIndex, !currentGuild, itemId, itemName);
+        await ToggleBankItem(exp.rosterCharacterId, 0, container.container, slotIndex, nextGuild, itemId, itemName);
       }
       load();
     } catch (err) {
@@ -866,21 +897,12 @@ function pendingConfirmBody(pending: {
       </span>
     );
   }
-  if (pending.kind === "toggleContainer" && pending.isShared) {
+  if (pending.kind === "toggleContainer") {
     return (
       <span>
         Flag <strong>{pending.container!.container}</strong> as guild property? This is <strong>{exp.character}</strong>&apos;s account-wide{" "}
         <strong>Shared Bank</strong> — every character sharing this EQ account will have this slot&apos;s contents treated as guild
         bank on the next sync, not just {exp.character}.
-      </span>
-    );
-  }
-  if (pending.kind === "toggleContainer") {
-    return (
-      <span>
-        Flag <strong>{pending.container!.container}</strong> on <strong>{exp.character}</strong> as guild property?{" "}
-        {exp.character} isn&apos;t marked as a mule ({exp.rosterCharType}) — double-check this slot doesn&apos;t hold{" "}
-        {exp.character}&apos;s own gear before syncing.
       </span>
     );
   }
@@ -1025,8 +1047,8 @@ function ContainerCard({
                   <input
                     type="checkbox"
                     checked={item.guild}
-                    disabled={disabled || container.guild || itemSaving}
-                    title={container.guild ? "Already covered by the whole-bag flag" : undefined}
+                    disabled={disabled || itemSaving}
+                    title={container.guild ? "Covered by the whole-bag flag — unchecking splits it into per-item flags" : undefined}
                     onChange={() => onToggleItem(item.slotIndex, item.guild, item.itemId, item.itemName)}
                   />
                   <span>{item.itemName}</span>
