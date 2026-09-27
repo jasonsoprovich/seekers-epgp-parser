@@ -70,6 +70,13 @@ function guildSlotCount(exp: BankCharacterExport): number {
 // containerSeed is what a container-level flag needs to seed its
 // move-detection baseline: the bag's own identity, or (Loose) the one
 // item sitting directly in the slot.
+// findContainer resolves a FlagSuggestion's plain container name back to
+// the real BankContainer object onToggleContainer needs (item identity for
+// the seed, current guild state) — 2026-09-27.
+function findContainer(exp: BankCharacterExport, name: string): BankContainer | undefined {
+  return [...(exp.bags ?? []), ...(exp.bank ?? []), ...(exp.sharedBank ?? [])].find((c) => c.container === name);
+}
+
 function containerSeed(c: BankContainer): { itemId: number; itemName: string } {
   if (!c.loose) return { itemId: c.bagItemId, itemName: c.bagName };
   const first = (c.items ?? [])[0];
@@ -81,10 +88,31 @@ function containerSeed(c: BankContainer): { itemId: number; itemName: string } {
 // actually sends null for them; normalize once here rather than `?? []`
 // at every call site.
 type DiffRow = { container: string; slotIndex: number; itemName: string; quantity: number };
-type Diff = { characterId: number; added: DiffRow[]; removed: DiffRow[]; changed: { before: DiffRow; after: DiffRow }[]; unchanged: number };
+type Diff = {
+  characterId: number;
+  added: DiffRow[];
+  removed: DiffRow[];
+  changed: { before: DiffRow; after: DiffRow }[];
+  unchanged: number;
+  // 2026-09-27 unverified-item reconciliation — which of this holder's
+  // sheet/manual rows this sync matched against a real synced item
+  // (verified), and which it still couldn't find (notFound, needs an
+  // officer's review on the site's own /bank page — nothing to act on
+  // from here).
+  verified: DiffRow[];
+  notFound: DiffRow[];
+};
 
 function normalizeDiff(d: BankSyncDiff): Diff {
-  return { characterId: d.characterId, added: d.added ?? [], removed: d.removed ?? [], changed: d.changed ?? [], unchanged: d.unchanged };
+  return {
+    characterId: d.characterId,
+    added: d.added ?? [],
+    removed: d.removed ?? [],
+    changed: d.changed ?? [],
+    unchanged: d.unchanged,
+    verified: d.verified ?? [],
+    notFound: d.notFound ?? [],
+  };
 }
 
 function formatLoc(r: { container: string; slotIndex: number }): string {
@@ -818,6 +846,8 @@ function PreviewBody({
           const changed = q
             ? d.changed.filter((c) => c.before.itemName.toLowerCase().includes(q) || c.after.itemName.toLowerCase().includes(q))
             : d.changed;
+          const verified = q ? d.verified.filter((r) => r.itemName.toLowerCase().includes(q)) : d.verified;
+          const notFound = q ? d.notFound.filter((r) => r.itemName.toLowerCase().includes(q)) : d.notFound;
           const bigRemoval = d.removed.length > 0 && d.unchanged + d.removed.length > 0 && d.removed.length / (d.unchanged + d.removed.length) > 0.25;
 
           return (
@@ -831,6 +861,14 @@ function PreviewBody({
                 <span style={{ color: "#9ca3af" }}>
                   (+{d.added.length} −{d.removed.length} ~{d.changed.length}, {d.unchanged} unchanged)
                 </span>
+                {d.verified.length > 0 && (
+                  <span style={{ marginLeft: 6, color: "#38bdf8" }}>· {d.verified.length} verified from sheet</span>
+                )}
+                {d.notFound.length > 0 && (
+                  <span className="badge ambiguous" style={{ marginLeft: 6 }}>
+                    {d.notFound.length} not found
+                  </span>
+                )}
                 {bigRemoval && (
                   <span className="badge ambiguous" style={{ marginLeft: 6 }}>
                     large removal
@@ -862,6 +900,24 @@ function PreviewBody({
                       {changed.map((c, i) => (
                         <div key={i}>
                           ~ {c.before.itemName} → {c.after.itemName} ({c.after.quantity}) @ {formatLoc(c.after)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {verified.length > 0 && (
+                    <div style={{ color: "#38bdf8" }}>
+                      {groupDiffRows(verified).map((g) => (
+                        <div key={g.itemName}>
+                          ✓ {g.itemName} {g.count > 1 ? `×${g.count} (${g.totalQty})` : g.totalQty > 1 ? `(${g.totalQty})` : ""} — confirmed at {g.locations.join(", ")}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {notFound.length > 0 && (
+                    <div style={{ color: "#fb923c" }}>
+                      {groupDiffRows(notFound).map((g) => (
+                        <div key={g.itemName}>
+                          ? {g.itemName} — sheet says {g.totalQty}, not found in this sync (review on the site&apos;s /bank page)
                         </div>
                       ))}
                     </div>
@@ -1091,6 +1147,7 @@ function CharacterDetail({
 }) {
   const bulkSaving = savingKey === `${exp.character}:__bulk`;
   const warnings = exp.moveWarnings ?? [];
+  const flagSuggestions = exp.flagSuggestions ?? [];
 
   return (
     <div>
@@ -1119,6 +1176,36 @@ function CharacterDetail({
               onResolve={onResolveWarning}
             />
           ))}
+        </div>
+      )}
+
+      {/* 2026-09-27 unverified-item tracking: the old sheet's numbers for
+          this character are still sitting on unflagged bags — surfaced
+          BEFORE a sync so fewer items end up needing officer review on
+          the site's /bank page afterward. Purely advisory; flagging a
+          suggestion is the exact same click as the ordinary checkbox. */}
+      {flagSuggestions.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          {flagSuggestions.map((s) => {
+            const container = findContainer(exp, s.container);
+            if (!container) return null;
+            const isShared = isSharedContainer(s.container);
+            const names = [...new Set((s.matches ?? []).map((m) => m.itemName))];
+            return (
+              <div key={s.container} className="warning" style={{ marginBottom: 6 }}>
+                Sheet says <strong>{s.container}</strong> holds guild item{names.length === 1 ? "" : "s"}: {names.join(", ")}. Not flagged yet.
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ marginLeft: 8, fontSize: 12 }}
+                  onClick={() => onToggleContainer(exp, isShared, container)}
+                  disabled={isShared && (!exp.isSharedBankHolder || exp.eqAccountId === null)}
+                >
+                  Flag {s.container}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 

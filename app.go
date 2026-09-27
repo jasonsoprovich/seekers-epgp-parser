@@ -836,6 +836,53 @@ type BankMoveWarning struct {
 	Candidates         []BankMoveCandidate `json:"candidates"`
 }
 
+// BankUnverifiedItem mirrors officerapi.UnverifiedItem — kept separate so
+// this file's JSON shapes don't leak a raw officerapi type into a field
+// meant for the frontend (same pattern BankMoveWarning already sets for
+// bankexport.MoveWarning).
+type BankUnverifiedItem struct {
+	ItemName       string `json:"itemName"`
+	ItemID         int    `json:"itemId"`
+	Quantity       int    `json:"quantity"`
+	LegacyLocation string `json:"legacyLocation"`
+	Kind           string `json:"kind"`
+	NotFound       bool   `json:"notFound"`
+}
+
+// BankFlagSuggestion mirrors bankexport.FlagSuggestion — one unflagged
+// container this scan shows holding an item the sheet/manual data still
+// lists as unverified for this character, 2026-09-27. Purely advisory:
+// clicking it just flags the container the same way the ordinary
+// checkbox toggle does (ToggleBankContainer) — nothing new to write.
+type BankFlagSuggestion struct {
+	Container string               `json:"container"`
+	Matches   []BankUnverifiedItem `json:"matches"`
+}
+
+func toBankFlagSuggestionItems(items []bankexport.UnverifiedItem) []BankUnverifiedItem {
+	out := make([]BankUnverifiedItem, len(items))
+	for i, u := range items {
+		out[i] = BankUnverifiedItem{ItemName: u.ItemName, ItemID: u.ItemID, Quantity: u.Quantity, LegacyLocation: u.LegacyLocation, Kind: u.Kind, NotFound: u.NotFound}
+	}
+	return out
+}
+
+func toBankFlagSuggestions(suggestions []bankexport.FlagSuggestion) []BankFlagSuggestion {
+	out := make([]BankFlagSuggestion, len(suggestions))
+	for i, s := range suggestions {
+		out[i] = BankFlagSuggestion{Container: s.Container, Matches: toBankFlagSuggestionItems(s.Matches)}
+	}
+	return out
+}
+
+func toBankexportUnverifiedItems(items []officerapi.UnverifiedItem) []bankexport.UnverifiedItem {
+	out := make([]bankexport.UnverifiedItem, len(items))
+	for i, u := range items {
+		out[i] = bankexport.UnverifiedItem{ItemName: u.ItemName, ItemID: u.ItemID, Quantity: u.Quantity, LegacyLocation: u.LegacyLocation, Kind: u.Kind, NotFound: u.NotFound}
+	}
+	return out
+}
+
 // BankCharacterExport is one discovered export file, parsed and matched
 // against the roster + the site's current designation config.
 type BankCharacterExport struct {
@@ -866,6 +913,13 @@ type BankCharacterExport struct {
 	// empty when nothing looks moved. A non-empty list blocks this
 	// character from Preview/Submit Sync until each one is resolved.
 	MoveWarnings []BankMoveWarning `json:"moveWarnings"`
+	// FlagSuggestions is every unflagged container this scan shows holding
+	// one of this character's still-unverified (sheet/manual) items —
+	// 2026-09-27, purely advisory ("this bag holds sheet items, flag it?"
+	// before a sync, so fewer land in the site's "needs review" list).
+	// Empty when there's nothing unverified for this character, or
+	// nothing unflagged looks like a match.
+	FlagSuggestions []BankFlagSuggestion `json:"flagSuggestions"`
 }
 
 // BankSuggestedGroup is an auto-detected "these characters look like the
@@ -1104,6 +1158,8 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 
 		allDesignated := mergeDesignationSets(personalDS, sharedDS).designated
 		warnings := bankexport.DetectMoves(inv, allDesignated)
+		unverified := toBankexportUnverifiedItems(sc.cfg.UnverifiedContents[strconv.Itoa(rc.ID)])
+		flagSuggestions := bankexport.SuggestFlags(inv, allDesignated, unverified)
 
 		exports = append(exports, BankCharacterExport{
 			Character:             inv.Character,
@@ -1120,6 +1176,7 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 			IsSharedBankHolder:    isHolder,
 			LastImport:            lastImport,
 			MoveWarnings:          toBankMoveWarnings(warnings),
+			FlagSuggestions:       toBankFlagSuggestions(flagSuggestions),
 		})
 	}
 

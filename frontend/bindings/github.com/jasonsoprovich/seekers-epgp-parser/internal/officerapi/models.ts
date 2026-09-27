@@ -81,6 +81,19 @@ export interface BankSyncDiff {
     "removed": BankSyncDiffRow[] | null;
     "changed": {"before": BankSyncDiffRow, "after": BankSyncDiffRow}[] | null;
     "unchanged": number;
+
+    /**
+     * Verified/NotFound are 2026-09-27 unverified-item reconciliation
+     * (src/lib/bank/sync.ts's reconcileUnverified) — which of this
+     * holder's sheet/manual rows this sync matched against a real synced
+     * item, and which it still couldn't find. Both always present (never
+     * omitted) from a server new enough to send them; an older/unaware
+     * server response simply leaves these nil after unmarshal, so
+     * normalizeBankSyncDiff (below) is what every caller actually reads
+     * these through — never this struct's own zero value directly.
+     */
+    "verified": BankSyncDiffRow[] | null;
+    "notFound": BankSyncDiffRow[] | null;
 }
 
 /**
