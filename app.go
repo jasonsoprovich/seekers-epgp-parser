@@ -2026,13 +2026,18 @@ func (a *App) CheckAttendanceRecorded(activity string, occurredAt string) (offic
 	return client.CheckAttendance(a.ctx, activity, occurredAt)
 }
 
+// awardEp is true by default in the UI — a rare event genuinely has no EP
+// tied to it (a purely social gathering captured the normal way), and this
+// keeps the attendance rows while sending points=0 for all of them. See
+// officerapi.AttendanceRequest.AwardEp.
+//
 // eventLeadCharacterName names who Event Lead goes to when awardEventLead
 // is true; empty keeps the site's default (the API key owner's own
 // current main) — see officerapi.AttendanceRequest.EventLeadCharacterName.
 // The attendance-taker isn't always the actual raid leader, so the
 // Settings/confirm-dialog UI lets an officer name someone else instead of
 // only being able to toggle their own award on/off.
-func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string, awardEventLead bool, eventLeadCharacterName string) (officerapi.AttendanceResponse, error) {
+func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string, awardEp bool, awardEventLead bool, eventLeadCharacterName string) (officerapi.AttendanceResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.AttendanceResponse{}, err
@@ -2043,6 +2048,7 @@ func (a *App) SubmitAttendance(activity string, occurredAt string, names []strin
 		CharacterNames:         names,
 		Zone:                   zone,
 		RaidName:               raidName,
+		AwardEp:                awardEp,
 		AwardEventLead:         awardEventLead,
 		EventLeadCharacterName: eventLeadCharacterName,
 	})

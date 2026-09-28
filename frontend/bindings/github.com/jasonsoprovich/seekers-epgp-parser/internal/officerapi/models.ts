@@ -21,6 +21,12 @@ export interface AttendanceCheck {
 
 export interface AttendanceResponse {
     "inserted": number;
+
+    /**
+     * Echoes what the server actually applied — lets the UI show "Recorded
+     * — 0 EP" distinctly from a normal award.
+     */
+    "awardEp": boolean;
     "eventLeadInserted": boolean;
 
     /**

@@ -264,6 +264,13 @@ type AttendanceRequest struct {
 	// carries this; a later Mid/End submit with the same value is a no-op
 	// server-side. Omitted when the officer left the field blank.
 	RaidName string `json:"raidName,omitempty"`
+	// Whether this capture awards EP at all — deliberately NOT `omitempty`.
+	// The server's own default (an old client that never sends this field)
+	// is true, but this field's own zero value is false, so `omitempty`
+	// would silently drop a real "no EP for this event" submission back to
+	// the server's default instead of sending the explicit false the
+	// officer chose. Always send this field, true or false.
+	AwardEp bool `json:"awardEp"`
 	// Awards the configured Event Lead EP value when true. Goes to the
 	// API-key owner's current main unless EventLeadCharacterName names
 	// someone else — the officer taking attendance isn't always the actual
@@ -278,7 +285,10 @@ type AttendanceRequest struct {
 }
 
 type AttendanceResponse struct {
-	Inserted          int  `json:"inserted"`
+	Inserted int `json:"inserted"`
+	// Echoes what the server actually applied — lets the UI show "Recorded
+	// — 0 EP" distinctly from a normal award.
+	AwardEp           bool `json:"awardEp"`
 	EventLeadInserted bool `json:"eventLeadInserted"`
 	// The character Event Lead was actually awarded to (may be an alt's
 	// main, not whatever name was typed) — empty unless EventLeadInserted.

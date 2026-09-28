@@ -55,7 +55,7 @@ const UNIQUE_ASSIGNMENTS = new Set<Assignment>(["Raid - Start", "Raid - Mid", "R
 // capture before wasting a submit.
 const GATED = new Set<Assignment>(["Raid - Start", "Raid - Mid", "Raid - End", "Event Attend"]);
 
-type SubmittedInfo = { activity: string; inserted: number; note: string };
+type SubmittedInfo = { activity: string; inserted: number; note: string; awardEp: boolean };
 
 // Pre-submit probe result for one capture (GET /api/officer/attendance).
 // enteredBy/eventLead only come back when count > 0 — see route.ts's GET
@@ -118,9 +118,21 @@ export function AttendancePanel() {
   const [minAttendance, setMinAttendance] = useState<number | null>(null);
   const [lookbackHours, setLookbackHours] = useState<number>(loadLookback);
   const [raidName, setRaidName] = useState<string>(() => window.localStorage.getItem(RAIDNAME_KEY) ?? "");
+  // On by default — events normally award EP. Off for the rare event with
+  // genuinely none tied to it (a purely social gathering captured the same
+  // way): the attendance rows still get written, just with 0 points.
+  const [awardEp, setAwardEp] = useState(true);
   // Most captures are submitted by the actual event leader. Keep this on by
   // default, while the existing submit confirmation makes the award explicit.
   const [awardEventLead, setAwardEventLead] = useState(true);
+
+  // Awarding an Event Lead bonus for an event with no base EP doesn't make
+  // sense — turning EP off also turns Event Lead off, but the officer can
+  // still re-enable it explicitly if that's really what they want.
+  function onAwardEpChange(checked: boolean) {
+    setAwardEp(checked);
+    if (!checked) setAwardEventLead(false);
+  }
   // Who Event Lead actually goes to — blank means "me" (the API key
   // owner's own current main, the site's default). The officer taking
   // attendance isn't always the actual raid leader (a trainee learning
@@ -372,6 +384,7 @@ export function AttendancePanel() {
           names,
           c.zone,
           trimmedRaidName,
+          awardEp,
           c.id === eventLeadCapture?.id,
           c.id === eventLeadCapture?.id ? eventLeadName.trim() : "",
         );
@@ -383,10 +396,10 @@ export function AttendancePanel() {
           (duplicates.length ? ` already recorded: ${duplicates.join(", ")};` : "") +
           (skipped ? ` Event Lead already awarded to ${skipped.recipientName}${skipped.enteredByName ? ` (by ${skipped.enteredByName})` : ""} — not awarded again;` : "");
         setCaptures((prev) =>
-          prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: c.assignment, inserted: res.inserted, note } } : x)),
+          prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: c.assignment, inserted: res.inserted, note, awardEp: res.awardEp } } : x)),
         );
         done.push(
-          `${c.assignment}: ${res.inserted}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}${skipped ? ` (Event Lead already went to ${skipped.recipientName})` : ""}`,
+          `${c.assignment}: ${res.inserted}${res.awardEp ? "" : " (0 EP)"}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}${skipped ? ` (Event Lead already went to ${skipped.recipientName})` : ""}`,
         );
       }
       setSubmitSummary(
@@ -396,6 +409,9 @@ export function AttendancePanel() {
         setAwardEventLead(false);
         setEventLeadName("");
       }
+      // Back to the safe default for the next capture — this toggle is for
+      // one deliberately-EP-less event, not a standing preference.
+      setAwardEp(true);
     } catch (err) {
       setError(`Stopped after ${done.length} of ${toSubmit.length}: ${String(err)}`);
     } finally {
@@ -430,8 +446,12 @@ export function AttendancePanel() {
           style={{ minWidth: 180 }}
           title={'Names the night on the site Raids & Events page — e.g. "VT 9/8". Leave blank to name it there later.'}
         />
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }}>
-          <input type="checkbox" checked={awardEventLead} onChange={(e) => setAwardEventLead(e.target.checked)} />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }} title="Off for an event with no EP tied to it — attendance is still recorded, just with 0 points.">
+          <input type="checkbox" checked={awardEp} onChange={(e) => onAwardEpChange(e.target.checked)} />
+          Award EP
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: awardEp ? "#9ca3af" : "#4b5563" }}>
+          <input type="checkbox" checked={awardEventLead} disabled={!awardEp} onChange={(e) => setAwardEventLead(e.target.checked)} />
           Award Event Lead
         </label>
         {awardEventLead && (
@@ -521,7 +541,7 @@ export function AttendancePanel() {
                       className={c.submitted.inserted === 0 ? "warning" : "success"}
                       style={{ marginLeft: "auto", padding: "2px 8px" }}
                     >
-                      {c.submitted.inserted === 0 ? "⚠ Nothing new" : "✓ Recorded"} — {c.submitted.activity} (
+                      {c.submitted.inserted === 0 ? "⚠ Nothing new" : c.submitted.awardEp ? "✓ Recorded" : "✓ Recorded — 0 EP"} — {c.submitted.activity} (
                       {c.submitted.inserted} new){c.submitted.note ? ` —${c.submitted.note}` : ""}
                     </span>
                   ) : (
@@ -645,7 +665,11 @@ export function AttendancePanel() {
         onConfirm={() => void doSubmit()}
         body={
           <>
-            <p style={{ margin: "0 0 8px" }}>This writes EP to the ledger for everyone in these captures:</p>
+            <p style={{ margin: "0 0 8px" }}>
+              {awardEp
+                ? "This writes EP to the ledger for everyone in these captures:"
+                : "This records attendance for everyone in these captures with 0 EP — no points will be awarded:"}
+            </p>
             <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
               {toSubmit.map((c) => {
                 const n = c.rows.map((r) => r.name.trim()).filter(Boolean).length;

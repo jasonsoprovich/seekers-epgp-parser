@@ -574,6 +574,11 @@ export function StopRollSession(id: string): $CancellablePromise<$models.RollSes
 }
 
 /**
+ * awardEp is true by default in the UI — a rare event genuinely has no EP
+ * tied to it (a purely social gathering captured the normal way), and this
+ * keeps the attendance rows while sending points=0 for all of them. See
+ * officerapi.AttendanceRequest.AwardEp.
+ * 
  * eventLeadCharacterName names who Event Lead goes to when awardEventLead
  * is true; empty keeps the site's default (the API key owner's own
  * current main) — see officerapi.AttendanceRequest.EventLeadCharacterName.
@@ -581,8 +586,8 @@ export function StopRollSession(id: string): $CancellablePromise<$models.RollSes
  * Settings/confirm-dialog UI lets an officer name someone else instead of
  * only being able to toggle their own award on/off.
  */
-export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string, awardEventLead: boolean, eventLeadCharacterName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
-    return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName, awardEventLead, eventLeadCharacterName);
+export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string, awardEp: boolean, awardEventLead: boolean, eventLeadCharacterName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
+    return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName, awardEp, awardEventLead, eventLeadCharacterName);
 }
 
 /**

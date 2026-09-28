@@ -48,7 +48,15 @@ export function ManualAttendanceForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [minAttendance, setMinAttendance] = useState<number | null>(null);
+  // On by default — off for a player-run event with genuinely no EP tied to
+  // it. Attendance is still recorded either way.
+  const [awardEp, setAwardEp] = useState(true);
   const [awardEventLead, setAwardEventLead] = useState(false);
+
+  function onAwardEpChange(checked: boolean) {
+    setAwardEp(checked);
+    if (!checked) setAwardEventLead(false);
+  }
 
   // Best-effort, same as everywhere else settings are read (PLAN.md §4i) —
   // a missing value just skips the pre-check; the server still enforces the
@@ -139,14 +147,14 @@ export function ManualAttendanceForm() {
       // Always awards the API key owner's own main here — this one-off
       // form has no "someone else took attendance for me" scenario like
       // the raid Attendance tab's confirm dialog does.
-      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "", awardEventLead, "");
+      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "", awardEp, awardEventLead, "");
       const unmatched = resp.unmatched ?? [];
       const duplicates = resp.duplicates ?? [];
       const notes: string[] = [];
       if (unmatched.length) notes.push(`no match for: ${unmatched.join(", ")}`);
       if (duplicates.length) notes.push(`already recorded, skipped: ${duplicates.join(", ")}`);
       setSuccess(
-        `Recorded ${activity} for ${resp.inserted} character(s).${resp.eventLeadInserted ? " Event Lead was awarded." : ""}${
+        `Recorded ${activity} for ${resp.inserted} character(s)${resp.awardEp ? "" : " — 0 EP"}.${resp.eventLeadInserted ? " Event Lead was awarded." : ""}${
           notes.length ? " — " + notes.join(" — ") : ""
         }`,
       );
@@ -188,11 +196,16 @@ export function ManualAttendanceForm() {
         </label>
       </div>
 
+      <label className="field field-inline" title="Off for an event with no EP tied to it — attendance is still recorded, just with 0 points.">
+        <input type="checkbox" checked={awardEp} onChange={(e) => onAwardEpChange(e.target.checked)} />
+        <span>Award EP</span>
+      </label>
+
       <label className="field field-inline">
         <input
           type="checkbox"
           checked={awardEventLead}
-          disabled={!gated}
+          disabled={!gated || !awardEp}
           onChange={(e) => setAwardEventLead(e.target.checked)}
         />
         <span>Award Event Lead to me{!gated ? " (attendance activities only)" : ""}</span>
