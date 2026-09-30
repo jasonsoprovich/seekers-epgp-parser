@@ -2106,6 +2106,47 @@ func newRoundID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// splitBidCancels separates "cancel my bid" tells (a cancel word with no tier)
+// from real bids, returning the bids in log order and each character's latest
+// cancel time. Shared by buildRows (the officer's own table) and the live
+// snapshot push, so what the officer sees as cancelled and what /live-bids
+// shows can never drift apart.
+func splitBidCancels(candidates []parse.BidCandidate) ([]parse.BidCandidate, map[string]time.Time) {
+	bids := make([]parse.BidCandidate, 0, len(candidates))
+	latestCancel := map[string]time.Time{}
+	for _, c := range candidates {
+		if c.Cancel && c.Tier == "" {
+			k := strings.ToLower(c.CharacterName)
+			if t, ok := latestCancel[k]; !ok || c.OccurredAt.After(t) {
+				latestCancel[k] = c.OccurredAt
+			}
+			continue
+		}
+		bids = append(bids, c)
+	}
+	return bids, latestCancel
+}
+
+// cancelledBidders is the set of characters (lower-cased) whose latest cancel
+// tell came at or after their newest real bid. A cancel followed by a fresh
+// bid is stale — that person is bidding again.
+func cancelledBidders(bids []parse.BidCandidate, latestCancel map[string]time.Time) map[string]bool {
+	newestBid := map[string]time.Time{}
+	for _, c := range bids {
+		k := strings.ToLower(c.CharacterName)
+		if t, ok := newestBid[k]; !ok || c.OccurredAt.After(t) {
+			newestBid[k] = c.OccurredAt
+		}
+	}
+	out := map[string]bool{}
+	for k, ct := range latestCancel {
+		if bt, ok := newestBid[k]; ok && !ct.Before(bt) {
+			out[k] = true
+		}
+	}
+	return out
+}
+
 // buildRows turns a parse window into the review-table rows the frontend
 // wants: every candidate tell in log order, later-from-the-same-character
 // rows flagged Superseded (kept visible, not dropped, so the officer can
@@ -2116,18 +2157,8 @@ func buildRows(raw string, startAt, stopAt time.Time) []BidRow {
 
 	// "cancel my bid" tells don't get their own row — pull them out and use
 	// them to flag the bidder's most recent bid instead.
-	bidCands := make([]parse.BidCandidate, 0, len(candidates))
-	latestCancel := map[string]time.Time{}
-	for _, c := range candidates {
-		if c.Cancel && c.Tier == "" {
-			k := strings.ToLower(c.CharacterName)
-			if t, ok := latestCancel[k]; !ok || c.OccurredAt.After(t) {
-				latestCancel[k] = c.OccurredAt
-			}
-			continue
-		}
-		bidCands = append(bidCands, c)
-	}
+	bidCands, latestCancel := splitBidCancels(candidates)
+	cancelled := cancelledBidders(bidCands, latestCancel)
 
 	latest := parse.ResolveLatestPerCharacter(bidCands)
 
@@ -2139,10 +2170,7 @@ func buildRows(raw string, startAt, stopAt time.Time) []BidRow {
 		// Flag only the character's active (latest) bid, and only if the
 		// cancel came at or after they placed it — a cancel before a later
 		// re-bid is stale.
-		cancelRequested := false
-		if ct, has := latestCancel[k]; has && !superseded && !ct.Before(c.OccurredAt) {
-			cancelRequested = true
-		}
+		cancelRequested := cancelled[k] && !superseded
 		rows = append(rows, BidRow{
 			CharacterName:   c.CharacterName,
 			OccurredAt:      c.OccurredAt.Format(time.RFC3339),
@@ -3059,11 +3087,18 @@ func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Tim
 
 			// The site's snapshot: every tell in log order (the board keeps
 			// the latest per character, same as the review table). A
-			// "cancel my bid" tell has no tier and never shows as a bid.
-			snapshot := make([]officerapi.LiveBidSnapshotEntry, 0, len(candidates))
+			// "cancel my bid" tell has no tier and never shows as a bid —
+			// and it takes the bidder's own bid off the board with it: the
+			// site replaces the round wholesale from this list, so a
+			// cancelled bidder simply has to be missing (they used to stay
+			// on /live-bids because only the cancel tell itself was
+			// skipped). A re-bid after the cancel brings them back.
+			bidCands, latestCancel := splitBidCancels(candidates)
+			cancelled := cancelledBidders(bidCands, latestCancel)
+			snapshot := make([]officerapi.LiveBidSnapshotEntry, 0, len(bidCands))
 			var sb strings.Builder
-			for _, c := range candidates {
-				if c.Cancel {
+			for _, c := range bidCands {
+				if cancelled[strings.ToLower(c.CharacterName)] {
 					continue
 				}
 				at := c.OccurredAt.Format(time.RFC3339)
