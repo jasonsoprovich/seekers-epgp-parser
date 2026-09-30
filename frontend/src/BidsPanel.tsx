@@ -154,6 +154,12 @@ export function BidsPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [tieWarning, setTieWarning] = useState<string | null>(null);
   const [winnerCount, setWinnerCount] = useState(1);
+  // Rows an officer may pick by hand: only the tied rows at the winner
+  // cutoff, or every active row when priorities couldn't be compared at all
+  // (see determineWinner). Otherwise null — winners come from Determine
+  // Winner alone. A manual round is separate (see canPick). Keyed by rowKey
+  // so removing a row can't shift it onto a different one.
+  const [pickable, setPickable] = useState<Set<string> | null>(null);
   const [gratsCopied, setGratsCopied] = useState(false);
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
   const [rotConfirmOpen, setRotConfirmOpen] = useState(false);
@@ -343,6 +349,8 @@ export function BidsPanel() {
     setTieWarning(null);
     setGratsCopied(false);
     setManualRound(false);
+    setWinnerCount(1);
+    setPickable(null);
     setRows(toReviewRows(round));
     setCapturedItem(round.itemName);
     setCapturedRoundId(round.roundId);
@@ -405,6 +413,8 @@ export function BidsPanel() {
     setError(null);
     setSubmitResult(null);
     setTieWarning(null);
+    setWinnerCount(1);
+    setPickable(null);
     setPendingAnnouncement(null);
     setPending(true);
     try {
@@ -437,6 +447,8 @@ export function BidsPanel() {
     setDupPrompt(null);
     setTieWarning(null);
     setGratsCopied(false);
+    setWinnerCount(1);
+    setPickable(null);
     setPendingAnnouncement(null);
     setCapturedItem(itemName.trim());
     setCapturedRoundId(newClientRoundId());
@@ -478,6 +490,9 @@ export function BidsPanel() {
     setGratsCopied(false);
     setManualRound(false);
     setDupPrompt(null);
+    // A duplicate-drop "2 winners" must never carry into the next item.
+    setWinnerCount(1);
+    setPickable(null);
   }
 
   // Explicit reset — a live/review round now survives a tab switch
@@ -558,7 +573,30 @@ export function BidsPanel() {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, characterName: name, displayName: name } : r)));
   }
 
-  function toggleWinner(index: number) {
+  // Winners come from Determine Winner (tier, then priority, capped at
+  // "Winners"). A hand pick is only offered where that can't decide —
+  // an exact tie at the cutoff, priorities that couldn't be compared, or a
+  // manual round with no captured tells — and never for a superseded or
+  // cancel-requested bid. A row click used to toggle winner on any row
+  // (including via the raw-message cell), which let an officer add a second
+  // winner past the count and past priority (9/28, Hawthor).
+  function canPick(index: number): boolean {
+    const r = rows[index];
+    if (!r || supersededSet.has(index) || r.cancelRequested) return false;
+    return manualRound || (pickable?.has(r.rowKey) ?? false);
+  }
+
+  function pickWinner(index: number) {
+    const row = rows[index];
+    if (!row || !canPick(index)) return;
+    if (!row.winner) {
+      const current = rows.filter((r, i) => r.winner && !supersededSet.has(i)).length;
+      if (current >= winnerCount) {
+        setError(`Already ${current} winner${current === 1 ? "" : "s"} marked — unpick one first, or raise “Winners” if this is a duplicate drop.`);
+        return;
+      }
+    }
+    setError(null);
     setTieWarning(null);
     setGratsCopied(false);
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, winner: !r.winner } : r)));
@@ -599,8 +637,9 @@ export function BidsPanel() {
       );
 
     if (eligible.length === 0) {
-      setTieWarning("No active row has both a resolved tier and a known priority to compare — pick a tier for each row and check the roster loaded.");
+      setTieWarning("No active row has both a resolved tier and a known priority to compare — pick a tier for each row and check the roster loaded. You can Pick a winner by hand below.");
       setRows((prev) => prev.map((r) => ({ ...r, winner: false })));
+      setPickable(new Set(rows.filter((r, i) => !supersededSet.has(i) && !r.cancelRequested).map((r) => r.rowKey)));
       return;
     }
 
@@ -610,15 +649,22 @@ export function BidsPanel() {
     const nextAfterCutoff = sorted[n];
 
     if (nextAfterCutoff && nextAfterCutoff.rank === cutoff.rank && nextAfterCutoff.priority === cutoff.priority) {
-      const tied = sorted
-        .filter((e) => e.rank === cutoff.rank && e.priority === cutoff.priority)
-        .map((e) => e.r.characterName)
-        .join(", ");
-      setTieWarning(`Exact tie on tier and priority at the cutoff for winner #${n}, between: ${tied}. Check the winner box(es) manually.`);
-      setRows((prev) => prev.map((r) => ({ ...r, winner: false })));
+      const tiedRows = sorted.filter((e) => e.rank === cutoff.rank && e.priority === cutoff.priority);
+      // Everyone strictly ahead of the tie still wins outright; only the
+      // remaining slots are left for the officer to fill from the tied rows.
+      const ahead = sorted.filter((e) => e.rank > cutoff.rank || (e.rank === cutoff.rank && e.priority > cutoff.priority));
+      const slots = n - ahead.length;
+      const aheadIndices = new Set(ahead.map((e) => e.i));
+      setTieWarning(
+        `Exact tie on tier and priority at the cutoff for winner #${n}, between: ${tiedRows.map((e) => e.r.characterName).join(", ")}. ` +
+          `Use Pick to choose ${slots} of them.`,
+      );
+      setRows((prev) => prev.map((r, i) => ({ ...r, winner: aheadIndices.has(i) })));
+      setPickable(new Set(tiedRows.map((e) => e.r.rowKey)));
       return;
     }
 
+    setPickable(null);
     const winnerIndices = new Set(sorted.slice(0, n).map((e) => e.i));
     setRows((prev) => prev.map((r, i) => ({ ...r, winner: winnerIndices.has(i) })));
   }
@@ -657,8 +703,16 @@ export function BidsPanel() {
     const invalid = activeRows.filter((r) => !TIERS.includes(r.tier));
     if (invalid.length > 0) return `Pick a tier for: ${invalid.map((r) => r.characterName || "(unnamed row)").join(", ")} before submitting.`;
     if (activeRows.filter((r) => r.winner).length === 0)
-      return "Mark at least one row as the winner before submitting — click Determine Winner or check one manually.";
+      return "Mark at least one row as the winner before submitting — click Re-check Winner.";
     if (activeRows.some((r) => !r.characterName.trim())) return "Fill in the character name for every manually added row, or remove it.";
+    const activeWinners = activeRows.filter((r) => r.winner);
+    if (activeWinners.length > winnerCount) {
+      return `${activeWinners.length} winners are marked but “Winners” is set to ${winnerCount} — raise it only for a duplicate drop, otherwise unpick the extra row(s).`;
+    }
+    const cancelledWinner = activeWinners.find((r) => r.cancelRequested);
+    if (cancelledWinner) {
+      return `${cancelledWinner.characterName} asked to cancel their bid — Remove that row (or add the bid back manually) before submitting.`;
+    }
     return null;
   }
 
@@ -674,28 +728,17 @@ export function BidsPanel() {
 
   async function onSubmit(confirmDuplicate = false) {
     if (rows.length === 0) return;
-    if (!capturedItem.trim()) {
-      setError("Name the item this round is for before submitting.");
+    // Same checks the confirm dialog ran (including the winner-count and
+    // cancelled-bid rules) — "Record anyway" must not be a way around them.
+    const invalid = validateForSubmit();
+    if (invalid) {
+      setError(invalid);
       return;
     }
     // A bid superseded by a later one from the same person is never sent —
     // only the person's active bid is recorded (guild rule: last tell wins).
     const activeRows = rows.filter((_, i) => !supersededSet.has(i));
-    const invalid = activeRows.filter((r) => !TIERS.includes(r.tier));
-    if (invalid.length > 0) {
-      setError(`Pick a tier for: ${invalid.map((r) => r.characterName || "(unnamed row)").join(", ")} before submitting.`);
-      return;
-    }
     const activeWinners = activeRows.filter((r) => r.winner);
-    if (activeWinners.length === 0) {
-      setError("Mark at least one row as the winner before submitting — click Determine Winner or check one manually.");
-      return;
-    }
-    const blankManual = activeRows.filter((r) => !r.characterName.trim());
-    if (blankManual.length > 0) {
-      setError("Fill in the character name for every manually added row, or remove it.");
-      return;
-    }
     setSubmitting(true);
     setSubmitResult(null);
     setError(null);
@@ -968,7 +1011,7 @@ export function BidsPanel() {
             className="primary"
             onClick={onSubmitClick}
             disabled={submitting || winners.length === 0}
-            title={winners.length === 0 ? "Pick a winner first — Re-check Winner, or click a row" : undefined}
+            title={winners.length === 0 ? "No winner yet — click Re-check Winner" : undefined}
           >
             {submitting ? "Submitting…" : "Submit to site"}
           </button>
@@ -1020,7 +1063,7 @@ export function BidsPanel() {
               const live = phase === "live";
               const isSuperseded = supersededSet.has(i);
               const cancelReq = !!r.cancelRequested && !isSuperseded;
-              const rowClickable = !live && !isSuperseded;
+              const pickAllowed = !live && canPick(i);
               return (
                 <tr
                   key={r.rowKey}
@@ -1031,16 +1074,14 @@ export function BidsPanel() {
                   ]
                     .join(" ")
                     .trim()}
-                  onClick={rowClickable ? () => toggleWinner(i) : undefined}
-                  style={{ cursor: rowClickable ? "pointer" : "default" }}
                   title={
                     live
                       ? undefined
                       : isSuperseded
                         ? "Superseded by a later bid from the same person — remove the newer row to bring this one back"
                         : cancelReq
-                          ? "This bidder said “cancel my bid” — decide whether to Remove it or keep it, then pick the winner"
-                          : "Click the row to mark/unmark this bid as a winner"
+                          ? "This bidder said “cancel my bid” — Remove the row, or add the bid back manually if the cancel was a mistake"
+                          : undefined
                   }
                 >
                   <td onClick={r.manual && !live ? (e) => e.stopPropagation() : undefined}>
@@ -1102,7 +1143,17 @@ export function BidsPanel() {
                     {isSuperseded && <span className="badge superseded" style={{ marginLeft: 6 }}>superseded</span>}
                   </td>
                   <td style={{ color: "#6b7280" }}>{r.rawMessage}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
+                  <td>
+                    {pickAllowed && (
+                      <button
+                        className="secondary"
+                        style={{ marginRight: 6 }}
+                        onClick={() => pickWinner(i)}
+                        title={r.winner ? "Unpick this bid" : "Pick this bid as a winner (limited to the Winners count)"}
+                      >
+                        {r.winner ? "Unpick" : "Pick"}
+                      </button>
+                    )}
                     {!live && (
                       <button className="danger" onClick={() => removeRow(i)}>
                         Remove
