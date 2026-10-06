@@ -444,7 +444,7 @@ export function AttendancePanel() {
           value={raidName}
           onChange={(e) => setRaidName(e.target.value)}
           style={{ minWidth: 180 }}
-          title={'Names the night on the site Raids & Events page — e.g. "VT 9/8". Leave blank to name it there later.'}
+          title={'Names the night on the site Raids and Events History page — e.g. "VT 9/8". Leave blank to name it there later.'}
         />
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9ca3af" }} title="Off for an event with no EP tied to it — attendance is still recorded, just with 0 points.">
           <input type="checkbox" checked={awardEp} onChange={(e) => onAwardEpChange(e.target.checked)} />
