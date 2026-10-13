@@ -44,11 +44,11 @@ type EditableRow = { name: string; displayName: string };
 // (min-attendance) covers those plus Event Attend.
 //
 // "New Target" (2026-10-13, PoP launch) is the first-kill bonus, not
-// attendance: everyone in the capture gets it, once per boss. It needs the
-// boss name (`target`), which the site stores as the row note and dedupes
-// on — so two first kills in one night are two New Target captures (use
+// attendance: everyone in the capture gets it. The boss name (`target`) is
+// optional, stored as the row note — and when given, the site dedupes on it,
+// so two first kills in one night are two New Target captures (use
 // Duplicate on the closest /who), not blocked by each other or by the
-// night's Start/Mid/End.
+// night's Start/Mid/End. Unnamed, the site only dedupes the exact same /who.
 const NEW_TARGET = "New Target";
 const ASSIGNMENTS = ["", "Raid - Start", "Raid - Mid", "Raid - End", "Guild Meeting", "Event Attend", NEW_TARGET] as const;
 type Assignment = (typeof ASSIGNMENTS)[number];
@@ -81,7 +81,7 @@ type Capture = {
   warnings: string[];
   rows: EditableRow[];
   assignment: Assignment;
-  // Boss name for a New Target capture; ignored for every other assignment.
+  // Optional boss name for a New Target capture; ignored otherwise.
   target?: string;
   expanded: boolean;
   submitted?: SubmittedInfo;
@@ -93,7 +93,8 @@ function captureNote(c: Capture): string {
 }
 
 function activityLabel(c: Capture): string {
-  return c.assignment === NEW_TARGET ? `New Target Bonus — ${captureNote(c) || "?"}` : c.assignment;
+  if (c.assignment !== NEW_TARGET) return c.assignment;
+  return captureNote(c) ? `New Target Bonus — ${captureNote(c)}` : "New Target Bonus";
 }
 
 // Captures live in the webview's localStorage so they survive a tab switch
@@ -362,9 +363,13 @@ export function AttendancePanel() {
     if (toSubmit.length === 0) return;
     setError(null);
     setSubmitSummary(null);
-    const unnamed = toSubmit.find((c) => c.assignment === NEW_TARGET && !captureNote(c));
-    if (unnamed) {
-      setError(`New Target Bonus (${fmtTime(unnamed.occurredAt)}): enter the boss name before submitting.`);
+    // Two unnamed bonuses off the same /who look identical to the site (it
+    // dedupes an unnamed one on the snapshot's time), so the second would
+    // silently award nothing — a boss name is what tells them apart.
+    const unnamed = toSubmit.filter((c) => c.assignment === NEW_TARGET && !captureNote(c));
+    const clash = unnamed.find((c, i) => unnamed.findIndex((o) => o.occurredAt === c.occurredAt) !== i);
+    if (clash) {
+      setError(`Two New Target Bonus captures from the ${fmtTime(clash.occurredAt)} /who have no boss name — name the bosses so both are awarded.`);
       return;
     }
     // Probe each assigned capture against the ledger so the dialog can flag
@@ -554,7 +559,7 @@ export function AttendancePanel() {
           Run "/who" or "/who guild" in-game at the start, middle, and end of the raid — click "Capture from log" after each
           (or once at the end; every snapshot from the last {lookbackHours}h shows up — widen "Look back" if you're doing this
           the next day). Assign the ones you want to Start / Mid / End, then Submit assigned. Nothing is sent until you do.
-          For a first kill, assign the /who closest to the kill to New Target Bonus and name the boss — or Duplicate a
+          For a first kill, assign the /who closest to the kill to New Target Bonus (boss name optional) — or Duplicate a
           capture that's already Start/Mid/End.
         </div>
       ) : (
@@ -615,11 +620,11 @@ export function AttendancePanel() {
                   {!c.submitted && c.assignment === NEW_TARGET && (
                     <input
                       type="text"
-                      placeholder="Boss name (required)"
+                      placeholder="Boss / NPC (optional)"
                       value={c.target ?? ""}
                       onChange={(e) => patch(c.id, (x) => ({ ...x, target: e.target.value }))}
-                      style={{ minWidth: 160, borderColor: captureNote(c) ? undefined : "#f87171" }}
-                      title="Which boss this first-kill bonus is for. Saved as the note on every row, and how the site tells two New Target bonuses apart."
+                      style={{ minWidth: 160 }}
+                      title="Optional: which boss/NPC this first-kill bonus is for. Saved as the note on every row. Name it if you're awarding two bonuses from the same /who — that's how the site tells them apart."
                     />
                   )}
                   <button

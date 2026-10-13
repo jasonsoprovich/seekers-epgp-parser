@@ -2040,8 +2040,8 @@ func (a *App) CheckAttendanceRecorded(activity string, occurredAt string, note s
 // Settings/confirm-dialog UI lets an officer name someone else instead of
 // only being able to toggle their own award on/off.
 //
-// note is written onto every row; a "New Target" capture requires it (the
-// boss name — the site rejects a blank one and dedupes on it).
+// note is written onto every row — for a "New Target" capture, the optional
+// boss name (the site dedupes that bonus on it when given).
 func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string, awardEp bool, awardEventLead bool, eventLeadCharacterName string, note string) (officerapi.AttendanceResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
