@@ -106,9 +106,11 @@ export function CaptureBids(itemName: string, announcedAt: string): $Cancellable
  * commits (sim feedback 2026-09-09). Best-effort at the call site: a
  * failure here (older site without the GET route, offline) just means no
  * pre-warning, not a blocked submit.
+ * note is the boss name for a "New Target" capture (the site dedupes that
+ * bonus per boss, not per time window); empty for every other activity.
  */
-export function CheckAttendanceRecorded(activity: string, occurredAt: string): $CancellablePromise<officerapi$0.AttendanceCheck> {
-    return $Call.ByID(1251765916, activity, occurredAt);
+export function CheckAttendanceRecorded(activity: string, occurredAt: string, note: string): $CancellablePromise<officerapi$0.AttendanceCheck> {
+    return $Call.ByID(1251765916, activity, occurredAt, note);
 }
 
 /**
@@ -585,9 +587,12 @@ export function StopRollSession(id: string): $CancellablePromise<$models.RollSes
  * The attendance-taker isn't always the actual raid leader, so the
  * Settings/confirm-dialog UI lets an officer name someone else instead of
  * only being able to toggle their own award on/off.
+ * 
+ * note is written onto every row; a "New Target" capture requires it (the
+ * boss name — the site rejects a blank one and dedupes on it).
  */
-export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string, awardEp: boolean, awardEventLead: boolean, eventLeadCharacterName: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
-    return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName, awardEp, awardEventLead, eventLeadCharacterName);
+export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string, awardEp: boolean, awardEventLead: boolean, eventLeadCharacterName: string, note: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
+    return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName, awardEp, awardEventLead, eventLeadCharacterName, note);
 }
 
 /**

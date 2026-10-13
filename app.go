@@ -2018,12 +2018,14 @@ func (a *App) ParseAttendanceText(raw string) (AttendanceResult, error) {
 // commits (sim feedback 2026-09-09). Best-effort at the call site: a
 // failure here (older site without the GET route, offline) just means no
 // pre-warning, not a blocked submit.
-func (a *App) CheckAttendanceRecorded(activity string, occurredAt string) (officerapi.AttendanceCheck, error) {
+// note is the boss name for a "New Target" capture (the site dedupes that
+// bonus per boss, not per time window); empty for every other activity.
+func (a *App) CheckAttendanceRecorded(activity string, occurredAt string, note string) (officerapi.AttendanceCheck, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.AttendanceCheck{}, err
 	}
-	return client.CheckAttendance(a.ctx, activity, occurredAt)
+	return client.CheckAttendance(a.ctx, activity, occurredAt, note)
 }
 
 // awardEp is true by default in the UI — a rare event genuinely has no EP
@@ -2037,7 +2039,10 @@ func (a *App) CheckAttendanceRecorded(activity string, occurredAt string) (offic
 // The attendance-taker isn't always the actual raid leader, so the
 // Settings/confirm-dialog UI lets an officer name someone else instead of
 // only being able to toggle their own award on/off.
-func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string, awardEp bool, awardEventLead bool, eventLeadCharacterName string) (officerapi.AttendanceResponse, error) {
+//
+// note is written onto every row; a "New Target" capture requires it (the
+// boss name — the site rejects a blank one and dedupes on it).
+func (a *App) SubmitAttendance(activity string, occurredAt string, names []string, zone string, raidName string, awardEp bool, awardEventLead bool, eventLeadCharacterName string, note string) (officerapi.AttendanceResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.AttendanceResponse{}, err
@@ -2046,6 +2051,7 @@ func (a *App) SubmitAttendance(activity string, occurredAt string, names []strin
 		Activity:               activity,
 		OccurredAt:             occurredAt,
 		CharacterNames:         names,
+		Note:                   note,
 		Zone:                   zone,
 		RaidName:               raidName,
 		AwardEp:                awardEp,

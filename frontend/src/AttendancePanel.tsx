@@ -42,8 +42,17 @@ type EditableRow = { name: string; displayName: string };
 // "" = ignore this capture. The three Raid - * are the ones an officer
 // assigns start/mid/end to; the site's ATTENDANCE_GATED_ACTIVITIES
 // (min-attendance) covers those plus Event Attend.
-const ASSIGNMENTS = ["", "Raid - Start", "Raid - Mid", "Raid - End", "Guild Meeting", "Event Attend"] as const;
+//
+// "New Target" (2026-10-13, PoP launch) is the first-kill bonus, not
+// attendance: everyone in the capture gets it, once per boss. It needs the
+// boss name (`target`), which the site stores as the row note and dedupes
+// on — so two first kills in one night are two New Target captures (use
+// Duplicate on the closest /who), not blocked by each other or by the
+// night's Start/Mid/End.
+const NEW_TARGET = "New Target";
+const ASSIGNMENTS = ["", "Raid - Start", "Raid - Mid", "Raid - End", "Guild Meeting", "Event Attend", NEW_TARGET] as const;
 type Assignment = (typeof ASSIGNMENTS)[number];
+const ASSIGNMENT_LABELS: Partial<Record<Assignment, string>> = { "": "— ignore", [NEW_TARGET]: "New Target Bonus" };
 
 // At most one capture may hold each of these at a time (post-live-test-1
 // LT-22 "do not allow multiple starts or mids or ends").
@@ -72,9 +81,20 @@ type Capture = {
   warnings: string[];
   rows: EditableRow[];
   assignment: Assignment;
+  // Boss name for a New Target capture; ignored for every other assignment.
+  target?: string;
   expanded: boolean;
   submitted?: SubmittedInfo;
 };
+
+// What the site gets as the row note — only New Target sends one.
+function captureNote(c: Capture): string {
+  return c.assignment === NEW_TARGET ? (c.target ?? "").trim() : "";
+}
+
+function activityLabel(c: Capture): string {
+  return c.assignment === NEW_TARGET ? `New Target Bonus — ${captureNote(c) || "?"}` : c.assignment;
+}
 
 // Captures live in the webview's localStorage so they survive a tab switch
 // (App.tsx keeps panels mounted anyway) AND an app restart mid-raid — the
@@ -285,6 +305,29 @@ export function AttendancePanel() {
     // same call as the Bids manual row).
     patch(id, (c) => ({ ...c, rows: [{ name: "", displayName: "" }, ...c.rows] }));
   }
+  // One /who can back more than one award — the usual case is a New Target
+  // bonus from the same snapshot as a Raid - Mid, or two first kills that
+  // night (2026-10-13, Luna: "we can just duplicate our attendance log").
+  // The copy keeps the snapshot's time/zone/names but gets its own id, so a
+  // later "Capture from log" (which merges by occurredAt) leaves it alone.
+  function duplicateCapture(id: string) {
+    setCaptures((prev) => {
+      const i = prev.findIndex((c) => c.id === id);
+      if (i < 0) return prev;
+      const src = prev[i];
+      const copy: Capture = {
+        id: `${src.occurredAt}#copy-${Date.now()}`,
+        occurredAt: src.occurredAt,
+        zone: src.zone,
+        warnings: src.warnings,
+        rows: src.rows.map((r) => ({ ...r })),
+        assignment: NEW_TARGET,
+        target: "",
+        expanded: false,
+      };
+      return [...prev.slice(0, i + 1), copy, ...prev.slice(i + 1)];
+    });
+  }
   function removeCapture(id: string) {
     setCaptures((prev) => prev.filter((c) => c.id !== id));
   }
@@ -319,6 +362,11 @@ export function AttendancePanel() {
     if (toSubmit.length === 0) return;
     setError(null);
     setSubmitSummary(null);
+    const unnamed = toSubmit.find((c) => c.assignment === NEW_TARGET && !captureNote(c));
+    if (unnamed) {
+      setError(`New Target Bonus (${fmtTime(unnamed.occurredAt)}): enter the boss name before submitting.`);
+      return;
+    }
     // Probe each assigned capture against the ledger so the dialog can flag
     // "already recorded — this would be a no-op" before the officer
     // commits. Best-effort: a failed probe just shows no warning.
@@ -327,7 +375,7 @@ export function AttendancePanel() {
     await Promise.all(
       toSubmit.map(async (c) => {
         try {
-          const res = await CheckAttendanceRecorded(c.assignment, c.occurredAt);
+          const res = await CheckAttendanceRecorded(c.assignment, c.occurredAt, captureNote(c));
           setDupChecks((prev) => ({ ...prev, [c.id]: { count: res.count, enteredBy: res.enteredBy, eventLead: res.eventLead } }));
         } catch {
           setDupChecks((prev) => {
@@ -387,6 +435,7 @@ export function AttendancePanel() {
           awardEp,
           c.id === eventLeadCapture?.id,
           c.id === eventLeadCapture?.id ? eventLeadName.trim() : "",
+          captureNote(c),
         );
         const unmatched = res.unmatched ?? [];
         const duplicates = res.duplicates ?? [];
@@ -396,10 +445,10 @@ export function AttendancePanel() {
           (duplicates.length ? ` already recorded: ${duplicates.join(", ")};` : "") +
           (skipped ? ` Event Lead already awarded to ${skipped.recipientName}${skipped.enteredByName ? ` (by ${skipped.enteredByName})` : ""} — not awarded again;` : "");
         setCaptures((prev) =>
-          prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: c.assignment, inserted: res.inserted, note, awardEp: res.awardEp } } : x)),
+          prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: activityLabel(c), inserted: res.inserted, note, awardEp: res.awardEp } } : x)),
         );
         done.push(
-          `${c.assignment}: ${res.inserted}${res.awardEp ? "" : " (0 EP)"}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}${skipped ? ` (Event Lead already went to ${skipped.recipientName})` : ""}`,
+          `${activityLabel(c)}: ${res.inserted}${res.awardEp ? "" : " (0 EP)"}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}${skipped ? ` (Event Lead already went to ${skipped.recipientName})` : ""}`,
         );
       }
       setSubmitSummary(
@@ -505,6 +554,8 @@ export function AttendancePanel() {
           Run "/who" or "/who guild" in-game at the start, middle, and end of the raid — click "Capture from log" after each
           (or once at the end; every snapshot from the last {lookbackHours}h shows up — widen "Look back" if you're doing this
           the next day). Assign the ones you want to Start / Mid / End, then Submit assigned. Nothing is sent until you do.
+          For a first kill, assign the /who closest to the kill to New Target Bonus and name the boss — or Duplicate a
+          capture that's already Start/Mid/End.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -554,13 +605,30 @@ export function AttendancePanel() {
                         const takenBy = UNIQUE_ASSIGNMENTS.has(a) ? takenUnique.get(a) : undefined;
                         return (
                           <option key={a || "none"} value={a} disabled={!!takenBy && takenBy !== c.id}>
-                            {a === "" ? "— ignore" : a}
+                            {ASSIGNMENT_LABELS[a] ?? a}
                             {takenBy && takenBy !== c.id ? " (taken)" : ""}
                           </option>
                         );
                       })}
                     </select>
                   )}
+                  {!c.submitted && c.assignment === NEW_TARGET && (
+                    <input
+                      type="text"
+                      placeholder="Boss name (required)"
+                      value={c.target ?? ""}
+                      onChange={(e) => patch(c.id, (x) => ({ ...x, target: e.target.value }))}
+                      style={{ minWidth: 160, borderColor: captureNote(c) ? undefined : "#f87171" }}
+                      title="Which boss this first-kill bonus is for. Saved as the note on every row, and how the site tells two New Target bonuses apart."
+                    />
+                  )}
+                  <button
+                    className="secondary"
+                    onClick={() => duplicateCapture(c.id)}
+                    title="Copy this /who into a new capture (set to New Target Bonus) — for a first-kill bonus, or a second one the same night."
+                  >
+                    Duplicate
+                  </button>
                   {!c.submitted && (
                     <button className="danger" onClick={() => removeCapture(c.id)}>
                       Remove
@@ -676,7 +744,7 @@ export function AttendancePanel() {
                 const check = dupChecks[c.id];
                 return (
                   <li key={c.id}>
-                    <strong>{c.assignment}</strong> — {fmtTime(c.occurredAt)}
+                    <strong>{activityLabel(c)}</strong> — {fmtTime(c.occurredAt)}
                     {c.zone ? ` · ${c.zone}` : ""} · {n} name(s)
                     {n < effectiveMin ? <span style={{ color: "#fbbf24" }}> · under {effectiveMin}</span> : null}
                     {check === "checking" && <span style={{ color: "#9ca3af" }}> · checking…</span>}
@@ -701,9 +769,9 @@ export function AttendancePanel() {
             </ul>
             {dupNewCount === 0 && Object.keys(dupChecks).length > 0 && (
               <p style={{ margin: "0 0 8px", color: "#fbbf24" }}>
-                Every name in these captures is already recorded within an hour of this timestamp. Submitting again
-                writes nothing new (the site dedupes by player + activity + a ±60 min window). Only do this if you
-                deliberately reversed the raid first.
+                Every name in these captures is already recorded. Submitting again writes nothing new (the site
+                dedupes by player + activity within ±60 min — or, for a New Target Bonus, player + boss). Only do this
+                if you deliberately reversed the raid first.
               </p>
             )}
             {raidName.trim() ? (

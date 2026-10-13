@@ -337,8 +337,13 @@ type AttendanceCheck struct {
 	EventLead  *EventLeadInfo `json:"eventLead,omitempty"`
 }
 
-func (c *Client) CheckAttendance(ctx context.Context, activity, occurredAt string) (AttendanceCheck, error) {
+// note narrows a "New Target" check to that boss (the site dedupes New
+// Target per boss); ignored by the site for every other activity.
+func (c *Client) CheckAttendance(ctx context.Context, activity, occurredAt, note string) (AttendanceCheck, error) {
 	params := url.Values{"activity": {activity}, "occurredAt": {occurredAt}}
+	if note != "" {
+		params.Set("note", note)
+	}
 	var out AttendanceCheck
 	err := c.do(ctx, http.MethodGet, "/api/officer/attendance?"+params.Encode(), nil, &out)
 	return out, err

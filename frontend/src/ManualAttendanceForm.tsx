@@ -147,7 +147,7 @@ export function ManualAttendanceForm() {
       // Always awards the API key owner's own main here — this one-off
       // form has no "someone else took attendance for me" scenario like
       // the raid Attendance tab's confirm dialog does.
-      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "", awardEp, awardEventLead, "");
+      const resp = await SubmitAttendance(activity, iso, names, zone.trim(), "", awardEp, awardEventLead, "", "");
       const unmatched = resp.unmatched ?? [];
       const duplicates = resp.duplicates ?? [];
       const notes: string[] = [];
