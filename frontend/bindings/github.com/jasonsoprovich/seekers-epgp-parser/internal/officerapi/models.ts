@@ -52,6 +52,13 @@ export interface AttendanceResponse {
      * skipped.
      */
     "eventLeadSkipped"?: EventLeadInfo | null;
+
+    /**
+     * Members whose award the per-cycle EP cap reduced (still recorded, with
+     * Awarded instead of Nominal EP — 0 when already at the cap). Includes
+     * "<name> (Event Lead)" when the Event Lead award was the one clamped.
+     */
+    "capped": CappedAward[] | null;
 }
 
 /**
@@ -142,6 +149,20 @@ export interface BidsResponse {
     "replay"?: boolean;
 }
 
+export interface CapAmount {
+    "awarded": number;
+    "nominal": number;
+}
+
+/**
+ * CappedAward is one award the server's per-cycle EP cap clamped.
+ */
+export interface CappedAward {
+    "name": string;
+    "awarded": number;
+    "nominal": number;
+}
+
 export interface Character {
     "id": number;
     "name": string;
@@ -150,6 +171,34 @@ export interface Character {
     "status": string;
     "mainCharacterName": string | null;
     "priorityRating": number | null;
+}
+
+export interface EpCapPreviewEntry {
+    "name": string;
+    "nominal": number;
+    "awarded": number;
+    "capped": boolean;
+}
+
+export interface EpCapPreviewItem {
+    "activity": string;
+    "occurredAt": string;
+    "cap": number | null;
+    "entries": EpCapPreviewEntry[] | null;
+}
+
+/**
+ * EpCapPreviewRequest is one capture/entry to preview against the per-cycle
+ * EP cap: either Names (attendance) or CharacterID (manual entry). Points
+ * nil means "the activity's current EP value" (attendance); a manual entry
+ * always sends its own points.
+ */
+export interface EpCapPreviewRequest {
+    "activity": string;
+    "occurredAt": string;
+    "names"?: string[] | null;
+    "characterId"?: number;
+    "points"?: number | null;
 }
 
 /**
@@ -197,6 +246,14 @@ export interface ManualEntryRequest {
     "points": number;
     "occurredAt": string;
     "note": string;
+}
+
+/**
+ * ManualEntryResponse — Capped is set when the per-cycle EP cap reduced
+ * the entry (only ever for an EP entry).
+ */
+export interface ManualEntryResponse {
+    "capped"?: CapAmount | null;
 }
 
 export interface PointValue {

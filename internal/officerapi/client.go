@@ -305,6 +305,17 @@ type AttendanceResponse struct {
 	// bug. The attendance rows above still land; only the SECOND award was
 	// skipped.
 	EventLeadSkipped *EventLeadInfo `json:"eventLeadSkipped,omitempty"`
+	// Members whose award the per-cycle EP cap reduced (still recorded, with
+	// Awarded instead of Nominal EP — 0 when already at the cap). Includes
+	// "<name> (Event Lead)" when the Event Lead award was the one clamped.
+	Capped []CappedAward `json:"capped"`
+}
+
+// CappedAward is one award the server's per-cycle EP cap clamped.
+type CappedAward struct {
+	Name    string  `json:"name"`
+	Awarded float64 `json:"awarded"`
+	Nominal float64 `json:"nominal"`
 }
 
 // EventLeadInfo names who already holds Event Lead for a raid moment —
@@ -573,8 +584,70 @@ type ManualEntryRequest struct {
 	Note        string  `json:"note"`
 }
 
-func (c *Client) SubmitManualEntry(ctx context.Context, req ManualEntryRequest) error {
-	return c.do(ctx, http.MethodPost, "/api/officer/manual-entry", req, nil)
+// ManualEntryResponse — Capped is set when the per-cycle EP cap reduced
+// the entry (only ever for an EP entry).
+type ManualEntryResponse struct {
+	Capped *CapAmount `json:"capped,omitempty"`
+}
+
+type CapAmount struct {
+	Awarded float64 `json:"awarded"`
+	Nominal float64 `json:"nominal"`
+}
+
+func (c *Client) SubmitManualEntry(ctx context.Context, req ManualEntryRequest) (ManualEntryResponse, error) {
+	var out ManualEntryResponse
+	err := c.do(ctx, http.MethodPost, "/api/officer/manual-entry", req, &out)
+	return out, err
+}
+
+// --- POST /api/officer/ep-cap/preview ---
+
+// EpCapPreviewRequest is one capture/entry to preview against the per-cycle
+// EP cap: either Names (attendance) or CharacterID (manual entry). Points
+// nil means "the activity's current EP value" (attendance); a manual entry
+// always sends its own points.
+type EpCapPreviewRequest struct {
+	Activity    string   `json:"activity"`
+	OccurredAt  string   `json:"occurredAt"`
+	Names       []string `json:"names,omitempty"`
+	CharacterID int      `json:"characterId,omitempty"`
+	Points      *float64 `json:"points,omitempty"`
+}
+
+type EpCapPreviewEntry struct {
+	Name    string  `json:"name"`
+	Nominal float64 `json:"nominal"`
+	Awarded float64 `json:"awarded"`
+	Capped  bool    `json:"capped"`
+}
+
+type EpCapPreviewItem struct {
+	Activity   string              `json:"activity"`
+	OccurredAt string              `json:"occurredAt"`
+	Cap        *float64            `json:"cap"`
+	Entries    []EpCapPreviewEntry `json:"entries"`
+}
+
+// PreviewEpCap asks the site what the per-cycle EP cap will do to these
+// items, in order (they accumulate, like a real Start/Mid/End submit).
+// Read-only. An older site without the route returns a 404 APIError.
+func (c *Client) PreviewEpCap(ctx context.Context, items []EpCapPreviewRequest) ([]EpCapPreviewItem, error) {
+	var out struct {
+		Items []EpCapPreviewItem `json:"items"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/officer/ep-cap/preview", map[string]any{"items": items}, &out); err != nil {
+		return []EpCapPreviewItem{}, err
+	}
+	if out.Items == nil {
+		out.Items = []EpCapPreviewItem{}
+	}
+	for i := range out.Items {
+		if out.Items[i].Entries == nil {
+			out.Items[i].Entries = []EpCapPreviewEntry{}
+		}
+	}
+	return out.Items, nil
 }
 
 // --- GET /api/officer/point-values ---

@@ -10,6 +10,7 @@ import {
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { EventLeadInfo } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { EpCapNotice, fetchCapPreview, type CapLine, type CapPreview } from "./EpCapNotice";
 import { NoMatchSelect } from "./NoMatchSelect";
 import { useRoster } from "./useRoster";
 
@@ -64,7 +65,9 @@ const UNIQUE_ASSIGNMENTS = new Set<Assignment>(["Raid - Start", "Raid - Mid", "R
 // capture before wasting a submit.
 const GATED = new Set<Assignment>(["Raid - Start", "Raid - Mid", "Raid - End", "Event Attend"]);
 
-type SubmittedInfo = { activity: string; inserted: number; note: string; awardEp: boolean };
+// `capped`: awards the site's per-cycle EP cap lowered (optional — captures
+// submitted by an older build, restored from localStorage, lack it).
+type SubmittedInfo = { activity: string; inserted: number; note: string; awardEp: boolean; capped?: CapLine[] };
 
 // Pre-submit probe result for one capture (GET /api/officer/attendance).
 // enteredBy/eventLead only come back when count > 0 — see route.ts's GET
@@ -166,6 +169,7 @@ export function AttendancePanel() {
   // "checking" while the probe is in flight; absent = not checked / probe
   // failed (no warning shown, submit still allowed).
   const [dupChecks, setDupChecks] = useState<Record<string, DupCheck | "checking">>({});
+  const [capPreview, setCapPreview] = useState<CapPreview>({ status: "idle", lines: [], cap: null });
   const roster = useRoster();
 
   // 2026-09-23 (post-live-test-1 feedback): an officer wasn't sure where to
@@ -377,6 +381,17 @@ export function AttendancePanel() {
     // commits. Best-effort: a failed probe just shows no warning.
     setDupChecks(Object.fromEntries(toSubmit.map((c) => [c.id, "checking" as const])));
     setConfirmOpen(true);
+    // Which awards the per-cycle EP cap will lower — previewed for all
+    // captures together, in order, the way they'll actually land.
+    if (awardEp) {
+      setCapPreview({ status: "checking", lines: [], cap: null });
+      void fetchCapPreview(
+        toSubmit.map((c) => ({ activity: c.assignment, occurredAt: c.occurredAt, names: c.rows.map((r) => r.name.trim()).filter(Boolean) })),
+        toSubmit.length > 1 ? toSubmit.map(activityLabel) : undefined,
+      ).then(setCapPreview);
+    } else {
+      setCapPreview({ status: "idle", lines: [], cap: null });
+    }
     await Promise.all(
       toSubmit.map(async (c) => {
         try {
@@ -445,15 +460,16 @@ export function AttendancePanel() {
         const unmatched = res.unmatched ?? [];
         const duplicates = res.duplicates ?? [];
         const skipped = res.eventLeadSkipped;
+        const capped: CapLine[] = (res.capped ?? []).map((x) => ({ name: x.name, awarded: x.awarded, nominal: x.nominal }));
         const note =
           (unmatched.length ? ` no match: ${unmatched.join(", ")};` : "") +
           (duplicates.length ? ` already recorded: ${duplicates.join(", ")};` : "") +
           (skipped ? ` Event Lead already awarded to ${skipped.recipientName}${skipped.enteredByName ? ` (by ${skipped.enteredByName})` : ""} — not awarded again;` : "");
         setCaptures((prev) =>
-          prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: activityLabel(c), inserted: res.inserted, note, awardEp: res.awardEp } } : x)),
+          prev.map((x) => (x.id === c.id ? { ...x, submitted: { activity: activityLabel(c), inserted: res.inserted, note, awardEp: res.awardEp, capped } } : x)),
         );
         done.push(
-          `${activityLabel(c)}: ${res.inserted}${res.awardEp ? "" : " (0 EP)"}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}${skipped ? ` (Event Lead already went to ${skipped.recipientName})` : ""}`,
+          `${activityLabel(c)}: ${res.inserted}${res.awardEp ? "" : " (0 EP)"}${res.eventLeadInserted ? ` + Event Lead${res.eventLeadCharacterName ? ` (${res.eventLeadCharacterName})` : ""}` : ""}${skipped ? ` (Event Lead already went to ${skipped.recipientName})` : ""}${capped.length ? ` (${capped.length} lowered by the EP cap)` : ""}`,
         );
       }
       setSubmitSummary(
@@ -647,6 +663,12 @@ export function AttendancePanel() {
                   </div>
                 ))}
 
+                {c.submitted?.capped && c.submitted.capped.length > 0 && (
+                  <div style={{ margin: "0 10px 8px" }}>
+                    <EpCapNotice lines={c.submitted.capped} mode="result" />
+                  </div>
+                )}
+
                 {c.expanded && (
                   <div style={{ padding: "0 10px 10px" }}>
                     <div className="toolbar">
@@ -772,6 +794,16 @@ export function AttendancePanel() {
                 );
               })}
             </ul>
+            {capPreview.status === "checking" && (
+              <p style={{ margin: "0 0 8px", color: "#9ca3af", fontSize: 13 }}>Checking the EP cycle cap…</p>
+            )}
+            {capPreview.status === "ready" && <EpCapNotice lines={capPreview.lines} mode="preview" cap={capPreview.cap} />}
+            {capPreview.status === "unavailable" && (
+              <p style={{ margin: "0 0 8px", color: "#9ca3af", fontSize: 13 }}>
+                Couldn't check the EP cycle cap ahead of time. If anyone is near the cap, the site will lower their award
+                automatically and you'll see who after submitting.
+              </p>
+            )}
             {dupNewCount === 0 && Object.keys(dupChecks).length > 0 && (
               <p style={{ margin: "0 0 8px", color: "#fbbf24" }}>
                 Every name in these captures is already recorded. Submitting again writes nothing new (the site
