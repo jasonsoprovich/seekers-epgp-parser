@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FetchGuildSettings, ParseAttendanceText, SubmitAttendance } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
+import { EpCapNotice, useCapPreview, type CapLine } from "./EpCapNotice";
 
 // "Event Attend" first: the main reason this form exists is player-run
 // quests, whose attendance reaches an officer as a pasted log rather than a
@@ -78,6 +79,12 @@ export function ManualAttendanceForm() {
   const uniqueCount = useMemo(() => new Set(names.map((n) => n.toLowerCase())).size, [names]);
   const gated = GATED_ACTIVITIES.has(activity);
   const short = gated && minAttendance !== null && uniqueCount < minAttendance;
+  const [cappedResult, setCappedResult] = useState<CapLine[]>([]);
+  const previewIso = Number.isNaN(Date.parse(occurredAt)) ? "" : new Date(occurredAt).toISOString();
+  const capPreview = useCapPreview(
+    awardEp && names.length > 0 && previewIso ? [{ activity, occurredAt: previewIso, names }] : null,
+    `${awardEp}|${activity}|${previewIso}|${names.join(",")}|${success ?? ""}`,
+  );
 
   async function extractNames() {
     setError(null);
@@ -124,6 +131,7 @@ export function ManualAttendanceForm() {
   async function submit() {
     setError(null);
     setSuccess(null);
+    setCappedResult([]);
     if (names.length === 0) {
       setError("Enter at least one name (one per line), or paste a log and extract them.");
       return;
@@ -153,6 +161,9 @@ export function ManualAttendanceForm() {
       const notes: string[] = [];
       if (unmatched.length) notes.push(`no match for: ${unmatched.join(", ")}`);
       if (duplicates.length) notes.push(`already recorded, skipped: ${duplicates.join(", ")}`);
+      const capped = (resp.capped ?? []).map((x) => ({ name: x.name, awarded: x.awarded, nominal: x.nominal }));
+      if (capped.length) notes.push(`${capped.length} lowered by the EP cap (see below)`);
+      setCappedResult(capped);
       setSuccess(
         `Recorded ${activity} for ${resp.inserted} character(s)${resp.awardEp ? "" : " — 0 EP"}.${resp.eventLeadInserted ? " Event Lead was awarded." : ""}${
           notes.length ? " — " + notes.join(" — ") : ""
@@ -174,6 +185,7 @@ export function ManualAttendanceForm() {
     <div className="form-card">
       {error && <div className="error">{error}</div>}
       {success && <div className="success">{success}</div>}
+      <EpCapNotice lines={cappedResult} mode="result" />
 
       <div className="form-row">
         <label>
@@ -255,6 +267,8 @@ export function ManualAttendanceForm() {
           <textarea rows={8} value={namesText} onChange={(e) => setNamesText(e.target.value)} placeholder={"Osui\nTakkisina\nKaalos"} />
         </label>
       </div>
+
+      {capPreview.status === "ready" && <EpCapNotice lines={capPreview.lines} mode="preview" cap={capPreview.cap} />}
 
       <div className="form-actions">
         <button className="primary" onClick={submit} disabled={pending || names.length === 0 || short}>

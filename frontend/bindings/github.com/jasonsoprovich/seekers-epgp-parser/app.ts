@@ -419,6 +419,16 @@ export function PreviewBankSync(): $CancellablePromise<$models.BankSyncResult> {
 }
 
 /**
+ * PreviewEpCap shows, before submit, which awards the site's per-cycle EP
+ * cap will reduce — feeds the confirm dialogs' "+30 instead of 50" lines.
+ * Read-only; the frontend treats an error (older site, offline) as "no
+ * preview" and still lets the officer submit.
+ */
+export function PreviewEpCap(items: officerapi$0.EpCapPreviewRequest[] | null): $CancellablePromise<officerapi$0.EpCapPreviewItem[] | null> {
+    return $Call.ByID(990848986, items);
+}
+
+/**
  * RemoveRollSession hides one session from the Rolls tab entirely (a test
  * /random, or a range that wasn't actually a loot roll) and, like Stop,
  * forces the next roll in the same range to start fresh rather than
@@ -588,8 +598,8 @@ export function StopRollSession(id: string): $CancellablePromise<$models.RollSes
  * Settings/confirm-dialog UI lets an officer name someone else instead of
  * only being able to toggle their own award on/off.
  * 
- * note is written onto every row; a "New Target" capture requires it (the
- * boss name — the site rejects a blank one and dedupes on it).
+ * note is written onto every row — for a "New Target" capture, the optional
+ * boss name (the site dedupes that bonus on it when given).
  */
 export function SubmitAttendance(activity: string, occurredAt: string, names: string[] | null, zone: string, raidName: string, awardEp: boolean, awardEventLead: boolean, eventLeadCharacterName: string, note: string): $CancellablePromise<officerapi$0.AttendanceResponse> {
     return $Call.ByID(2782717002, activity, occurredAt, names, zone, raidName, awardEp, awardEventLead, eventLeadCharacterName, note);
@@ -641,7 +651,7 @@ export function SubmitManualBid(itemName: string, occurredAt: string, note: stri
     return $Call.ByID(2335504918, itemName, occurredAt, note, entries, confirmDuplicate);
 }
 
-export function SubmitManualEntry(req: officerapi$0.ManualEntryRequest): $CancellablePromise<void> {
+export function SubmitManualEntry(req: officerapi$0.ManualEntryRequest): $CancellablePromise<officerapi$0.ManualEntryResponse> {
     return $Call.ByID(1930507941, req);
 }
 

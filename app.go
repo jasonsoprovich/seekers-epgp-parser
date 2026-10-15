@@ -701,12 +701,24 @@ func (a *App) FetchPointValues() (PointValues, error) {
 	return PointValues{EP: ep, GP: gp}, err
 }
 
-func (a *App) SubmitManualEntry(req officerapi.ManualEntryRequest) error {
+func (a *App) SubmitManualEntry(req officerapi.ManualEntryRequest) (officerapi.ManualEntryResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
-		return err
+		return officerapi.ManualEntryResponse{}, err
 	}
 	return client.SubmitManualEntry(a.ctx, req)
+}
+
+// PreviewEpCap shows, before submit, which awards the site's per-cycle EP
+// cap will reduce — feeds the confirm dialogs' "+30 instead of 50" lines.
+// Read-only; the frontend treats an error (older site, offline) as "no
+// preview" and still lets the officer submit.
+func (a *App) PreviewEpCap(items []officerapi.EpCapPreviewRequest) ([]officerapi.EpCapPreviewItem, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return []officerapi.EpCapPreviewItem{}, err
+	}
+	return client.PreviewEpCap(a.ctx, items)
 }
 
 // SubmitManualBid records a bid round the parser never captured — a tell

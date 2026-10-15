@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FetchPointValues, SubmitManualEntry } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { PointValue } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
+import { EpCapNotice, useCapPreview, type CapLine } from "./EpCapNotice";
 import { ManualAttendanceForm } from "./ManualAttendanceForm";
 import { useOfficerDataGeneration } from "./officerData";
 import { useRoster } from "./useRoster";
@@ -32,7 +33,16 @@ export function ManualEntryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [pointValuesError, setPointValuesError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [cappedResult, setCappedResult] = useState<CapLine[]>([]);
   const roster = useRoster();
+  // Live "the EP cap will lower this" preview while an EP entry is filled in
+  // (positive EP only — the cap never touches a negative correction or GP).
+  const previewPoints = Number(points);
+  const previewItems =
+    kind === "ep" && characterId !== "" && Number.isFinite(previewPoints) && previewPoints > 0
+      ? [{ activity: (activitySelect === CUSTOM ? customActivity.trim() : activitySelect) || "Manual", occurredAt: new Date().toISOString(), characterId, points: previewPoints }]
+      : null;
+  const capPreview = useCapPreview(previewItems, `${kind}|${characterId}|${previewPoints}|${success ?? ""}`);
   // Re-run the point-values fetch when the key is saved or Retry is clicked
   // — same reason useRoster subscribes: this effect's failure was otherwise
   // frozen for the whole session (see officerData.ts).
@@ -64,6 +74,7 @@ export function ManualEntryPanel() {
   async function onSubmit() {
     setError(null);
     setSuccess(null);
+    setCappedResult([]);
     if (characterId === "") {
       setError("Pick a character.");
       return;
@@ -81,7 +92,7 @@ export function ManualEntryPanel() {
 
     setPending(true);
     try {
-      await SubmitManualEntry({
+      const res = await SubmitManualEntry({
         kind,
         characterId,
         activity: kind === "ep" ? activity : undefined,
@@ -93,7 +104,13 @@ export function ManualEntryPanel() {
         note: note.trim(),
       });
       const characterName = roster.characters.find((c) => c.id === characterId)?.name ?? "character";
-      setSuccess(`Recorded ${pointsNum} ${kind.toUpperCase()} for ${characterName} (${activity}).`);
+      const capped = res.capped;
+      if (capped) {
+        setSuccess(`Recorded +${capped.awarded} of ${capped.nominal} EP for ${characterName} (${activity}). The EP cap lowered it; see below.`);
+        setCappedResult([{ name: characterName, awarded: capped.awarded, nominal: capped.nominal }]);
+      } else {
+        setSuccess(`Recorded ${pointsNum} ${kind.toUpperCase()} for ${characterName} (${activity}).`);
+      }
       setPoints("");
       setNote("");
       setItemName("");
@@ -121,6 +138,7 @@ export function ManualEntryPanel() {
         <>
           {error && <div className="error">{error}</div>}
           {success && <div className="success">{success}</div>}
+          <EpCapNotice lines={cappedResult} mode="result" />
           {(pointValuesError || roster.error) && (
             <div className="warning">
               {pointValuesError && <div>Couldn't load activities/points: {pointValuesError}</div>}
@@ -220,6 +238,8 @@ export function ManualEntryPanel() {
             <input type="text" value={note} onChange={(e) => setNote(e.target.value)} />
           </label>
         </div>
+
+          {capPreview.status === "ready" && <EpCapNotice lines={capPreview.lines} mode="preview" cap={capPreview.cap} />}
 
           <div className="form-actions">
             <button className="primary" onClick={onSubmit} disabled={pending}>
