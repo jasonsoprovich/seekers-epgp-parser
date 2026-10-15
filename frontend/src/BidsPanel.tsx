@@ -675,7 +675,24 @@ export function BidsPanel() {
   // for the clipboard only: control characters in a link would just show as
   // boxes/garbage if put on screen here.
   function gratsMessage(winners: BidRow[]): string {
-    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${capturedItem}!`;
+    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${capturedItem}, ${gratsDetail(winners)}.`;
+  }
+
+  // The ", 12 total bids and won with a Medium Bid at 2.5431 priority" part
+  // of the grats line. Total bids = every active (non-superseded) row, the
+  // same count the submit confirm dialog shows. With more than one winner
+  // each winner gets their own tier/priority. Priority is left out if the
+  // roster has no rating for that character.
+  function gratsDetail(winners: BidRow[]): string {
+    const totalBids = rows.filter((_, i) => !supersededSet.has(i)).length;
+    const total = `${totalBids} total bid${totalBids === 1 ? "" : "s"}`;
+    const wonWith = (r: BidRow): string => {
+      const article = /^[aeiou]/i.test(r.tier) ? "an" : "a";
+      const priority = roster.resolve(r.characterName).priorityRating;
+      return `won with ${article} ${r.tier}${priority !== null ? ` at ${priority.toFixed(4)} priority` : ""}`;
+    };
+    if (winners.length === 1) return `${total} and ${wonWith(winners[0])}`;
+    return `${total}; ${winners.map((r) => `${r.characterName} ${wonWith(r)}`).join(", ")}`;
   }
 
   // Same message, but with the item name resolved to an in-game clickable
@@ -685,7 +702,7 @@ export function BidsPanel() {
   // item can't be matched.
   async function gratsMessageLinked(winners: BidRow[]): Promise<string> {
     const linkedItem = await ItemLink(capturedItem).catch(() => capturedItem);
-    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${linkedItem}!`;
+    return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${linkedItem}, ${gratsDetail(winners)}.`;
   }
 
   async function onCopyGrats() {
