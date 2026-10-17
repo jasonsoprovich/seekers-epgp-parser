@@ -8,6 +8,7 @@ import "strings"
 // DesignatedSlot above: this package stays free of any tracker-API
 // dependency).
 type UnverifiedItem struct {
+	ID       int
 	ItemName string
 	ItemID   int
 	Quantity int
@@ -108,11 +109,32 @@ func containerItemNames(c Container) []string {
 	return names
 }
 
+// containsFold reports whether target names the same item as any of
+// names, compared via NormalizeItemName — the sheet lists a spell by its
+// bare name ("Breath of Tunare") while the export has "Spell: Breath of
+// Tunare". Before 2026-10-17 this was a plain EqualFold, so no spell or
+// song ever produced a suggestion (Darkclaw's unflagged Bank7-30 spells
+// went straight to the site's "needs review" list instead).
 func containsFold(names []string, target string) bool {
+	want := NormalizeItemName(target)
 	for _, n := range names {
-		if strings.EqualFold(n, target) {
+		if NormalizeItemName(n) == want {
 			return true
 		}
 	}
 	return false
+}
+
+// NormalizeItemName is the "same item?" comparison key shared with the
+// site (src/lib/bank/item-name.ts normalizeBankItemName — keep in sync):
+// trimmed, lowercased, whitespace collapsed, and a leading "Spell: " or
+// "Song: " dropped.
+func NormalizeItemName(name string) string {
+	n := strings.ToLower(strings.Join(strings.Fields(name), " "))
+	for _, prefix := range []string{"spell:", "song:"} {
+		if strings.HasPrefix(n, prefix) {
+			return strings.TrimSpace(n[len(prefix):])
+		}
+	}
+	return n
 }

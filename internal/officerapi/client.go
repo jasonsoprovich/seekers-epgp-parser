@@ -847,6 +847,9 @@ type SyncedOccupant struct {
 // unconfirmed by any real sync yet — 2026-09-27. Mirrors src/lib/bank/
 // sync.ts's UnverifiedContentEntry.
 type UnverifiedItem struct {
+	// ID is the site's bank_holdings row id — what RemoveBankUnverified
+	// sends back (absent/0 from a pre-2026-10-17 server).
+	ID             int    `json:"id"`
 	ItemName       string `json:"itemName"`
 	ItemID         int    `json:"itemId"`
 	Quantity       int    `json:"quantity"`
@@ -919,6 +922,17 @@ func (c *Client) SaveBankAccount(ctx context.Context, req SaveBankAccountRequest
 	}
 	err := c.do(ctx, http.MethodPut, "/api/officer/bank/accounts", req, &out)
 	return out.ID, err
+}
+
+// RemoveBankUnverified removes old-sheet/manual bank rows an officer has
+// confirmed are gone (POST /api/officer/bank/unverified). The site requires
+// a note and audits each row; returns how many were removed.
+func (c *Client) RemoveBankUnverified(ctx context.Context, ids []int, note string) (int, error) {
+	var out struct {
+		Removed int `json:"removed"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/officer/bank/unverified", map[string]any{"ids": ids, "note": note}, &out)
+	return out.Removed, err
 }
 
 func (c *Client) DeleteBankAccount(ctx context.Context, id int) error {

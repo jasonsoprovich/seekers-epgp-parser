@@ -82,6 +82,20 @@ export interface BankCharacterExport {
      * nothing unflagged looks like a match.
      */
     "flagSuggestions": BankFlagSuggestion[] | null;
+
+    /**
+     * NeedsReview is every old-sheet/manual item a real sync of this
+     * character already looked for and couldn't find (2026-10-17) — shown
+     * right on the Guild Bank tab so a banker can flag the right bag or
+     * remove what's really gone, instead of finding it later on /bank.
+     */
+    "needsReview": BankUnverifiedItem[] | null;
+
+    /**
+     * UnverifiedCount is every still-unconfirmed sheet/manual item on this
+     * character, needs-review or not (those just haven't been synced yet).
+     */
+    "unverifiedCount": number;
 }
 
 /**
@@ -236,6 +250,7 @@ export interface BankSyncResult {
  * bankexport.MoveWarning).
  */
 export interface BankUnverifiedItem {
+    "id": number;
     "itemName": string;
     "itemId": number;
     "quantity": number;
