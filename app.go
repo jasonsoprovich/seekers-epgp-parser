@@ -853,6 +853,7 @@ type BankMoveWarning struct {
 // meant for the frontend (same pattern BankMoveWarning already sets for
 // bankexport.MoveWarning).
 type BankUnverifiedItem struct {
+	ID             int    `json:"id"`
 	ItemName       string `json:"itemName"`
 	ItemID         int    `json:"itemId"`
 	Quantity       int    `json:"quantity"`
@@ -874,7 +875,7 @@ type BankFlagSuggestion struct {
 func toBankFlagSuggestionItems(items []bankexport.UnverifiedItem) []BankUnverifiedItem {
 	out := make([]BankUnverifiedItem, len(items))
 	for i, u := range items {
-		out[i] = BankUnverifiedItem{ItemName: u.ItemName, ItemID: u.ItemID, Quantity: u.Quantity, LegacyLocation: u.LegacyLocation, Kind: u.Kind, NotFound: u.NotFound}
+		out[i] = BankUnverifiedItem{ID: u.ID, ItemName: u.ItemName, ItemID: u.ItemID, Quantity: u.Quantity, LegacyLocation: u.LegacyLocation, Kind: u.Kind, NotFound: u.NotFound}
 	}
 	return out
 }
@@ -890,7 +891,7 @@ func toBankFlagSuggestions(suggestions []bankexport.FlagSuggestion) []BankFlagSu
 func toBankexportUnverifiedItems(items []officerapi.UnverifiedItem) []bankexport.UnverifiedItem {
 	out := make([]bankexport.UnverifiedItem, len(items))
 	for i, u := range items {
-		out[i] = bankexport.UnverifiedItem{ItemName: u.ItemName, ItemID: u.ItemID, Quantity: u.Quantity, LegacyLocation: u.LegacyLocation, Kind: u.Kind, NotFound: u.NotFound}
+		out[i] = bankexport.UnverifiedItem{ID: u.ID, ItemName: u.ItemName, ItemID: u.ItemID, Quantity: u.Quantity, LegacyLocation: u.LegacyLocation, Kind: u.Kind, NotFound: u.NotFound}
 	}
 	return out
 }
@@ -932,6 +933,14 @@ type BankCharacterExport struct {
 	// Empty when there's nothing unverified for this character, or
 	// nothing unflagged looks like a match.
 	FlagSuggestions []BankFlagSuggestion `json:"flagSuggestions"`
+	// NeedsReview is every old-sheet/manual item a real sync of this
+	// character already looked for and couldn't find (2026-10-17) — shown
+	// right on the Guild Bank tab so a banker can flag the right bag or
+	// remove what's really gone, instead of finding it later on /bank.
+	NeedsReview []BankUnverifiedItem `json:"needsReview"`
+	// UnverifiedCount is every still-unconfirmed sheet/manual item on this
+	// character, needs-review or not (those just haven't been synced yet).
+	UnverifiedCount int `json:"unverifiedCount"`
 }
 
 // BankSuggestedGroup is an auto-detected "these characters look like the
@@ -1172,6 +1181,12 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 		warnings := bankexport.DetectMoves(inv, allDesignated)
 		unverified := toBankexportUnverifiedItems(sc.cfg.UnverifiedContents[strconv.Itoa(rc.ID)])
 		flagSuggestions := bankexport.SuggestFlags(inv, allDesignated, unverified)
+		needsReview := []BankUnverifiedItem{}
+		for _, u := range toBankFlagSuggestionItems(unverified) {
+			if u.NotFound {
+				needsReview = append(needsReview, u)
+			}
+		}
 
 		exports = append(exports, BankCharacterExport{
 			Character:             inv.Character,
@@ -1189,6 +1204,8 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 			LastImport:            lastImport,
 			MoveWarnings:          toBankMoveWarnings(warnings),
 			FlagSuggestions:       toBankFlagSuggestions(flagSuggestions),
+			NeedsReview:           needsReview,
+			UnverifiedCount:       len(unverified),
 		})
 	}
 
@@ -1418,6 +1435,17 @@ func (a *App) SaveBankEqAccount(req officerapi.SaveBankAccountRequest) (int, err
 		return 0, err
 	}
 	return client.SaveBankAccount(a.ctx, req)
+}
+
+// RemoveBankUnverified removes reviewed old-sheet/manual bank rows (by
+// site row id) that the banker confirmed are gone. note is required by
+// the site and lands in the bank audit log.
+func (a *App) RemoveBankUnverified(ids []int, note string) (int, error) {
+	client, err := a.officerClient()
+	if err != nil {
+		return 0, err
+	}
+	return client.RemoveBankUnverified(a.ctx, ids, note)
 }
 
 func (a *App) DeleteBankEqAccount(id int) error {

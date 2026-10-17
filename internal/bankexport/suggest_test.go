@@ -91,3 +91,34 @@ func TestSuggestFlags_EmptyUnverifiedReturnsEmpty(t *testing.T) {
 		t.Errorf("expected an empty (never nil-ambiguous) slice with nothing unverified, got %+v", suggestions)
 	}
 }
+
+// 2026-10-17: the sheet lists bare spell names; the export prefixes them.
+// A plain case-insensitive compare never suggested any spell/song bag.
+func TestSuggestFlags_SpellPrefixIgnored(t *testing.T) {
+	inv := invWith([]Container{
+		bagContainer("Bank13", 900, "Hand Made Backpack",
+			SlotItem{SlotIndex: 3, ItemID: 100, ItemName: "Spell: Brell's Mountainous Barrier"},
+			SlotItem{SlotIndex: 4, ItemID: 101, ItemName: "Song: Occlusion of Sound"}),
+	})
+	unverified := []UnverifiedItem{
+		{ItemName: "Brell's Mountainous Barrier", Quantity: 1, LegacyLocation: "Bank13-Slot3", Kind: "sheet"},
+		{ItemName: "occlusion of  sound", Quantity: 1, Kind: "sheet"},
+	}
+
+	suggestions := SuggestFlags(inv, nil, unverified)
+	if len(suggestions) != 1 || suggestions[0].Container != "Bank13" || len(suggestions[0].Matches) != 2 {
+		t.Fatalf("expected Bank13 suggested for both prefixed items, got %+v", suggestions)
+	}
+}
+
+func TestNormalizeItemName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Spell: Breath of Tunare": "breath of tunare",
+		"  SONG:  Selo's  Song ":  "selo's song",
+		"Spellbinder's Gloves":    "spellbinder's gloves",
+	} {
+		if got := NormalizeItemName(in); got != want {
+			t.Errorf("NormalizeItemName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
