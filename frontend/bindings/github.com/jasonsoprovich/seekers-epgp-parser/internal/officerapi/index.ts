@@ -4,7 +4,6 @@
 export type {
     AttendanceCheck,
     AttendanceResponse,
-    BankEqAccount,
     BankImportInfo,
     BankSyncDiff,
     BankSyncDiffRow,
@@ -21,7 +20,6 @@ export type {
     ManualEntryRequest,
     ManualEntryResponse,
     PointValue,
-    SaveBankAccountRequest,
     Settings,
     TotalsRow
 } from "./models.js";

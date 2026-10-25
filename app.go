@@ -906,22 +906,19 @@ type BankCharacterExport struct {
 	Bags       []BankContainer `json:"bags"`
 	Bank       []BankContainer `json:"bank"`
 	SharedBank []BankContainer `json:"sharedBank"`
-	// SharedBankFingerprint is "" when this export's SharedBank is empty
-	// (bankexport.SharedBankFingerprint) — used client-side only for the
-	// account-grouping UI, not sent anywhere.
-	SharedBankFingerprint string `json:"sharedBankFingerprint"`
 	// RosterCharacterID is nil when no roster character matches this
 	// export's filename — the Guild Bank tab offers "Create mule" for
 	// these instead of showing containers to toggle.
 	RosterCharacterID *int   `json:"rosterCharacterId"`
 	RosterCharType    string `json:"rosterCharType"`
-	EqAccountID       *int   `json:"eqAccountId"`
-	// IsSharedBankHolder is true when this character is its account
-	// group's designated SharedBank holder — only its SharedBank
-	// containers can ever be flagged guild (a designation update on a
-	// non-holder is refused server-side, same rule the server enforces).
-	IsSharedBankHolder bool                       `json:"isSharedBankHolder"`
-	LastImport         *officerapi.BankImportInfo `json:"lastImport"`
+	// SharedBankAlsoFlaggedOn names the officer's OTHER characters whose
+	// export shows this same (non-empty) Shared Bank with Shared Bank slots
+	// flagged guild too — i.e. two characters on one EQ login both set to
+	// upload it, which would count every item twice. Empty normally. While
+	// non-empty this character is left out of a sync until one side's
+	// Shared Bank flags are cleared (see sharedBankConflicts).
+	SharedBankAlsoFlaggedOn []string                   `json:"sharedBankAlsoFlaggedOn"`
+	LastImport              *officerapi.BankImportInfo `json:"lastImport"`
 	// MoveWarnings is every detected bag/item move for this character —
 	// empty when nothing looks moved. A non-empty list blocks this
 	// character from Preview/Submit Sync until each one is resolved.
@@ -943,20 +940,9 @@ type BankCharacterExport struct {
 	UnverifiedCount int `json:"unverifiedCount"`
 }
 
-// BankSuggestedGroup is an auto-detected "these characters look like the
-// same EQ account" suggestion (matching, non-empty SharedBank
-// fingerprints) for characters not already in a saved account group. The
-// officer confirms or ignores it via SaveBankEqAccount — nothing is
-// grouped automatically.
-type BankSuggestedGroup struct {
-	CharacterNames []string `json:"characterNames"`
-}
-
 type GuildBankState struct {
-	GameDir         string                     `json:"gameDir"`
-	Exports         []BankCharacterExport      `json:"exports"`
-	Accounts        []officerapi.BankEqAccount `json:"accounts"`
-	SuggestedGroups []BankSuggestedGroup       `json:"suggestedGroups"`
+	GameDir string                `json:"gameDir"`
+	Exports []BankCharacterExport `json:"exports"`
 	// Unmatched names a real export was found for but no roster character
 	// matches — surfaced separately so the UI can offer "Create mule"
 	// without cluttering Exports with an entry that has nothing to toggle.
@@ -964,15 +950,13 @@ type GuildBankState struct {
 }
 
 // bankScanContext is what every Guild Bank operation needs: the exports on
-// disk, the roster (by lowercased name), the site's current designation
-// config, and which account (if any) each roster character belongs to.
-// Centralized so ScanGuildBank and buildBankSyncHolders can't drift into
-// resolving "which account is this character in" two different ways.
+// disk, the roster (by lowercased name), and the site's current designation
+// config. Centralized so ScanGuildBank and buildBankSyncHolders resolve
+// everything the same way.
 type bankScanContext struct {
-	files           []bankexport.ExportFile
-	rosterByName    map[string]officerapi.Character
-	cfg             officerapi.BankConfig
-	accountByCharID map[int]officerapi.BankEqAccount
+	files        []bankexport.ExportFile
+	rosterByName map[string]officerapi.Character
+	cfg          officerapi.BankConfig
 }
 
 func (a *App) loadBankScanContext(client *officerapi.Client, gameDir string) (bankScanContext, error) {
@@ -994,14 +978,59 @@ func (a *App) loadBankScanContext(client *officerapi.Client, gameDir string) (ba
 	if err != nil {
 		return bankScanContext{}, err
 	}
-	accountByCharID := map[int]officerapi.BankEqAccount{}
-	for _, acc := range cfg.Accounts {
-		for _, cid := range acc.CharacterIDs {
-			accountByCharID[cid] = acc
+	return bankScanContext{files: files, rosterByName: rosterByName, cfg: cfg}, nil
+}
+
+// flagsSharedBank reports whether any SharedBank position is flagged guild.
+func (ds designationSets) flagsSharedBank() bool {
+	for _, d := range ds.designated {
+		if strings.HasPrefix(d.Container, "SharedBank") {
+			return true
 		}
 	}
+	return false
+}
 
-	return bankScanContext{files: files, rosterByName: rosterByName, cfg: cfg, accountByCharID: accountByCharID}, nil
+// sharedBankEntry is one of the officer's own characters for the duplicate
+// Shared Bank check: its name, its export's SharedBank fingerprint ("" when
+// empty) and whether any of its SharedBank slots are flagged guild.
+type sharedBankEntry struct {
+	name        string
+	fingerprint string
+	flagged     bool
+}
+
+// sharedBankConflicts finds characters on one EQ login that are BOTH set to
+// upload its Shared Bank. The Shared Bank belongs to the login, so every
+// character on it exports identical SharedBank contents — two such
+// characters with SharedBank flags would sync every item twice. Keyed by
+// character name; the value is the other character(s) it clashes with.
+// An empty SharedBank (fingerprint "") never clashes: there's nothing to
+// double-count, and every empty bank would otherwise "match".
+func sharedBankConflicts(entries []sharedBankEntry) map[string][]string {
+	byFingerprint := map[string][]string{}
+	for _, e := range entries {
+		if e.flagged && e.fingerprint != "" {
+			byFingerprint[e.fingerprint] = append(byFingerprint[e.fingerprint], e.name)
+		}
+	}
+	out := map[string][]string{}
+	for _, names := range byFingerprint {
+		if len(names) < 2 {
+			continue
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			others := []string{}
+			for _, other := range names {
+				if other != name {
+					others = append(others, other)
+				}
+			}
+			out[name] = others
+		}
+	}
+	return out
 }
 
 // designationSets splits one owner's flagged positions (as the server
@@ -1034,25 +1063,6 @@ func designationSetsFor(byMap map[string][]officerapi.DesignationSlot, key int) 
 		ds.sub[slot.Container][slot.SlotIndex] = true
 	}
 	return ds
-}
-
-func mergeDesignationSets(a, b designationSets) designationSets {
-	out := designationSets{whole: map[string]bool{}, sub: map[string]map[int]bool{}}
-	for _, ds := range []designationSets{a, b} {
-		for c := range ds.whole {
-			out.whole[c] = true
-		}
-		for c, slots := range ds.sub {
-			if out.sub[c] == nil {
-				out.sub[c] = map[int]bool{}
-			}
-			for s := range slots {
-				out.sub[c][s] = true
-			}
-		}
-		out.designated = append(out.designated, ds.designated...)
-	}
-	return out
 }
 
 func toBankItems(items []bankexport.SlotItem, container string, ds designationSets) []BankItem {
@@ -1139,10 +1149,7 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 
 	exports := make([]BankCharacterExport, 0, len(sc.files))
 	unmatched := []string{}
-	// fingerprint -> character names, only for characters not already in
-	// a saved account group — an already-grouped character never needs a
-	// suggestion.
-	fingerprintGroups := map[string][]string{}
+	sharedEntries := []sharedBankEntry{}
 
 	for _, f := range sc.files {
 		exp, parseErr := bankexport.ParseExport(f.Path)
@@ -1158,18 +1165,8 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 			continue
 		}
 
-		personalDS := designationSetsFor(sc.cfg.PersonalDesignations, rc.ID)
-		sharedDS := designationSets{whole: map[string]bool{}, sub: map[string]map[int]bool{}}
-		var eqAccountID *int
-		isHolder := false
-		if acc, ok := sc.accountByCharID[rc.ID]; ok {
-			id := acc.ID
-			eqAccountID = &id
-			isHolder = acc.SharedBankHolderCharacterID == rc.ID
-			sharedDS = designationSetsFor(sc.cfg.SharedDesignations, acc.ID)
-		} else if fp != "" {
-			fingerprintGroups[fp] = append(fingerprintGroups[fp], inv.Character)
-		}
+		ds := designationSetsFor(sc.cfg.Designations, rc.ID)
+		sharedEntries = append(sharedEntries, sharedBankEntry{name: inv.Character, fingerprint: fp, flagged: ds.flagsSharedBank()})
 
 		var lastImport *officerapi.BankImportInfo
 		if info, ok := sc.cfg.LastImports[strconv.Itoa(rc.ID)]; ok {
@@ -1177,7 +1174,7 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 			lastImport = &li
 		}
 
-		allDesignated := mergeDesignationSets(personalDS, sharedDS).designated
+		allDesignated := ds.designated
 		warnings := bankexport.DetectMoves(inv, allDesignated)
 		unverified := toBankexportUnverifiedItems(sc.cfg.UnverifiedContents[strconv.Itoa(rc.ID)])
 		flagSuggestions := bankexport.SuggestFlags(inv, allDesignated, unverified)
@@ -1189,43 +1186,36 @@ func (a *App) ScanGuildBank() (GuildBankState, error) {
 		}
 
 		exports = append(exports, BankCharacterExport{
-			Character:             inv.Character,
-			SourceFile:            filepath.Base(f.Path),
-			ExportedAt:            f.ModifiedAt.Format(time.RFC3339),
-			Equipped:              toBankEquipped(inv.Equipped),
-			Bags:                  toBankContainers(inv.Bags, personalDS),
-			Bank:                  toBankContainers(inv.Bank, personalDS),
-			SharedBank:            toBankContainers(inv.SharedBank, sharedDS),
-			SharedBankFingerprint: fp,
-			RosterCharacterID:     &rc.ID,
-			RosterCharType:        rc.CharType,
-			EqAccountID:           eqAccountID,
-			IsSharedBankHolder:    isHolder,
-			LastImport:            lastImport,
-			MoveWarnings:          toBankMoveWarnings(warnings),
-			FlagSuggestions:       toBankFlagSuggestions(flagSuggestions),
-			NeedsReview:           needsReview,
-			UnverifiedCount:       len(unverified),
+			Character:               inv.Character,
+			SourceFile:              filepath.Base(f.Path),
+			ExportedAt:              f.ModifiedAt.Format(time.RFC3339),
+			Equipped:                toBankEquipped(inv.Equipped),
+			Bags:                    toBankContainers(inv.Bags, ds),
+			Bank:                    toBankContainers(inv.Bank, ds),
+			SharedBank:              toBankContainers(inv.SharedBank, ds),
+			RosterCharacterID:       &rc.ID,
+			RosterCharType:          rc.CharType,
+			SharedBankAlsoFlaggedOn: []string{},
+			LastImport:              lastImport,
+			MoveWarnings:            toBankMoveWarnings(warnings),
+			FlagSuggestions:         toBankFlagSuggestions(flagSuggestions),
+			NeedsReview:             needsReview,
+			UnverifiedCount:         len(unverified),
 		})
 	}
 
-	suggested := []BankSuggestedGroup{}
-	for _, names := range fingerprintGroups {
-		if len(names) < 2 {
-			continue
+	conflicts := sharedBankConflicts(sharedEntries)
+	for i := range exports {
+		if others, ok := conflicts[exports[i].Character]; ok {
+			exports[i].SharedBankAlsoFlaggedOn = others
 		}
-		sort.Strings(names)
-		suggested = append(suggested, BankSuggestedGroup{CharacterNames: names})
 	}
-	sort.Slice(suggested, func(i, j int) bool { return suggested[i].CharacterNames[0] < suggested[j].CharacterNames[0] })
 	sort.Slice(exports, func(i, j int) bool { return exports[i].Character < exports[j].Character })
 	sort.Strings(unmatched)
 
 	return GuildBankState{
 		GameDir:             s.GameDir,
 		Exports:             exports,
-		Accounts:            sc.cfg.Accounts,
-		SuggestedGroups:     suggested,
 		UnmatchedCharacters: unmatched,
 	}, nil
 }
@@ -1239,40 +1229,38 @@ func toBankEquipped(items []bankexport.EquippedItem) []BankEquipped {
 }
 
 // ToggleBankContainer flags/unflags an ENTIRE top-level container (the bag
-// and everything in it) for one character's personal Bank/General slots,
-// or (eqAccountID set instead) an EQ account's SharedBank slots — pass
-// exactly one of characterID/eqAccountID, mirroring the site's own
-// "exactly one owner" rule. expectedItemID/expectedItemName seed the
+// and everything in it) — a General/Bank slot or a SharedBank slot, always
+// on one character. expectedItemID/expectedItemName seed the
 // move-detection baseline immediately from the current scan when flagging
 // on, rather than waiting for the first sync to set it.
-func (a *App) ToggleBankContainer(characterID, eqAccountID int, container string, guild bool, expectedItemID int, expectedItemName string) error {
+func (a *App) ToggleBankContainer(characterID int, container string, guild bool, expectedItemID int, expectedItemName string) error {
 	client, err := a.officerClient()
 	if err != nil {
 		return err
 	}
 	if guild {
 		add := []officerapi.DesignationSlot{{Container: container, SlotIndex: 0, ExpectedItemID: expectedItemID, ExpectedItemName: expectedItemName}}
-		return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, add, nil)
+		return client.UpdateBankDesignations(a.ctx, characterID, nil, add, nil)
 	}
 	remove := []officerapi.RemoveSlot{{Container: container, SlotIndex: 0}}
-	return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, nil, remove)
+	return client.UpdateBankDesignations(a.ctx, characterID, nil, nil, remove)
 }
 
 // ToggleBankItem flags/unflags ONE item inside a bag — finer-grained than
 // ToggleBankContainer (2026-09-25 officer feedback: "the ability to check
 // off the individual items within each bag in case things are spread
-// around"). Same owner/argument shape as ToggleBankContainer.
-func (a *App) ToggleBankItem(characterID, eqAccountID int, container string, slotIndex int, guild bool, itemID int, itemName string) error {
+// around"). Same argument shape as ToggleBankContainer.
+func (a *App) ToggleBankItem(characterID int, container string, slotIndex int, guild bool, itemID int, itemName string) error {
 	client, err := a.officerClient()
 	if err != nil {
 		return err
 	}
 	if guild {
 		add := []officerapi.DesignationSlot{{Container: container, SlotIndex: slotIndex, ExpectedItemID: itemID, ExpectedItemName: itemName}}
-		return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, add, nil)
+		return client.UpdateBankDesignations(a.ctx, characterID, nil, add, nil)
 	}
 	remove := []officerapi.RemoveSlot{{Container: container, SlotIndex: slotIndex}}
-	return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, nil, remove)
+	return client.UpdateBankDesignations(a.ctx, characterID, nil, nil, remove)
 }
 
 // BankSlotSeed is one position (a whole container, SlotIndex 0, or one
@@ -1304,9 +1292,8 @@ type BankRemoveSlot struct {
 //     one SlotIndex-0 whole-container flag instead, collapsing back to the
 //     simpler form.
 //
-// Same owner/argument shape as ToggleBankContainer/ToggleBankItem — pass
-// exactly one of characterID/eqAccountID.
-func (a *App) UpdateBankSlotFlags(characterID, eqAccountID int, add []BankSlotSeed, remove []BankRemoveSlot) error {
+// Same argument shape as ToggleBankContainer/ToggleBankItem.
+func (a *App) UpdateBankSlotFlags(characterID int, add []BankSlotSeed, remove []BankRemoveSlot) error {
 	client, err := a.officerClient()
 	if err != nil {
 		return err
@@ -1319,7 +1306,7 @@ func (a *App) UpdateBankSlotFlags(characterID, eqAccountID int, add []BankSlotSe
 	for i, r := range remove {
 		removeSlots[i] = officerapi.RemoveSlot{Container: r.Container, SlotIndex: r.SlotIndex}
 	}
-	return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, addSlots, removeSlots)
+	return client.UpdateBankDesignations(a.ctx, characterID, nil, addSlots, removeSlots)
 }
 
 // BankContainerSeed is one container to flag guild in bulk, carrying its
@@ -1338,7 +1325,7 @@ type BankContainerSeed struct {
 // pre-2026-09-25 bug where a full-set replace silently dropped a flag on
 // a container missing from the current scan (e.g. a moved bag's now-empty
 // old slot).
-func (a *App) MarkAllContainersGuild(characterID, eqAccountID int, containers []BankContainerSeed) error {
+func (a *App) MarkAllContainersGuild(characterID int, containers []BankContainerSeed) error {
 	client, err := a.officerClient()
 	if err != nil {
 		return err
@@ -1347,20 +1334,20 @@ func (a *App) MarkAllContainersGuild(characterID, eqAccountID int, containers []
 	for i, c := range containers {
 		add[i] = officerapi.DesignationSlot{Container: c.Container, SlotIndex: 0, ExpectedItemID: c.ExpectedItemID, ExpectedItemName: c.ExpectedItemName}
 	}
-	return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, nil, add, nil)
+	return client.UpdateBankDesignations(a.ctx, characterID, nil, add, nil)
 }
 
-// ClearAllBankDesignations wholesale-clears an owner's designations — the
+// ClearAllBankDesignations wholesale-clears a character's designations — the
 // one bulk action that's a real "replace with nothing" rather than
 // add/remove, since "clear everything" has no "leave other flags alone"
 // nuance to preserve.
-func (a *App) ClearAllBankDesignations(characterID, eqAccountID int) error {
+func (a *App) ClearAllBankDesignations(characterID int) error {
 	client, err := a.officerClient()
 	if err != nil {
 		return err
 	}
 	empty := []officerapi.DesignationSlot{}
-	return client.UpdateBankDesignations(a.ctx, characterID, eqAccountID, &empty, nil, nil)
+	return client.UpdateBankDesignations(a.ctx, characterID, &empty, nil, nil)
 }
 
 // ResolveBankMoveInput describes what to do about one detected bag/item
@@ -1378,7 +1365,6 @@ func (a *App) ClearAllBankDesignations(characterID, eqAccountID int) error {
 // with it would silently start tracking the wrong item.
 type ResolveBankMoveInput struct {
 	CharacterID      int    `json:"characterId"`
-	EqAccountID      int    `json:"eqAccountId"`
 	Container        string `json:"container"`
 	SlotIndex        int    `json:"slotIndex"`
 	Action           string `json:"action"` // "move" | "keep" | "unflag"
@@ -1423,18 +1409,7 @@ func (a *App) ResolveBankMove(input ResolveBankMoveInput) error {
 		return fmt.Errorf("unknown action %q", input.Action)
 	}
 
-	return client.UpdateBankDesignations(a.ctx, input.CharacterID, input.EqAccountID, nil, add, remove)
-}
-
-// SaveBankEqAccount creates or updates a "these characters share a real
-// EQ account" group — confirming (or overriding) one of ScanGuildBank's
-// SuggestedGroups, or a manual grouping.
-func (a *App) SaveBankEqAccount(req officerapi.SaveBankAccountRequest) (int, error) {
-	client, err := a.officerClient()
-	if err != nil {
-		return 0, err
-	}
-	return client.SaveBankAccount(a.ctx, req)
+	return client.UpdateBankDesignations(a.ctx, input.CharacterID, nil, add, remove)
 }
 
 // RemoveBankUnverified removes reviewed old-sheet/manual bank rows (by
@@ -1446,14 +1421,6 @@ func (a *App) RemoveBankUnverified(ids []int, note string) (int, error) {
 		return 0, err
 	}
 	return client.RemoveBankUnverified(a.ctx, ids, note)
-}
-
-func (a *App) DeleteBankEqAccount(id int) error {
-	client, err := a.officerClient()
-	if err != nil {
-		return err
-	}
-	return client.DeleteBankAccount(a.ctx, id)
 }
 
 // CreateBankMule creates a brand-new mule character, attached to the
@@ -1475,11 +1442,14 @@ type bankSyncBuild struct {
 	blocked []BankSyncBlocked
 }
 
-// BankSyncBlocked is one character excluded from a sync because it still
-// has an unresolved bag/item-move warning — see ResolveBankMove.
+// BankSyncBlocked is one character excluded from a sync: it still has
+// unresolved bag/item-move warnings (Warnings > 0, see ResolveBankMove), or
+// its Shared Bank is also flagged on SharedBankAlsoFlaggedOn — another of
+// the officer's characters on the same EQ login (see sharedBankConflicts).
 type BankSyncBlocked struct {
-	Character string `json:"character"`
-	Warnings  int    `json:"warnings"`
+	Character               string   `json:"character"`
+	Warnings                int      `json:"warnings"`
+	SharedBankAlsoFlaggedOn []string `json:"sharedBankAlsoFlaggedOn"`
 }
 
 // occupantsFor resolves what currently sits at every one of a character's
@@ -1517,7 +1487,14 @@ func (a *App) buildBankSyncHolders(client *officerapi.Client, gameDir string) (b
 		return bankSyncBuild{}, err
 	}
 
-	build := bankSyncBuild{holders: []officerapi.BankSyncHolder{}, blocked: []BankSyncBlocked{}}
+	type parsed struct {
+		file bankexport.ExportFile
+		rc   officerapi.Character
+		inv  *bankexport.Inventory
+		ds   designationSets
+	}
+	all := []parsed{}
+	sharedEntries := []sharedBankEntry{}
 	for _, f := range sc.files {
 		rc, matched := sc.rosterByName[strings.ToLower(f.Character)]
 		if !matched {
@@ -1527,22 +1504,26 @@ func (a *App) buildBankSyncHolders(client *officerapi.Client, gameDir string) (b
 		if parseErr != nil {
 			continue
 		}
-		inv := bankexport.BuildInventory(exp)
+		ds := designationSetsFor(sc.cfg.Designations, rc.ID)
+		all = append(all, parsed{file: f, rc: rc, inv: bankexport.BuildInventory(exp), ds: ds})
+		sharedEntries = append(sharedEntries, sharedBankEntry{name: f.Character, fingerprint: bankexport.SharedBankFingerprint(exp), flagged: ds.flagsSharedBank()})
+	}
+	conflicts := sharedBankConflicts(sharedEntries)
 
-		personalDS := designationSetsFor(sc.cfg.PersonalDesignations, rc.ID)
-		sharedDS := designationSets{whole: map[string]bool{}, sub: map[string]map[int]bool{}}
-		includeShared := false
-		if acc, ok := sc.accountByCharID[rc.ID]; ok && acc.SharedBankHolderCharacterID == rc.ID {
-			includeShared = true
-			sharedDS = designationSetsFor(sc.cfg.SharedDesignations, acc.ID)
-		}
-		merged := mergeDesignationSets(personalDS, sharedDS)
+	build := bankSyncBuild{holders: []officerapi.BankSyncHolder{}, blocked: []BankSyncBlocked{}}
+	for _, p := range all {
+		f, rc, inv, merged := p.file, p.rc, p.inv, p.ds
 
 		warnings := bankexport.DetectMoves(inv, merged.designated)
-		if len(warnings) > 0 {
-			build.blocked = append(build.blocked, BankSyncBlocked{Character: f.Character, Warnings: len(warnings)})
+		others := conflicts[f.Character]
+		if len(warnings) > 0 || len(others) > 0 {
+			if others == nil {
+				others = []string{}
+			}
+			build.blocked = append(build.blocked, BankSyncBlocked{Character: f.Character, Warnings: len(warnings), SharedBankAlsoFlaggedOn: others})
 			continue
 		}
+		includeShared := merged.flagsSharedBank()
 
 		rows := bankexport.BuildSyncRows(inv, merged.whole, merged.sub, includeShared)
 		syncRows := make([]officerapi.BankSyncRow, len(rows))

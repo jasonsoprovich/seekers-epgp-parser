@@ -782,15 +782,6 @@ func (c *Client) FetchTotals(ctx context.Context, query string) ([]TotalsRow, er
 
 // --- Guild bank (PLAN.md §9/§11 Phase 8.4) ---
 
-// BankEqAccount is one "these characters share a real EQ login" group
-// (bank_eq_accounts) — see src/lib/bank/sync.ts on the site.
-type BankEqAccount struct {
-	ID                          int    `json:"id"`
-	Label                       string `json:"label"`
-	SharedBankHolderCharacterID int    `json:"sharedBankHolderCharacterId"`
-	CharacterIDs                []int  `json:"characterIds"`
-}
-
 // BankImportInfo is the last sync recorded for one holder character.
 type BankImportInfo struct {
 	CharacterID       int    `json:"characterId"`
@@ -837,12 +828,6 @@ type SyncedOccupant struct {
 	ItemName  string `json:"itemName"`
 }
 
-// BankConfig is GET /api/officer/bank/config's response — every
-// designation, every EQ-account group, each holder's last sync, and each
-// holder's last-synced contents. PersonalDesignations/SharedDesignations/
-// SyncedContents are keyed by characterId/eqAccountId as a string (JSON
-// object keys are always strings; the app re-parses them to int on
-// receipt).
 // UnverifiedItem is one sheet/manual item still sitting on a holder,
 // unconfirmed by any real sync yet — 2026-09-27. Mirrors src/lib/bank/
 // sync.ts's UnverifiedContentEntry.
@@ -858,12 +843,17 @@ type UnverifiedItem struct {
 	NotFound       bool   `json:"notFound"`
 }
 
+// BankConfig is GET /api/officer/bank/config's response — every
+// designation, each holder's last sync, and each holder's last-synced
+// contents, all keyed by characterId as a string (JSON object keys are
+// always strings). Designations covers bags, bank AND SharedBank slots:
+// since 2026-10-25 a SharedBank slot is flagged per character like any bag
+// (the site's EQ account groups are gone). The JSON key is still
+// "personalDesignations" for older app builds.
 type BankConfig struct {
-	PersonalDesignations map[string][]DesignationSlot `json:"personalDesignations"`
-	SharedDesignations   map[string][]DesignationSlot `json:"sharedDesignations"`
-	Accounts             []BankEqAccount              `json:"accounts"`
-	LastImports          map[string]BankImportInfo    `json:"lastImports"`
-	SyncedContents       map[string][]SyncedOccupant  `json:"syncedContents"`
+	Designations   map[string][]DesignationSlot `json:"personalDesignations"`
+	LastImports    map[string]BankImportInfo    `json:"lastImports"`
+	SyncedContents map[string][]SyncedOccupant  `json:"syncedContents"`
 	// UnverifiedContents is what SuggestFlags (bankexport package) compares
 	// a fresh scan against — absent entirely from an older server response,
 	// which is fine: a nil map reads as empty via a plain `cfg.
@@ -880,8 +870,7 @@ func (c *Client) FetchBankConfig(ctx context.Context) (BankConfig, error) {
 }
 
 type updateDesignationsRequest struct {
-	CharacterID int `json:"characterId,omitempty"`
-	EqAccountID int `json:"eqAccountId,omitempty"`
+	CharacterID int `json:"characterId"`
 	// Set is a pointer so a genuine "clear everything" (`*set = []`) can be
 	// told apart from "not touching `set` at all" (`set == nil`) — a plain
 	// slice can't: Go's `omitempty` drops an empty slice exactly the same
@@ -892,9 +881,8 @@ type updateDesignationsRequest struct {
 	Remove []RemoveSlot       `json:"remove,omitempty"`
 }
 
-// UpdateBankDesignations mutates one owner's guild-flagged positions —
-// pass exactly one of characterID/eqAccountID (the other zero), matching
-// the site's own "exactly one owner" validation. set replaces the WHOLE
+// UpdateBankDesignations mutates one character's guild-flagged positions
+// (bags, bank and SharedBank alike). set replaces the WHOLE
 // list ("Mark all Bank slots guild" / "Clear all personal designations");
 // add/remove touch only the listed positions, leaving every other flag
 // untouched — this is what an individual checkbox toggle uses, and what
@@ -902,26 +890,9 @@ type updateDesignationsRequest struct {
 // set, silently dropping a flag on a container missing from the current
 // scan (e.g. a moved bag's now-empty old slot). Pass nil for any of
 // set/add/remove not being used.
-func (c *Client) UpdateBankDesignations(ctx context.Context, characterID, eqAccountID int, set *[]DesignationSlot, add []DesignationSlot, remove []RemoveSlot) error {
-	body := updateDesignationsRequest{CharacterID: characterID, EqAccountID: eqAccountID, Set: set, Add: add, Remove: remove}
+func (c *Client) UpdateBankDesignations(ctx context.Context, characterID int, set *[]DesignationSlot, add []DesignationSlot, remove []RemoveSlot) error {
+	body := updateDesignationsRequest{CharacterID: characterID, Set: set, Add: add, Remove: remove}
 	return c.do(ctx, http.MethodPut, "/api/officer/bank/designations", body, nil)
-}
-
-// SaveBankAccountRequest creates (ID zero) or updates (ID set) an EQ
-// account group.
-type SaveBankAccountRequest struct {
-	ID                          int    `json:"id,omitempty"`
-	Label                       string `json:"label"`
-	CharacterIDs                []int  `json:"characterIds"`
-	SharedBankHolderCharacterID int    `json:"sharedBankHolderCharacterId"`
-}
-
-func (c *Client) SaveBankAccount(ctx context.Context, req SaveBankAccountRequest) (int, error) {
-	var out struct {
-		ID int `json:"id"`
-	}
-	err := c.do(ctx, http.MethodPut, "/api/officer/bank/accounts", req, &out)
-	return out.ID, err
 }
 
 // RemoveBankUnverified removes old-sheet/manual bank rows an officer has
@@ -933,10 +904,6 @@ func (c *Client) RemoveBankUnverified(ctx context.Context, ids []int, note strin
 	}
 	err := c.do(ctx, http.MethodPost, "/api/officer/bank/unverified", map[string]any{"ids": ids, "note": note}, &out)
 	return out.Removed, err
-}
-
-func (c *Client) DeleteBankAccount(ctx context.Context, id int) error {
-	return c.do(ctx, http.MethodDelete, "/api/officer/bank/accounts", map[string]int{"id": id}, nil)
 }
 
 // BankSyncRow is one physical stack in a sync payload — shaped exactly

@@ -62,17 +62,6 @@ export interface AttendanceResponse {
 }
 
 /**
- * BankEqAccount is one "these characters share a real EQ login" group
- * (bank_eq_accounts) — see src/lib/bank/sync.ts on the site.
- */
-export interface BankEqAccount {
-    "id": number;
-    "label": string;
-    "sharedBankHolderCharacterId": number;
-    "characterIds": number[] | null;
-}
-
-/**
  * BankImportInfo is the last sync recorded for one holder character.
  */
 export interface BankImportInfo {
@@ -259,17 +248,6 @@ export interface ManualEntryResponse {
 export interface PointValue {
     "activity": string;
     "points": number;
-}
-
-/**
- * SaveBankAccountRequest creates (ID zero) or updates (ID set) an EQ
- * account group.
- */
-export interface SaveBankAccountRequest {
-    "id"?: number;
-    "label": string;
-    "characterIds": number[] | null;
-    "sharedBankHolderCharacterId": number;
 }
 
 /**

@@ -126,13 +126,13 @@ export function CheckForUpdate(): $CancellablePromise<$models.UpdateInfo> {
 }
 
 /**
- * ClearAllBankDesignations wholesale-clears an owner's designations — the
+ * ClearAllBankDesignations wholesale-clears a character's designations — the
  * one bulk action that's a real "replace with nothing" rather than
  * add/remove, since "clear everything" has no "leave other flags alone"
  * nuance to preserve.
  */
-export function ClearAllBankDesignations(characterID: number, eqAccountID: number): $CancellablePromise<void> {
-    return $Call.ByID(3085203971, characterID, eqAccountID);
+export function ClearAllBankDesignations(characterID: number): $CancellablePromise<void> {
+    return $Call.ByID(3085203971, characterID);
 }
 
 /**
@@ -166,10 +166,6 @@ export function CreateBankMule(name: string): $CancellablePromise<officerapi$0.C
  */
 export function CurrentLogCharacter(): $CancellablePromise<string> {
     return $Call.ByID(2012932359);
-}
-
-export function DeleteBankEqAccount(id: number): $CancellablePromise<void> {
-    return $Call.ByID(2002968089, id);
 }
 
 /**
@@ -369,8 +365,8 @@ export function ListAttendanceSnapshots(lookbackHours: number): $CancellableProm
  * a container missing from the current scan (e.g. a moved bag's now-empty
  * old slot).
  */
-export function MarkAllContainersGuild(characterID: number, eqAccountID: number, containers: $models.BankContainerSeed[] | null): $CancellablePromise<void> {
-    return $Call.ByID(2285521906, characterID, eqAccountID, containers);
+export function MarkAllContainersGuild(characterID: number, containers: $models.BankContainerSeed[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2285521906, characterID, containers);
 }
 
 /**
@@ -471,15 +467,6 @@ export function ResolveBankMove(input: $models.ResolveBankMoveInput): $Cancellab
  */
 export function ResolveNoBidRound(itemName: string, roundID: string): $CancellablePromise<void> {
     return $Call.ByID(2519945105, itemName, roundID);
-}
-
-/**
- * SaveBankEqAccount creates or updates a "these characters share a real
- * EQ account" group — confirming (or overriding) one of ScanGuildBank's
- * SuggestedGroups, or a manual grouping.
- */
-export function SaveBankEqAccount(req: officerapi$0.SaveBankAccountRequest): $CancellablePromise<number> {
-    return $Call.ByID(2236179599, req);
 }
 
 export function SaveSettings(apiKey: string): $CancellablePromise<void> {
@@ -694,25 +681,23 @@ export function TestConnection(): $CancellablePromise<number> {
 
 /**
  * ToggleBankContainer flags/unflags an ENTIRE top-level container (the bag
- * and everything in it) for one character's personal Bank/General slots,
- * or (eqAccountID set instead) an EQ account's SharedBank slots — pass
- * exactly one of characterID/eqAccountID, mirroring the site's own
- * "exactly one owner" rule. expectedItemID/expectedItemName seed the
+ * and everything in it) — a General/Bank slot or a SharedBank slot, always
+ * on one character. expectedItemID/expectedItemName seed the
  * move-detection baseline immediately from the current scan when flagging
  * on, rather than waiting for the first sync to set it.
  */
-export function ToggleBankContainer(characterID: number, eqAccountID: number, container: string, guild: boolean, expectedItemID: number, expectedItemName: string): $CancellablePromise<void> {
-    return $Call.ByID(2973327450, characterID, eqAccountID, container, guild, expectedItemID, expectedItemName);
+export function ToggleBankContainer(characterID: number, container: string, guild: boolean, expectedItemID: number, expectedItemName: string): $CancellablePromise<void> {
+    return $Call.ByID(2973327450, characterID, container, guild, expectedItemID, expectedItemName);
 }
 
 /**
  * ToggleBankItem flags/unflags ONE item inside a bag — finer-grained than
  * ToggleBankContainer (2026-09-25 officer feedback: "the ability to check
  * off the individual items within each bag in case things are spread
- * around"). Same owner/argument shape as ToggleBankContainer.
+ * around"). Same argument shape as ToggleBankContainer.
  */
-export function ToggleBankItem(characterID: number, eqAccountID: number, container: string, slotIndex: number, guild: boolean, itemID: number, itemName: string): $CancellablePromise<void> {
-    return $Call.ByID(2917885368, characterID, eqAccountID, container, slotIndex, guild, itemID, itemName);
+export function ToggleBankItem(characterID: number, container: string, slotIndex: number, guild: boolean, itemID: number, itemName: string): $CancellablePromise<void> {
+    return $Call.ByID(2917885368, characterID, container, slotIndex, guild, itemID, itemName);
 }
 
 /**
@@ -728,9 +713,8 @@ export function ToggleBankItem(characterID: number, eqAccountID: number, contain
  *     one SlotIndex-0 whole-container flag instead, collapsing back to the
  *     simpler form.
  * 
- * Same owner/argument shape as ToggleBankContainer/ToggleBankItem — pass
- * exactly one of characterID/eqAccountID.
+ * Same argument shape as ToggleBankContainer/ToggleBankItem.
  */
-export function UpdateBankSlotFlags(characterID: number, eqAccountID: number, add: $models.BankSlotSeed[] | null, remove: $models.BankRemoveSlot[] | null): $CancellablePromise<void> {
-    return $Call.ByID(2132533345, characterID, eqAccountID, add, remove);
+export function UpdateBankSlotFlags(characterID: number, add: $models.BankSlotSeed[] | null, remove: $models.BankRemoveSlot[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2132533345, characterID, add, remove);
 }

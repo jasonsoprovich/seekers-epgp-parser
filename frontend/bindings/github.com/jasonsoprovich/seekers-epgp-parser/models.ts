@@ -42,28 +42,22 @@ export interface BankCharacterExport {
     "sharedBank": BankContainer[] | null;
 
     /**
-     * SharedBankFingerprint is "" when this export's SharedBank is empty
-     * (bankexport.SharedBankFingerprint) — used client-side only for the
-     * account-grouping UI, not sent anywhere.
-     */
-    "sharedBankFingerprint": string;
-
-    /**
      * RosterCharacterID is nil when no roster character matches this
      * export's filename — the Guild Bank tab offers "Create mule" for
      * these instead of showing containers to toggle.
      */
     "rosterCharacterId": number | null;
     "rosterCharType": string;
-    "eqAccountId": number | null;
 
     /**
-     * IsSharedBankHolder is true when this character is its account
-     * group's designated SharedBank holder — only its SharedBank
-     * containers can ever be flagged guild (a designation update on a
-     * non-holder is refused server-side, same rule the server enforces).
+     * SharedBankAlsoFlaggedOn names the officer's OTHER characters whose
+     * export shows this same (non-empty) Shared Bank with Shared Bank slots
+     * flagged guild too — i.e. two characters on one EQ login both set to
+     * upload it, which would count every item twice. Empty normally. While
+     * non-empty this character is left out of a sync until one side's
+     * Shared Bank flags are cleared (see sharedBankConflicts).
      */
-    "isSharedBankHolder": boolean;
+    "sharedBankAlsoFlaggedOn": string[] | null;
     "lastImport": officerapi$0.BankImportInfo | null;
 
     /**
@@ -214,23 +208,15 @@ export interface BankSlotSeed {
 }
 
 /**
- * BankSuggestedGroup is an auto-detected "these characters look like the
- * same EQ account" suggestion (matching, non-empty SharedBank
- * fingerprints) for characters not already in a saved account group. The
- * officer confirms or ignores it via SaveBankEqAccount — nothing is
- * grouped automatically.
- */
-export interface BankSuggestedGroup {
-    "characterNames": string[] | null;
-}
-
-/**
- * BankSyncBlocked is one character excluded from a sync because it still
- * has an unresolved bag/item-move warning — see ResolveBankMove.
+ * BankSyncBlocked is one character excluded from a sync: it still has
+ * unresolved bag/item-move warnings (Warnings > 0, see ResolveBankMove), or
+ * its Shared Bank is also flagged on SharedBankAlsoFlaggedOn — another of
+ * the officer's characters on the same EQ login (see sharedBankConflicts).
  */
 export interface BankSyncBlocked {
     "character": string;
     "warnings": number;
+    "sharedBankAlsoFlaggedOn": string[] | null;
 }
 
 /**
@@ -333,8 +319,6 @@ export interface GameDirInfo {
 export interface GuildBankState {
     "gameDir": string;
     "exports": BankCharacterExport[] | null;
-    "accounts": officerapi$0.BankEqAccount[] | null;
-    "suggestedGroups": BankSuggestedGroup[] | null;
 
     /**
      * Unmatched names a real export was found for but no roster character
@@ -434,7 +418,6 @@ export interface PointValues {
  */
 export interface ResolveBankMoveInput {
     "characterId": number;
-    "eqAccountId": number;
     "container": string;
     "slotIndex": number;
 

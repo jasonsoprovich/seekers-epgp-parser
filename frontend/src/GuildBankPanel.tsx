@@ -2,12 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ClearAllBankDesignations,
   CreateBankMule,
-  DeleteBankEqAccount,
   MarkAllContainersGuild,
   PreviewBankSync,
   RemoveBankUnverified,
   ResolveBankMove,
-  SaveBankEqAccount,
   ScanGuildBank,
   SubmitBankSync,
   ToggleBankContainer,
@@ -23,7 +21,7 @@ import type {
   BankUnverifiedItem,
   GuildBankState,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
-import type { BankEqAccount, BankSyncDiff } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
+import type { BankSyncDiff } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 // The Guild Bank tab (PLAN.md §9/§11 Phase 8.4; per-item designation,
@@ -47,19 +45,17 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-// Mirrors internal/bankexport/moves.go's isSharedContainerName — a
-// designated position's owner is the character for personal containers,
-// or the EQ account for SharedBank ones, and that's derivable purely from
-// the container's own name.
+// Mirrors internal/bankexport/moves.go's isSharedContainerName. A SharedBank
+// slot is flagged on a character like any bag (2026-10-25: EQ account groups
+// are gone); it only differs in being shared by every character on the
+// login, so flag it on one of them.
 function isSharedContainer(name: string): boolean {
   return name.startsWith("SharedBank");
 }
 
 function guildSlotCount(exp: BankCharacterExport): number {
-  const personal = [...(exp.bags ?? []), ...(exp.bank ?? [])];
-  const shared = exp.isSharedBankHolder ? (exp.sharedBank ?? []) : [];
   let count = 0;
-  for (const c of [...personal, ...shared]) {
+  for (const c of [...(exp.bags ?? []), ...(exp.bank ?? []), ...(exp.sharedBank ?? [])]) {
     if (c.guild) {
       count += 1;
       continue;
@@ -77,6 +73,21 @@ function guildSlotCount(exp: BankCharacterExport): number {
 // the seed, current guild state) — 2026-09-27.
 function findContainer(exp: BankCharacterExport, name: string): BankContainer | undefined {
   return [...(exp.bags ?? []), ...(exp.bank ?? []), ...(exp.sharedBank ?? [])].find((c) => c.container === name);
+}
+
+// Every flagged SharedBank position on a character, as remove slots — what
+// "Unflag Shared Bank here" sends when two characters on one login both
+// have it flagged.
+function sharedBankFlags(exp: BankCharacterExport): { container: string; slotIndex: number }[] {
+  const out: { container: string; slotIndex: number }[] = [];
+  for (const c of exp.sharedBank ?? []) {
+    if (c.guild) {
+      out.push({ container: c.container, slotIndex: 0 });
+      continue;
+    }
+    for (const it of c.items ?? []) if (it.guild) out.push({ container: c.container, slotIndex: it.slotIndex });
+  }
+  return out;
 }
 
 function containerSeed(c: BankContainer): { itemId: number; itemName: string } {
@@ -153,8 +164,6 @@ export function GuildBankPanel() {
   const [diffFilter, setDiffFilter] = useState("");
   const [openCards, setOpenCards] = useState<Set<number>>(new Set());
 
-  const [accountEditor, setAccountEditor] = useState<{ id?: number; label: string; characterIds: number[]; holderId: number | null } | null>(null);
-  const [accountSaving, setAccountSaving] = useState(false);
   const [muleName, setMuleName] = useState("");
   const [creatingMule, setCreatingMule] = useState(false);
   const [resolvingKey, setResolvingKey] = useState<string | null>(null);
@@ -174,8 +183,6 @@ export function GuildBankPanel() {
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exports = state?.exports ?? [];
-  const accounts = state?.accounts ?? [];
-  const suggested = state?.suggestedGroups ?? [];
   const unmatched = state?.unmatchedCharacters ?? [];
 
   const nameByCharacterId = useMemo(() => {
@@ -190,23 +197,15 @@ export function GuildBankPanel() {
     return map;
   }, [exports]);
 
-  const accountByCharacterId = useMemo(() => {
-    const map = new Map<number, BankEqAccount>();
-    for (const acc of accounts) for (const id of acc.characterIds ?? []) map.set(id, acc);
-    return map;
-  }, [accounts]);
-
-  const groupedCharacterIds = useMemo(() => new Set(accounts.flatMap((a) => a.characterIds ?? [])), [accounts]);
-  void groupedCharacterIds; // reserved for a future "ungrouped mule" hint — not otherwise read yet
-
   const current = exports.find((e) => e.character === selected) ?? null;
   const totalWarnings = exports.reduce((sum, e) => sum + (e.moveWarnings ?? []).length, 0);
+  const sharedConflicts = exports.filter((e) => (e.sharedBankAlsoFlaggedOn ?? []).length > 0);
 
   // Flagging something guild is the risky direction (unflagging just stops
   // it being uploaded next sync — always safe). Only a SharedBank
-  // container is confirmed first — it affects every character sharing the
-  // EQ account, not just this one, so a mis-click there reaches further
-  // than the current character. An ordinary personal container is NOT
+  // container is confirmed first — its contents are the same on every
+  // character on that EQ login, so the officer is reminded to flag it on
+  // just one of them. An ordinary personal container is NOT
   // confirmed (2026-09-26 officer feedback: confirming every single toggle
   // on a non-mule test character made routine bag-by-bag flagging
   // unusable) — same reasoning per-item toggles already used: one bag on
@@ -219,18 +218,14 @@ export function GuildBankPanel() {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
 
-  async function performToggleContainer(exp: BankCharacterExport, isShared: boolean, container: BankContainer) {
+  async function performToggleContainer(exp: BankCharacterExport, container: BankContainer) {
     const key = `${exp.character}:${container.container}`;
     setSavingKey(key);
     setError(null);
     const nextGuild = !container.guild;
     const seed = containerSeed(container);
     try {
-      if (isShared) {
-        await ToggleBankContainer(0, exp.eqAccountId!, container.container, nextGuild, seed.itemId, seed.itemName);
-      } else {
-        await ToggleBankContainer(exp.rosterCharacterId!, 0, container.container, nextGuild, seed.itemId, seed.itemName);
-      }
+      await ToggleBankContainer(exp.rosterCharacterId!, container.container, nextGuild, seed.itemId, seed.itemName);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -241,14 +236,13 @@ export function GuildBankPanel() {
 
   function toggleContainer(exp: BankCharacterExport, isShared: boolean, container: BankContainer) {
     if (exp.rosterCharacterId === null) return;
-    if (isShared && (!exp.isSharedBankHolder || exp.eqAccountId === null)) return;
 
     const turningOn = !container.guild;
     if (turningOn && isShared) {
       setPendingConfirm({ kind: "toggleContainer", exp, isShared, container });
       return;
     }
-    void performToggleContainer(exp, isShared, container);
+    void performToggleContainer(exp, container);
   }
 
   // Unlike toggleContainer, per-item toggles must sometimes reconcile the
@@ -265,32 +259,28 @@ export function GuildBankPanel() {
   //     instead of leaving N separate per-item rows around.
   // Both go through the one atomic UpdateBankSlotFlags call so the bag
   // never passes through an inconsistent intermediate state.
-  async function toggleItem(exp: BankCharacterExport, isShared: boolean, container: BankContainer, slotIndex: number, currentGuild: boolean, itemId: number, itemName: string) {
+  async function toggleItem(exp: BankCharacterExport, _isShared: boolean, container: BankContainer, slotIndex: number, currentGuild: boolean, itemId: number, itemName: string) {
     if (exp.rosterCharacterId === null) return;
-    if (isShared && (!exp.isSharedBankHolder || exp.eqAccountId === null)) return;
     const key = `${exp.character}:${container.container}:${slotIndex}`;
     setSavingKey(key);
     setError(null);
     const nextGuild = !currentGuild;
     const items = container.items ?? [];
-    const characterId = isShared ? 0 : exp.rosterCharacterId;
-    const eqAccountId = isShared ? exp.eqAccountId! : 0;
+    const characterId = exp.rosterCharacterId;
     try {
       if (!nextGuild && container.guild) {
         const add = items
           .filter((it) => it.slotIndex !== slotIndex)
           .map((it) => ({ container: container.container, slotIndex: it.slotIndex, expectedItemId: it.itemId, expectedItemName: it.itemName }));
         const remove = [{ container: container.container, slotIndex: 0 }];
-        await UpdateBankSlotFlags(characterId, eqAccountId, add, remove);
+        await UpdateBankSlotFlags(characterId, add, remove);
       } else if (nextGuild && !container.guild && items.length > 0 && items.every((it) => it.slotIndex === slotIndex || it.guild)) {
         const seed = containerSeed(container);
         const add = [{ container: container.container, slotIndex: 0, expectedItemId: seed.itemId, expectedItemName: seed.itemName }];
         const remove = items.map((it) => ({ container: container.container, slotIndex: it.slotIndex }));
-        await UpdateBankSlotFlags(characterId, eqAccountId, add, remove);
-      } else if (isShared) {
-        await ToggleBankItem(0, exp.eqAccountId!, container.container, slotIndex, nextGuild, itemId, itemName);
+        await UpdateBankSlotFlags(characterId, add, remove);
       } else {
-        await ToggleBankItem(exp.rosterCharacterId, 0, container.container, slotIndex, nextGuild, itemId, itemName);
+        await ToggleBankItem(characterId, container.container, slotIndex, nextGuild, itemId, itemName);
       }
       load();
     } catch (err) {
@@ -310,7 +300,7 @@ export function GuildBankPanel() {
     setSavingKey(`${exp.character}:__bulk`);
     setError(null);
     try {
-      await MarkAllContainersGuild(exp.rosterCharacterId, 0, seeds);
+      await MarkAllContainersGuild(exp.rosterCharacterId, seeds);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -331,7 +321,7 @@ export function GuildBankPanel() {
     setConfirmBusy(true);
     try {
       if (pendingConfirm.kind === "toggleContainer") {
-        await performToggleContainer(pendingConfirm.exp, pendingConfirm.isShared, pendingConfirm.container);
+        await performToggleContainer(pendingConfirm.exp, pendingConfirm.container);
       } else if (pendingConfirm.kind === "markAll") {
         await performMarkAll(pendingConfirm.exp, pendingConfirm.scope);
       } else {
@@ -348,7 +338,23 @@ export function GuildBankPanel() {
     setSavingKey(`${exp.character}:__bulk`);
     setError(null);
     try {
-      await ClearAllBankDesignations(exp.rosterCharacterId, 0);
+      await ClearAllBankDesignations(exp.rosterCharacterId);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  // Clears only this character's SharedBank flags — the fix for two
+  // characters on one EQ login both set to upload its Shared Bank.
+  async function clearSharedBank(exp: BankCharacterExport) {
+    if (exp.rosterCharacterId === null) return;
+    setSavingKey(`${exp.character}:__bulk`);
+    setError(null);
+    try {
+      await UpdateBankSlotFlags(exp.rosterCharacterId, [], sharedBankFlags(exp));
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -361,7 +367,7 @@ export function GuildBankPanel() {
     if (exp.rosterCharacterId === null) return;
     // Always confirm — same bulk-blast-radius reasoning as markAll, just
     // in the opposite (unflagging) direction: a mis-click here silently
-    // drops every personal Bank/Bags designation this character has,
+    // drops every Bags/Bank/Shared Bank designation this character has,
     // with no undo besides re-flagging each one by hand.
     setPendingConfirm({ kind: "clearAllPersonal", exp });
   }
@@ -373,15 +379,12 @@ export function GuildBankPanel() {
   // remove-then-add designations call.
   async function resolveWarning(exp: BankCharacterExport, w: BankMoveWarning, action: "move" | "keep" | "unflag", target?: { container: string; slotIndex: number }) {
     if (exp.rosterCharacterId === null) return;
-    const shared = isSharedContainer(w.container);
-    if (shared && (!exp.isSharedBankHolder || exp.eqAccountId === null)) return;
     const key = `${exp.character}:${w.container}:${w.slotIndex}:resolve`;
     setResolvingKey(key);
     setError(null);
     try {
       await ResolveBankMove({
-        characterId: shared ? 0 : exp.rosterCharacterId,
-        eqAccountId: shared ? exp.eqAccountId! : 0,
+        characterId: exp.rosterCharacterId,
         container: w.container,
         slotIndex: w.slotIndex,
         action,
@@ -408,8 +411,8 @@ export function GuildBankPanel() {
 
   // "Flag all suggested bags" — the same ToggleBankContainer call as the
   // per-suggestion button, once per personal bag. SharedBank suggestions
-  // are left to their own button (they're confirmed individually — they
-  // affect the whole EQ account).
+  // are left to their own button (they're confirmed individually — flag
+  // a login's Shared Bank on one character only).
   async function flagAllSuggested(exp: BankCharacterExport) {
     if (exp.rosterCharacterId === null) return;
     const targets = (exp.flagSuggestions ?? [])
@@ -421,7 +424,7 @@ export function GuildBankPanel() {
     try {
       for (const c of targets) {
         const seed = containerSeed(c);
-        await ToggleBankContainer(exp.rosterCharacterId, 0, c.container, true, seed.itemId, seed.itemName);
+        await ToggleBankContainer(exp.rosterCharacterId, c.container, true, seed.itemId, seed.itemName);
       }
       load();
     } catch (err) {
@@ -479,7 +482,7 @@ export function GuildBankPanel() {
       const notFoundCount = normalized.reduce((sum, d) => sum + d.notFound.length, 0);
       setSyncMessage(
         `Synced ${normalized.length} character${normalized.length === 1 ? "" : "s"}, ${totalRows} row(s) total.` +
-          (blockedCount > 0 ? ` ${blockedCount} character${blockedCount === 1 ? "" : "s"} skipped — resolve their bag warnings and sync again.` : "") +
+          (blockedCount > 0 ? ` ${blockedCount} character${blockedCount === 1 ? "" : "s"} skipped — resolve their warnings and sync again.` : "") +
           (notFoundCount > 0 ? ` ${notFoundCount} old sheet item${notFoundCount === 1 ? "" : "s"} weren't found — see "Needs review" on each character.` : ""),
       );
       setPreviewOpen(false);
@@ -498,49 +501,6 @@ export function GuildBankPanel() {
       else next.add(characterId);
       return next;
     });
-  }
-
-  function startNewAccount(names: string[]) {
-    const ids = names.map((n) => exports.find((e) => e.character === n)?.rosterCharacterId).filter((id): id is number => id !== null && id !== undefined);
-    setAccountEditor({ label: names.join(" & "), characterIds: ids, holderId: ids[0] ?? null });
-  }
-
-  function startEditAccount(acc: BankEqAccount) {
-    setAccountEditor({ id: acc.id, label: acc.label, characterIds: [...(acc.characterIds ?? [])], holderId: acc.sharedBankHolderCharacterId });
-  }
-
-  async function saveAccount() {
-    if (!accountEditor || accountEditor.holderId === null || accountEditor.characterIds.length === 0) return;
-    setAccountSaving(true);
-    setError(null);
-    try {
-      await SaveBankEqAccount({
-        id: accountEditor.id,
-        label: accountEditor.label,
-        characterIds: accountEditor.characterIds,
-        sharedBankHolderCharacterId: accountEditor.holderId,
-      });
-      setAccountEditor(null);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAccountSaving(false);
-    }
-  }
-
-  async function deleteAccount(id: number) {
-    setAccountSaving(true);
-    setError(null);
-    try {
-      await DeleteBankEqAccount(id);
-      setAccountEditor(null);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAccountSaving(false);
-    }
   }
 
   async function createMule() {
@@ -577,6 +537,14 @@ export function GuildBankPanel() {
       {error && <div className="error">{error}</div>}
       {syncMessage && <div className="success">{syncMessage}</div>}
 
+      {sharedConflicts.length > 0 && (
+        <div className="warning">
+          The Shared Bank is flagged on more than one character on the same EQ login (
+          {sharedConflicts.map((e) => e.character).join(", ")}). Every character on a login sees the same Shared Bank, so it would be
+          counted twice. Those characters are skipped by Preview/Submit sync until you unflag the Shared Bank on all but one.
+        </div>
+      )}
+
       {totalWarnings > 0 && (
         <div className="warning">
           {totalWarnings} bag/item warning{totalWarnings === 1 ? "" : "s"} across your characters — a flagged bag or item doesn&apos;t
@@ -594,55 +562,9 @@ export function GuildBankPanel() {
 
       <div className="bank-layout">
         <div className="bank-sidebar">
-          {(accounts.length > 0 || suggested.length > 0) && (
-            <div className="bank-sidebar-section">
-              <div className="bank-sidebar-title">EQ Accounts</div>
-              {accounts.map((acc) => (
-                <div key={acc.id} className="bank-account-card">
-                  <div className="bank-account-card-header">
-                    <strong>{acc.label}</strong>
-                    <button className="secondary" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => startEditAccount(acc)}>
-                      Edit
-                    </button>
-                  </div>
-                  <div className="bank-account-card-members">
-                    {(acc.characterIds ?? []).map((id) => (
-                      <span key={id} className={id === acc.sharedBankHolderCharacterId ? "badge leading" : "badge superseded"}>
-                        {nameByCharacterId.get(id) ?? `#${id}`}
-                        {id === acc.sharedBankHolderCharacterId ? " (holder)" : ""}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {suggested.map((g) => {
-                const names = g.characterNames ?? [];
-                return (
-                  <div key={names.join(",")} className="bank-account-card bank-account-card-suggested">
-                    <div className="bank-account-card-header">
-                      <span>Same account? {names.join(", ")}</span>
-                      <button className="secondary" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => startNewAccount(names)}>
-                        Confirm
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              <button className="secondary" style={{ fontSize: 12 }} onClick={() => setAccountEditor({ label: "", characterIds: [], holderId: null })}>
-                + New account group
-              </button>
-            </div>
-          )}
-          {accounts.length === 0 && suggested.length === 0 && exports.length > 1 && (
-            <button className="secondary" style={{ fontSize: 12, marginBottom: 8 }} onClick={() => setAccountEditor({ label: "", characterIds: [], holderId: null })}>
-              + New EQ account group
-            </button>
-          )}
-
           <div className="bank-sidebar-section">
             <div className="bank-sidebar-title">Characters</div>
             {exports.map((exp) => {
-              const account = exp.rosterCharacterId !== null ? accountByCharacterId.get(exp.rosterCharacterId) : undefined;
               const slots = guildSlotCount(exp);
               const warnCount = (exp.moveWarnings ?? []).length;
               const reviewCount = (exp.needsReview ?? []).length + (exp.flagSuggestions ?? []).length;
@@ -662,6 +584,11 @@ export function GuildBankPanel() {
                         ⚠ {warnCount}
                       </span>
                     )}
+                    {(exp.sharedBankAlsoFlaggedOn ?? []).length > 0 && (
+                      <span className="badge ambiguous" style={{ marginLeft: 6 }} title="Shared Bank also flagged on another character on this login">
+                        ⚠ Shared Bank
+                      </span>
+                    )}
                     {reviewCount > 0 && (
                       <span className="badge ambiguous" style={{ marginLeft: 6 }} title="Old sheet items to review: bags to flag, or items a sync couldn't find">
                         {reviewCount} to review
@@ -670,7 +597,6 @@ export function GuildBankPanel() {
                   </div>
                   <div className="bank-char-row-meta">
                     {slots} guild slot{slots === 1 ? "" : "s"} · exported {timeAgo(exp.exportedAt)}
-                    {account && <span> · {account.label}</span>}
                   </div>
                 </button>
               );
@@ -714,98 +640,14 @@ export function GuildBankPanel() {
               onToggleItem={toggleItem}
               onMarkAll={markAll}
               onClearAll={clearAllPersonal}
+              onClearSharedBank={clearSharedBank}
               onResolveWarning={resolveWarning}
               onFlagAllSuggested={flagAllSuggested}
               onRemoveReviewed={removeReviewed}
-              sharedOwnerLabel={
-                current.eqAccountId !== null && !current.isSharedBankHolder
-                  ? nameByCharacterId.get(accountByCharacterId.get(current.rosterCharacterId ?? -1)?.sharedBankHolderCharacterId ?? -1)
-                  : undefined
-              }
             />
           )}
         </div>
       </div>
-
-      {accountEditor && (
-        <div className="bank-modal-backdrop" onClick={() => !accountSaving && setAccountEditor(null)}>
-          <div className="bank-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>{accountEditor.id ? "Edit EQ account group" : "New EQ account group"}</h3>
-            <label className="bank-modal-field">
-              <span>Label</span>
-              <input
-                type="text"
-                value={accountEditor.label}
-                onChange={(e) => setAccountEditor({ ...accountEditor, label: e.target.value })}
-                placeholder="e.g. Aransur's mule account"
-              />
-            </label>
-            <div className="bank-modal-field">
-              <span>Members</span>
-              <div className="bank-modal-checklist">
-                {exports
-                  .filter((e) => e.rosterCharacterId !== null)
-                  .map((e) => {
-                    const id = e.rosterCharacterId as number;
-                    const checked = accountEditor.characterIds.includes(id);
-                    return (
-                      <label key={id} className="bank-modal-check">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            const ids = checked ? accountEditor.characterIds.filter((x) => x !== id) : [...accountEditor.characterIds, id];
-                            setAccountEditor({
-                              ...accountEditor,
-                              characterIds: ids,
-                              holderId: accountEditor.holderId !== null && ids.includes(accountEditor.holderId) ? accountEditor.holderId : (ids[0] ?? null),
-                            });
-                          }}
-                        />
-                        {e.character}
-                      </label>
-                    );
-                  })}
-              </div>
-            </div>
-            <label className="bank-modal-field">
-              <span>SharedBank holder</span>
-              <select
-                value={accountEditor.holderId ?? ""}
-                onChange={(e) => setAccountEditor({ ...accountEditor, holderId: e.target.value ? Number(e.target.value) : null })}
-              >
-                <option value="">— pick a member —</option>
-                {accountEditor.characterIds.map((id) => (
-                  <option key={id} value={id}>
-                    {nameByCharacterId.get(id) ?? `#${id}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="form-actions" style={{ justifyContent: "space-between" }}>
-              {accountEditor.id ? (
-                <button className="danger" onClick={() => deleteAccount(accountEditor.id!)} disabled={accountSaving}>
-                  Delete group
-                </button>
-              ) : (
-                <span />
-              )}
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="secondary" onClick={() => setAccountEditor(null)} disabled={accountSaving}>
-                  Cancel
-                </button>
-                <button
-                  className="primary"
-                  onClick={saveAccount}
-                  disabled={accountSaving || !accountEditor.label.trim() || accountEditor.characterIds.length === 0 || accountEditor.holderId === null}
-                >
-                  {accountSaving ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <ConfirmDialog
         open={previewOpen}
@@ -833,7 +675,7 @@ export function GuildBankPanel() {
 
       <ConfirmDialog
         open={pendingConfirm !== null}
-        title={pendingConfirm?.kind === "clearAllPersonal" ? "Clear all personal designations?" : "Flag as guild property?"}
+        title={pendingConfirm?.kind === "clearAllPersonal" ? "Clear all guild flags?" : "Flag as guild property?"}
         confirmLabel={confirmBusy ? "Saving…" : pendingConfirm?.kind === "clearAllPersonal" ? "Clear all" : "Flag it"}
         busy={confirmBusy}
         onCancel={() => !confirmBusy && setPendingConfirm(null)}
@@ -871,8 +713,16 @@ function PreviewBody({
     <div>
       {blocked.length > 0 && (
         <div className="warning" style={{ marginBottom: 10 }}>
-          <strong>Blocked — resolve bag warnings first:</strong>{" "}
-          {blocked.map((b) => `${b.character} (${b.warnings})`).join(", ")}
+          <strong>Skipped until resolved:</strong>{" "}
+          {blocked
+            .map((b) => {
+              const reasons: string[] = [];
+              if (b.warnings > 0) reasons.push(`${b.warnings} bag warning${b.warnings === 1 ? "" : "s"}`);
+              const others = b.sharedBankAlsoFlaggedOn ?? [];
+              if (others.length > 0) reasons.push(`Shared Bank also flagged on ${others.join(", ")}`);
+              return `${b.character} (${reasons.join("; ")})`;
+            })
+            .join(", ")}
         </div>
       )}
       {diffs.length === 0 && blocked.length === 0 && <span>Nothing to sync — no character has any guild-flagged inventory yet.</span>}
@@ -989,24 +839,21 @@ function pendingConfirmBody(pending: {
 }) {
   const { exp } = pending;
   if (pending.kind === "clearAllPersonal") {
-    const containers = [...(exp.bags ?? []), ...(exp.bank ?? [])];
-    const flaggedContainers = containers.filter((c) => c.guild).length;
-    const flaggedItems = containers.flatMap((c) => c.items ?? []).filter((i) => i.guild).length;
-    const total = flaggedContainers + flaggedItems;
+    const total = guildSlotCount(exp);
     return (
       <span>
-        Clear all {total} personal (Bank/Bags) designation{total === 1 ? "" : "s"} on <strong>{exp.character}</strong>?
-        This unflags every whole-bag and per-item guild designation on this character — Shared Bank designations are
-        untouched. There&apos;s no undo besides re-flagging each one by hand.
+        Clear all {total} guild flag{total === 1 ? "" : "s"} (Bags, Bank and Shared Bank) on <strong>{exp.character}</strong>? This
+        unflags every whole-bag and per-item guild designation on this character. There&apos;s no undo besides re-flagging each one
+        by hand.
       </span>
     );
   }
   if (pending.kind === "toggleContainer") {
     return (
       <span>
-        Flag <strong>{pending.container!.container}</strong> as guild property? This is <strong>{exp.character}</strong>&apos;s account-wide{" "}
-        <strong>Shared Bank</strong> — every character sharing this EQ account will have this slot&apos;s contents treated as guild
-        bank on the next sync, not just {exp.character}.
+        Flag <strong>{pending.container!.container}</strong> as guild property? This is the <strong>Shared Bank</strong>, which every
+        character on {exp.character}&apos;s EQ login shares. Flag it on <strong>one</strong> of those characters only, or its items
+        will be counted twice.
       </span>
     );
   }
@@ -1134,7 +981,7 @@ function ContainerCard({
             </span>
           )}
         </button>
-        <label className="bank-guild-switch" title={disabled ? `Toggle on ${isShared ? "the SharedBank holder" : "this character"}` : undefined}>
+        <label className="bank-guild-switch" title={isShared ? "Shared by every character on this EQ login — flag it on one of them only" : undefined}>
           <input type="checkbox" checked={container.guild} disabled={disabled || containerSaving} onChange={onToggleContainer} />
           {containerSaving ? "…" : "Guild"}
         </label>
@@ -1181,7 +1028,7 @@ function CharacterDetail({
   onResolveWarning,
   onFlagAllSuggested,
   onRemoveReviewed,
-  sharedOwnerLabel,
+  onClearSharedBank,
 }: {
   exp: BankCharacterExport;
   hideEmpty: boolean;
@@ -1195,11 +1042,12 @@ function CharacterDetail({
   onResolveWarning: (exp: BankCharacterExport, w: BankMoveWarning, action: "move" | "keep" | "unflag", target?: { container: string; slotIndex: number }) => void;
   onFlagAllSuggested: (exp: BankCharacterExport) => void;
   onRemoveReviewed: (ids: number[], note: string) => Promise<string | null>;
-  sharedOwnerLabel?: string;
+  onClearSharedBank: (exp: BankCharacterExport) => void;
 }) {
   const bulkSaving = savingKey === `${exp.character}:__bulk`;
   const warnings = exp.moveWarnings ?? [];
   const flagSuggestions = exp.flagSuggestions ?? [];
+  const sharedAlsoOn = exp.sharedBankAlsoFlaggedOn ?? [];
 
   return (
     <div>
@@ -1216,6 +1064,19 @@ function CharacterDetail({
           Hide empty bags
         </label>
       </div>
+
+      {sharedAlsoOn.length > 0 && (
+        <div className="bank-container-card" style={{ borderColor: "#a16207", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, marginBottom: 6 }}>
+            This character&apos;s <strong>Shared Bank</strong> is also flagged on <strong>{sharedAlsoOn.join(", ")}</strong>. They share an
+            EQ login, so it would be synced twice. Keep the flags on one character and unflag the rest. Until then these characters are
+            skipped by sync.
+          </div>
+          <button className="secondary" disabled={bulkSaving} onClick={() => onClearSharedBank(exp)}>
+            Unflag Shared Bank on {exp.character}
+          </button>
+        </div>
+      )}
 
       {warnings.length > 0 && (
         <div style={{ marginBottom: 12 }}>
@@ -1256,7 +1117,6 @@ function CharacterDetail({
                   className="secondary"
                   style={{ marginLeft: 8, fontSize: 12 }}
                   onClick={() => onToggleContainer(exp, isShared, container)}
-                  disabled={isShared && (!exp.isSharedBankHolder || exp.eqAccountId === null)}
                 >
                   Flag {s.container}
                 </button>
@@ -1276,7 +1136,7 @@ function CharacterDetail({
           Mark all Bags guild
         </button>
         <button className="secondary" style={{ fontSize: 12 }} onClick={() => onClearAll(exp)} disabled={bulkSaving}>
-          Clear all personal designations
+          Clear all guild flags
         </button>
         {bulkSaving && <span style={{ color: "#6b7280", fontSize: 12 }}>Saving…</span>}
       </div>
@@ -1336,12 +1196,7 @@ function CharacterDetail({
         <details className="bank-section" open>
           <summary>
             Shared Bank ({(exp.sharedBank ?? []).length})
-            {!exp.isSharedBankHolder && sharedOwnerLabel && (
-              <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}> — toggle on {sharedOwnerLabel}, the account's holder</span>
-            )}
-            {exp.eqAccountId === null && (
-              <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}> — group this character into an EQ account to sync it</span>
-            )}
+            <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}> — shared by every character on this EQ login; flag it on one of them only</span>
           </summary>
           <div className="bank-container-grid">
             {(exp.sharedBank ?? []).map((c) => (
@@ -1351,7 +1206,7 @@ function CharacterDetail({
                 container={c}
                 isShared={true}
                 hideEmpty={hideEmpty}
-                disabled={!exp.isSharedBankHolder}
+                disabled={false}
                 savingKey={savingKey}
                 onToggleContainer={() => onToggleContainer(exp, true, c)}
                 onToggleItem={(slotIndex, currentGuild, itemId, itemName) => onToggleItem(exp, true, c, slotIndex, currentGuild, itemId, itemName)}

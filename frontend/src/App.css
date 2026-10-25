@@ -731,17 +731,7 @@ tr.leading td {
   margin-top: 2px;
 }
 
-.bank-account-card {
-  border: 1px solid #1f2937;
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #10151f;
-}
 
-.bank-account-card-suggested {
-  border-color: rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.06);
-}
 
 .bank-account-card-header {
   display: flex;
@@ -751,12 +741,6 @@ tr.leading td {
   font-size: 12px;
 }
 
-.bank-account-card-members {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
 
 .bank-detail {
   flex: 1;
@@ -860,47 +844,9 @@ tr.leading td {
   font-style: italic;
 }
 
-.bank-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
 
-.bank-modal {
-  background: #131a26;
-  border: 1px solid #2a3550;
-  border-radius: 10px;
-  padding: 20px;
-  max-width: 480px;
-  width: calc(100% - 48px);
-  max-height: calc(100vh - 96px);
-  overflow-y: auto;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-}
 
-.bank-modal-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  color: #9ca3af;
-  margin-bottom: 14px;
-}
 
-.bank-modal-checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 160px;
-  overflow-y: auto;
-  border: 1px solid #1f2937;
-  border-radius: 6px;
-  padding: 8px;
-}
 
 .bank-modal-check {
   display: flex;
