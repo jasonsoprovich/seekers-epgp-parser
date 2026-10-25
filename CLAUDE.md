@@ -298,9 +298,7 @@ or just use `wails3 build`, which does both.
 - **Guild Bank designation and account-holder rules are re-checked
   server-side, never trusted from this app alone** (PLAN.md §9/§11 Phase
   8.4). `internal/bankexport.BuildSyncRows` only ever includes a container
-  actually flagged guild in `GuildBankState`, and `SetBankDesignations`
-  refuses a SharedBank container from a personal owner (and vice versa) —
-  but the real enforcement is `src/lib/bank/sync.ts`'s
+  actually flagged guild in `GuildBankState` — but the real enforcement is `src/lib/bank/sync.ts`'s
   `validateSyncPayload` on the tracker side, which independently
   re-resolves every row against live designations at sync time. Don't
   relax either side on the assumption the other one already caught it.
@@ -312,11 +310,17 @@ or just use `wails3 build`, which does both.
   with no bag at all, and the item itself is the holding. Getting this
   backwards would sync every character's ordinary backpacks as if they
   were guild loot.
-- **`SharedBankFingerprint` only ever suggests a grouping, never assigns
-  one** — an empty SharedBank fingerprints to `""` specifically so two
-  characters with nothing in their shared bank never look like a match.
-  The officer always confirms (or edits) a suggested `bank_eq_accounts`
-  group via `SaveBankEqAccount`; nothing is grouped automatically.
+- **Shared Bank is flagged per character; EQ account groups are gone
+  (2026-10-25).** The Shared Bank belongs to the EQ login, so every
+  character on one login exports identical SharedBank contents. Instead of
+  a `bank_eq_accounts` group owning those flags, each character flags its
+  own, and `sharedBankConflicts` (app.go) uses
+  `bankexport.SharedBankFingerprint` to find two+ characters with the same
+  non-empty Shared Bank that BOTH flag it (`BankCharacterExport.
+  SharedBankAlsoFlaggedOn`). Those are blocked from Preview/Submit Sync
+  (`BankSyncBlocked`) until one is unflagged, or the same items would sync
+  twice. An empty Shared Bank fingerprints to `""` and never conflicts —
+  don't change that, every mule with an empty shared bank would clash.
 - **A real item's `Count/Charges` can legitimately be `0`** (found
   2026-09-24 via a real click-through against Darkclaw's export — two
   "Forge of Icewell Arms" rows). Not every non-stacking item is
