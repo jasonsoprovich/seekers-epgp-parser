@@ -425,15 +425,6 @@ export function PreviewEpCap(items: officerapi$0.EpCapPreviewRequest[] | null): 
 }
 
 /**
- * RemoveBankUnverified removes reviewed old-sheet/manual bank rows (by
- * site row id) that the banker confirmed are gone. note is required by
- * the site and lands in the bank audit log.
- */
-export function RemoveBankUnverified(ids: number[] | null, note: string): $CancellablePromise<number> {
-    return $Call.ByID(1107370412, ids, note);
-}
-
-/**
  * RemoveRollSession hides one session from the Rolls tab entirely (a test
  * /random, or a range that wasn't actually a loot roll) and, like Stop,
  * forces the next roll in the same range to start fresh rather than

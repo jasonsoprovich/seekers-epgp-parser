@@ -4,7 +4,6 @@ import {
   CreateBankMule,
   MarkAllContainersGuild,
   PreviewBankSync,
-  RemoveBankUnverified,
   ResolveBankMove,
   ScanGuildBank,
   SubmitBankSync,
@@ -18,7 +17,6 @@ import type {
   BankContainerSeed,
   BankMoveWarning,
   BankSyncBlocked,
-  BankUnverifiedItem,
   GuildBankState,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import type { BankSyncDiff } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/internal/officerapi/models";
@@ -65,16 +63,6 @@ function guildSlotCount(exp: BankCharacterExport): number {
   return count;
 }
 
-// containerSeed is what a container-level flag needs to seed its
-// move-detection baseline: the bag's own identity, or (Loose) the one
-// item sitting directly in the slot.
-// findContainer resolves a FlagSuggestion's plain container name back to
-// the real BankContainer object onToggleContainer needs (item identity for
-// the seed, current guild state) — 2026-09-27.
-function findContainer(exp: BankCharacterExport, name: string): BankContainer | undefined {
-  return [...(exp.bags ?? []), ...(exp.bank ?? []), ...(exp.sharedBank ?? [])].find((c) => c.container === name);
-}
-
 // Every flagged SharedBank position on a character, as remove slots — what
 // "Unflag Shared Bank here" sends when two characters on one login both
 // have it flagged.
@@ -90,6 +78,9 @@ function sharedBankFlags(exp: BankCharacterExport): { container: string; slotInd
   return out;
 }
 
+// containerSeed is what a container-level flag needs to seed its
+// move-detection baseline: the bag's own identity, or (Loose) the one
+// item sitting directly in the slot.
 function containerSeed(c: BankContainer): { itemId: number; itemName: string } {
   if (!c.loose) return { itemId: c.bagItemId, itemName: c.bagName };
   const first = (c.items ?? [])[0];
@@ -107,13 +98,6 @@ type Diff = {
   removed: DiffRow[];
   changed: { before: DiffRow; after: DiffRow }[];
   unchanged: number;
-  // 2026-09-27 unverified-item reconciliation — which of this holder's
-  // sheet/manual rows this sync matched against a real synced item
-  // (verified), and which it still couldn't find (notFound, needs an
-  // officer's review on the site's own /bank page — nothing to act on
-  // from here).
-  verified: DiffRow[];
-  notFound: DiffRow[];
 };
 
 function normalizeDiff(d: BankSyncDiff): Diff {
@@ -123,8 +107,6 @@ function normalizeDiff(d: BankSyncDiff): Diff {
     removed: d.removed ?? [],
     changed: d.changed ?? [],
     unchanged: d.unchanged,
-    verified: d.verified ?? [],
-    notFound: d.notFound ?? [],
   };
 }
 
@@ -409,42 +391,6 @@ export function GuildBankPanel() {
     }
   }
 
-  // "Flag all suggested bags" — the same ToggleBankContainer call as the
-  // per-suggestion button, once per personal bag. SharedBank suggestions
-  // are left to their own button (they're confirmed individually — flag
-  // a login's Shared Bank on one character only).
-  async function flagAllSuggested(exp: BankCharacterExport) {
-    if (exp.rosterCharacterId === null) return;
-    const targets = (exp.flagSuggestions ?? [])
-      .map((s) => findContainer(exp, s.container))
-      .filter((c): c is BankContainer => !!c && !c.guild && !isSharedContainer(c.container));
-    if (targets.length === 0) return;
-    setSavingKey(`${exp.character}:__bulk`);
-    setError(null);
-    try {
-      for (const c of targets) {
-        const seed = containerSeed(c);
-        await ToggleBankContainer(exp.rosterCharacterId, c.container, true, seed.itemId, seed.itemName);
-      }
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      load();
-    } finally {
-      setSavingKey(null);
-    }
-  }
-
-  async function removeReviewed(ids: number[], note: string): Promise<string | null> {
-    try {
-      await RemoveBankUnverified(ids, note);
-      load();
-      return null;
-    } catch (err) {
-      return err instanceof Error ? err.message : String(err);
-    }
-  }
-
   async function openPreview() {
     setPreviewOpen(true);
     setPreviewLoading(true);
@@ -479,11 +425,9 @@ export function GuildBankPanel() {
       const normalized = (result?.diffs ?? []).map(normalizeDiff);
       const totalRows = normalized.reduce((sum, d) => sum + d.added.length + d.removed.length + d.changed.length + d.unchanged, 0);
       const blockedCount = result?.blocked?.length ?? 0;
-      const notFoundCount = normalized.reduce((sum, d) => sum + d.notFound.length, 0);
       setSyncMessage(
         `Synced ${normalized.length} character${normalized.length === 1 ? "" : "s"}, ${totalRows} row(s) total.` +
-          (blockedCount > 0 ? ` ${blockedCount} character${blockedCount === 1 ? "" : "s"} skipped — resolve their warnings and sync again.` : "") +
-          (notFoundCount > 0 ? ` ${notFoundCount} old sheet item${notFoundCount === 1 ? "" : "s"} weren't found — see "Needs review" on each character.` : ""),
+          (blockedCount > 0 ? ` ${blockedCount} character${blockedCount === 1 ? "" : "s"} skipped — resolve their warnings and sync again.` : ""),
       );
       setPreviewOpen(false);
       load();
@@ -567,7 +511,6 @@ export function GuildBankPanel() {
             {exports.map((exp) => {
               const slots = guildSlotCount(exp);
               const warnCount = (exp.moveWarnings ?? []).length;
-              const reviewCount = (exp.needsReview ?? []).length + (exp.flagSuggestions ?? []).length;
               return (
                 <button
                   key={exp.character}
@@ -587,11 +530,6 @@ export function GuildBankPanel() {
                     {(exp.sharedBankAlsoFlaggedOn ?? []).length > 0 && (
                       <span className="badge ambiguous" style={{ marginLeft: 6 }} title="Shared Bank also flagged on another character on this login">
                         ⚠ Shared Bank
-                      </span>
-                    )}
-                    {reviewCount > 0 && (
-                      <span className="badge ambiguous" style={{ marginLeft: 6 }} title="Old sheet items to review: bags to flag, or items a sync couldn't find">
-                        {reviewCount} to review
                       </span>
                     )}
                   </div>
@@ -642,8 +580,6 @@ export function GuildBankPanel() {
               onClearAll={clearAllPersonal}
               onClearSharedBank={clearSharedBank}
               onResolveWarning={resolveWarning}
-              onFlagAllSuggested={flagAllSuggested}
-              onRemoveReviewed={removeReviewed}
             />
           )}
         </div>
@@ -744,8 +680,6 @@ function PreviewBody({
           const changed = q
             ? d.changed.filter((c) => c.before.itemName.toLowerCase().includes(q) || c.after.itemName.toLowerCase().includes(q))
             : d.changed;
-          const verified = q ? d.verified.filter((r) => r.itemName.toLowerCase().includes(q)) : d.verified;
-          const notFound = q ? d.notFound.filter((r) => r.itemName.toLowerCase().includes(q)) : d.notFound;
           const bigRemoval = d.removed.length > 0 && d.unchanged + d.removed.length > 0 && d.removed.length / (d.unchanged + d.removed.length) > 0.25;
 
           return (
@@ -759,14 +693,6 @@ function PreviewBody({
                 <span style={{ color: "#9ca3af" }}>
                   (+{d.added.length} −{d.removed.length} ~{d.changed.length}, {d.unchanged} unchanged)
                 </span>
-                {d.verified.length > 0 && (
-                  <span style={{ marginLeft: 6, color: "#38bdf8" }}>· {d.verified.length} verified from sheet</span>
-                )}
-                {d.notFound.length > 0 && (
-                  <span className="badge ambiguous" style={{ marginLeft: 6 }}>
-                    {d.notFound.length} not found
-                  </span>
-                )}
                 {bigRemoval && (
                   <span className="badge ambiguous" style={{ marginLeft: 6 }}>
                     large removal
@@ -798,24 +724,6 @@ function PreviewBody({
                       {changed.map((c, i) => (
                         <div key={i}>
                           ~ {c.before.itemName} → {c.after.itemName} ({c.after.quantity}) @ {formatLoc(c.after)}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {verified.length > 0 && (
-                    <div style={{ color: "#38bdf8" }}>
-                      {groupDiffRows(verified).map((g) => (
-                        <div key={g.itemName}>
-                          ✓ {g.itemName} {g.count > 1 ? `×${g.count} (${g.totalQty})` : g.totalQty > 1 ? `(${g.totalQty})` : ""} — confirmed at {g.locations.join(", ")}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {notFound.length > 0 && (
-                    <div style={{ color: "#fb923c" }}>
-                      {groupDiffRows(notFound).map((g) => (
-                        <div key={g.itemName}>
-                          ? {g.itemName} — sheet says {g.totalQty}, not found in this sync (review on the site&apos;s /bank page)
                         </div>
                       ))}
                     </div>
@@ -1026,8 +934,6 @@ function CharacterDetail({
   onMarkAll,
   onClearAll,
   onResolveWarning,
-  onFlagAllSuggested,
-  onRemoveReviewed,
   onClearSharedBank,
 }: {
   exp: BankCharacterExport;
@@ -1040,13 +946,10 @@ function CharacterDetail({
   onMarkAll: (exp: BankCharacterExport, scope: "bank" | "bags") => void;
   onClearAll: (exp: BankCharacterExport) => void;
   onResolveWarning: (exp: BankCharacterExport, w: BankMoveWarning, action: "move" | "keep" | "unflag", target?: { container: string; slotIndex: number }) => void;
-  onFlagAllSuggested: (exp: BankCharacterExport) => void;
-  onRemoveReviewed: (ids: number[], note: string) => Promise<string | null>;
   onClearSharedBank: (exp: BankCharacterExport) => void;
 }) {
   const bulkSaving = savingKey === `${exp.character}:__bulk`;
   const warnings = exp.moveWarnings ?? [];
-  const flagSuggestions = exp.flagSuggestions ?? [];
   const sharedAlsoOn = exp.sharedBankAlsoFlaggedOn ?? [];
 
   return (
@@ -1091,42 +994,6 @@ function CharacterDetail({
           ))}
         </div>
       )}
-
-      {/* 2026-09-27 unverified-item tracking: the old sheet's numbers for
-          this character are still sitting on unflagged bags — surfaced
-          BEFORE a sync so fewer items end up needing officer review on
-          the site's /bank page afterward. Purely advisory; flagging a
-          suggestion is the exact same click as the ordinary checkbox. */}
-      {flagSuggestions.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          {flagSuggestions.filter((s) => !isSharedContainer(s.container)).length > 1 && (
-            <button type="button" className="secondary" style={{ fontSize: 12, marginBottom: 6 }} onClick={() => onFlagAllSuggested(exp)} disabled={bulkSaving}>
-              Flag all {flagSuggestions.filter((s) => !isSharedContainer(s.container)).length} suggested bags
-            </button>
-          )}
-          {flagSuggestions.map((s) => {
-            const container = findContainer(exp, s.container);
-            if (!container) return null;
-            const isShared = isSharedContainer(s.container);
-            const names = [...new Set((s.matches ?? []).map((m) => m.itemName))];
-            return (
-              <div key={s.container} className="warning" style={{ marginBottom: 6 }}>
-                Sheet says <strong>{s.container}</strong> holds guild item{names.length === 1 ? "" : "s"}: {names.join(", ")}. Not flagged yet.
-                <button
-                  type="button"
-                  className="secondary"
-                  style={{ marginLeft: 8, fontSize: 12 }}
-                  onClick={() => onToggleContainer(exp, isShared, container)}
-                >
-                  Flag {s.container}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {(exp.needsReview ?? []).length > 0 && <NeedsReviewPanel key={exp.character} items={exp.needsReview ?? []} onRemove={onRemoveReviewed} />}
 
       <div className="toolbar">
         <button className="secondary" style={{ fontSize: 12 }} onClick={() => onMarkAll(exp, "bank")} disabled={bulkSaving}>
@@ -1216,102 +1083,5 @@ function CharacterDetail({
         </details>
       )}
     </div>
-  );
-}
-
-// "Needs review" (2026-10-17): old sheet items a real sync of this
-// character looked for, in a bag that WAS synced, and didn't find. Shown
-// here so a banker deals with them while syncing instead of later on the
-// website's /bank page. Two ways out: the item is in another bag (flag it,
-// sync again — it's matched automatically), or it's really gone (select,
-// say why, remove — audited on the site exactly like /bank's Remove).
-function NeedsReviewPanel({ items, onRemove }: { items: BankUnverifiedItem[]; onRemove: (ids: number[], note: string) => Promise<string | null> }) {
-  const [checked, setChecked] = useState<Set<number>>(new Set());
-  const [note, setNote] = useState("");
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const removable = items.filter((i) => i.id > 0);
-  const allChecked = removable.length > 0 && removable.every((i) => checked.has(i.id));
-
-  function toggle(id: number) {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  async function confirm() {
-    setBusy(true);
-    const error = await onRemove([...checked], note.trim());
-    setBusy(false);
-    setConfirming(false);
-    if (error) setErr(error);
-    else {
-      setChecked(new Set());
-      setNote("");
-      setErr(null);
-    }
-  }
-
-  return (
-    <details className="bank-section" open style={{ marginBottom: 12 }}>
-      <summary>
-        Needs review ({items.length}) — old sheet items the last sync couldn&apos;t find
-      </summary>
-      <div style={{ padding: "8px 4px", fontSize: 12, color: "#9ca3af" }}>
-        The sheet listed these in a bag that was synced, but they weren&apos;t there. If one is in another bag, flag that bag and sync
-        again; it&apos;s matched automatically. If it&apos;s really gone, select it and remove it with a note.
-      </div>
-      {removable.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#9ca3af", padding: "0 4px 8px" }}>Update the site to remove these from here; for now use the website&apos;s Bank page.</div>
-      ) : (
-        <>
-          <label className="bank-modal-check" style={{ fontSize: 12, padding: "0 4px" }}>
-            <input type="checkbox" checked={allChecked} onChange={() => setChecked(allChecked ? new Set() : new Set(removable.map((i) => i.id)))} />
-            Select all
-          </label>
-          <div className="bank-item-list">
-            {items.map((it, idx) => (
-              <label key={it.id || idx} className="bank-item bank-modal-check" style={{ fontSize: 12 }}>
-                <input type="checkbox" checked={checked.has(it.id)} disabled={it.id <= 0} onChange={() => toggle(it.id)} />
-                {it.itemName}
-                {it.quantity > 1 ? ` ×${it.quantity}` : ""}
-                <span style={{ color: "#6b7280", marginLeft: 6 }}>sheet: {it.legacyLocation || (it.kind === "manual" ? "added by hand" : "no location")}</span>
-              </label>
-            ))}
-          </div>
-          <div className="toolbar" style={{ marginTop: 6 }}>
-            <input
-              type="text"
-              placeholder="Why are these gone? (e.g. handed out, sold, never existed)"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              style={{ flex: 1, minWidth: 0 }}
-            />
-            <button className="secondary" style={{ fontSize: 12 }} disabled={checked.size === 0 || !note.trim() || busy} onClick={() => setConfirming(true)}>
-              Remove {checked.size || ""} selected
-            </button>
-          </div>
-          {err && <div className="error" style={{ fontSize: 12 }}>{err}</div>}
-        </>
-      )}
-      <ConfirmDialog
-        open={confirming}
-        title="Remove from the guild bank"
-        confirmLabel={busy ? "Removing…" : `Remove ${checked.size}`}
-        busy={busy}
-        onCancel={() => !busy && setConfirming(false)}
-        onConfirm={confirm}
-        body={
-          <span>
-            Remove {checked.size} old sheet item{checked.size === 1 ? "" : "s"} from the guild bank? Each is recorded in the bank&apos;s audit log
-            with your note: &ldquo;{note.trim()}&rdquo;.
-          </span>
-        }
-      />
-    </details>
   );
 }

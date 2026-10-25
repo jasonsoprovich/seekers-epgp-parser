@@ -66,30 +66,6 @@ export interface BankCharacterExport {
      * character from Preview/Submit Sync until each one is resolved.
      */
     "moveWarnings": BankMoveWarning[] | null;
-
-    /**
-     * FlagSuggestions is every unflagged container this scan shows holding
-     * one of this character's still-unverified (sheet/manual) items —
-     * 2026-09-27, purely advisory ("this bag holds sheet items, flag it?"
-     * before a sync, so fewer land in the site's "needs review" list).
-     * Empty when there's nothing unverified for this character, or
-     * nothing unflagged looks like a match.
-     */
-    "flagSuggestions": BankFlagSuggestion[] | null;
-
-    /**
-     * NeedsReview is every old-sheet/manual item a real sync of this
-     * character already looked for and couldn't find (2026-10-17) — shown
-     * right on the Guild Bank tab so a banker can flag the right bag or
-     * remove what's really gone, instead of finding it later on /bank.
-     */
-    "needsReview": BankUnverifiedItem[] | null;
-
-    /**
-     * UnverifiedCount is every still-unconfirmed sheet/manual item on this
-     * character, needs-review or not (those just haven't been synced yet).
-     */
-    "unverifiedCount": number;
 }
 
 /**
@@ -125,18 +101,6 @@ export interface BankContainerSeed {
 export interface BankEquipped {
     "location": string;
     "itemName": string;
-}
-
-/**
- * BankFlagSuggestion mirrors bankexport.FlagSuggestion — one unflagged
- * container this scan shows holding an item the sheet/manual data still
- * lists as unverified for this character, 2026-09-27. Purely advisory:
- * clicking it just flags the container the same way the ordinary
- * checkbox toggle does (ToggleBankContainer) — nothing new to write.
- */
-export interface BankFlagSuggestion {
-    "container": string;
-    "matches": BankUnverifiedItem[] | null;
 }
 
 /**
@@ -227,22 +191,6 @@ export interface BankSyncBlocked {
 export interface BankSyncResult {
     "diffs": officerapi$0.BankSyncDiff[] | null;
     "blocked": BankSyncBlocked[] | null;
-}
-
-/**
- * BankUnverifiedItem mirrors officerapi.UnverifiedItem — kept separate so
- * this file's JSON shapes don't leak a raw officerapi type into a field
- * meant for the frontend (same pattern BankMoveWarning already sets for
- * bankexport.MoveWarning).
- */
-export interface BankUnverifiedItem {
-    "id": number;
-    "itemName": string;
-    "itemId": number;
-    "quantity": number;
-    "legacyLocation": string;
-    "kind": string;
-    "notFound": boolean;
 }
 
 /**

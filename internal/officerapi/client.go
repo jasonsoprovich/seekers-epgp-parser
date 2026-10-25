@@ -828,21 +828,6 @@ type SyncedOccupant struct {
 	ItemName  string `json:"itemName"`
 }
 
-// UnverifiedItem is one sheet/manual item still sitting on a holder,
-// unconfirmed by any real sync yet — 2026-09-27. Mirrors src/lib/bank/
-// sync.ts's UnverifiedContentEntry.
-type UnverifiedItem struct {
-	// ID is the site's bank_holdings row id — what RemoveBankUnverified
-	// sends back (absent/0 from a pre-2026-10-17 server).
-	ID             int    `json:"id"`
-	ItemName       string `json:"itemName"`
-	ItemID         int    `json:"itemId"`
-	Quantity       int    `json:"quantity"`
-	LegacyLocation string `json:"legacyLocation"`
-	Kind           string `json:"kind"` // "sheet" | "manual"
-	NotFound       bool   `json:"notFound"`
-}
-
 // BankConfig is GET /api/officer/bank/config's response — every
 // designation, each holder's last sync, and each holder's last-synced
 // contents, all keyed by characterId as a string (JSON object keys are
@@ -854,13 +839,6 @@ type BankConfig struct {
 	Designations   map[string][]DesignationSlot `json:"personalDesignations"`
 	LastImports    map[string]BankImportInfo    `json:"lastImports"`
 	SyncedContents map[string][]SyncedOccupant  `json:"syncedContents"`
-	// UnverifiedContents is what SuggestFlags (bankexport package) compares
-	// a fresh scan against — absent entirely from an older server response,
-	// which is fine: a nil map reads as empty via a plain `cfg.
-	// UnverifiedContents[key]` lookup, no normalization needed the way a
-	// nil SLICE needs (see normalizeBankSyncDiff's comment) — a nil Go map
-	// is safe to read from, just not to write to.
-	UnverifiedContents map[string][]UnverifiedItem `json:"unverifiedContents"`
 }
 
 func (c *Client) FetchBankConfig(ctx context.Context) (BankConfig, error) {
@@ -893,17 +871,6 @@ type updateDesignationsRequest struct {
 func (c *Client) UpdateBankDesignations(ctx context.Context, characterID int, set *[]DesignationSlot, add []DesignationSlot, remove []RemoveSlot) error {
 	body := updateDesignationsRequest{CharacterID: characterID, Set: set, Add: add, Remove: remove}
 	return c.do(ctx, http.MethodPut, "/api/officer/bank/designations", body, nil)
-}
-
-// RemoveBankUnverified removes old-sheet/manual bank rows an officer has
-// confirmed are gone (POST /api/officer/bank/unverified). The site requires
-// a note and audits each row; returns how many were removed.
-func (c *Client) RemoveBankUnverified(ctx context.Context, ids []int, note string) (int, error) {
-	var out struct {
-		Removed int `json:"removed"`
-	}
-	err := c.do(ctx, http.MethodPost, "/api/officer/bank/unverified", map[string]any{"ids": ids, "note": note}, &out)
-	return out.Removed, err
 }
 
 // BankSyncRow is one physical stack in a sync payload — shaped exactly
@@ -958,25 +925,14 @@ type BankSyncDiff struct {
 		After  BankSyncDiffRow `json:"after"`
 	} `json:"changed"`
 	Unchanged int `json:"unchanged"`
-	// Verified/NotFound are 2026-09-27 unverified-item reconciliation
-	// (src/lib/bank/sync.ts's reconcileUnverified) — which of this
-	// holder's sheet/manual rows this sync matched against a real synced
-	// item, and which it still couldn't find. Both always present (never
-	// omitted) from a server new enough to send them; an older/unaware
-	// server response simply leaves these nil after unmarshal, so
-	// normalizeBankSyncDiff (below) is what every caller actually reads
-	// these through — never this struct's own zero value directly.
-	Verified []BankSyncDiffRow `json:"verified"`
-	NotFound []BankSyncDiffRow `json:"notFound"`
 }
 
 // normalizeBankSyncDiff guards the "Go nil slice -> JSON null" gotcha
 // (CLAUDE.md) one level further than usual: these fields aren't just
 // Go-constructed, they're unmarshaled from the tracker's HTTP response and
-// then re-marshaled again for the Wails frontend, so an older/differently-
-// behaved server response leaving Verified/NotFound absent would otherwise
-// round-trip as a literal `null` the frontend's own `.length`/`.map()`
-// calls would crash on.
+// then re-marshaled again for the Wails frontend, so a server response
+// leaving a list absent would otherwise round-trip as a literal `null` the
+// frontend's own `.length`/`.map()` calls would crash on.
 func normalizeBankSyncDiff(d BankSyncDiff) BankSyncDiff {
 	if d.Added == nil {
 		d.Added = []BankSyncDiffRow{}
@@ -989,12 +945,6 @@ func normalizeBankSyncDiff(d BankSyncDiff) BankSyncDiff {
 			Before BankSyncDiffRow `json:"before"`
 			After  BankSyncDiffRow `json:"after"`
 		}{}
-	}
-	if d.Verified == nil {
-		d.Verified = []BankSyncDiffRow{}
-	}
-	if d.NotFound == nil {
-		d.NotFound = []BankSyncDiffRow{}
 	}
 	return d
 }
