@@ -678,18 +678,20 @@ export function BidsPanel() {
     return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${capturedItem}, ${gratsDetail(winners)}.`;
   }
 
-  // The ", 12 total bids and won with a Medium Bid at 2.5431 priority" part
+  // The ", 12 total bids and won with a Medium Bid at 2,5431 priority" part
   // of the grats line. Total bids = every active (non-superseded) row, the
   // same count the submit confirm dialog shows. With more than one winner
   // each winner gets their own tier/priority. Priority is left out if the
-  // roster has no rating for that character.
+  // roster has no rating for that character. The decimal is a comma
+  // because "2.5431" pasted in game came out as "2 5431" — the dot between
+  // digits looks to be eaten by EQ's chat filtering, not our code.
   function gratsDetail(winners: BidRow[]): string {
     const totalBids = rows.filter((_, i) => !supersededSet.has(i)).length;
     const total = `${totalBids} total bid${totalBids === 1 ? "" : "s"}`;
     const wonWith = (r: BidRow): string => {
       const article = /^[aeiou]/i.test(r.tier) ? "an" : "a";
       const priority = roster.resolve(r.characterName).priorityRating;
-      return `won with ${article} ${r.tier}${priority !== null ? ` at ${priority.toFixed(4)} priority` : ""}`;
+      return `won with ${article} ${r.tier}${priority !== null ? ` at ${priority.toFixed(4).replace(".", ",")} priority` : ""}`;
     };
     if (winners.length === 1) return `${total} and ${wonWith(winners[0])}`;
     return `${total}; ${winners.map((r) => `${r.characterName} ${wonWith(r)}`).join(", ")}`;
