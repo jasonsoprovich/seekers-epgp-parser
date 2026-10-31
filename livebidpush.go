@@ -22,6 +22,7 @@ import (
 // snapshot push, or a bare heartbeat for the same round (entries == nil).
 type livePushJob struct {
 	itemName   string
+	itemID     int
 	capturedBy string
 	entries    []officerapi.LiveBidSnapshotEntry
 	sig        string
@@ -168,7 +169,7 @@ func runLivePushDelivery(ctx context.Context, mailbox *livePushMailbox, status *
 			if job.entries == nil {
 				err = client.HeartbeatLiveBids(attemptCtx, job.itemName)
 			} else {
-				err = client.PushLiveBidSnapshot(attemptCtx, job.itemName, job.capturedBy, job.entries)
+				err = client.PushLiveBidSnapshot(attemptCtx, job.itemName, job.itemID, job.capturedBy, job.entries)
 			}
 			cancel()
 

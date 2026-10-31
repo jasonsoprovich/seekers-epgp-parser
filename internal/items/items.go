@@ -37,7 +37,11 @@ type Item struct {
 var (
 	loadOnce sync.Once
 	byNorm   map[string]Item
-	loadErr  error
+	byID     map[int]Item
+	// variantsOf holds every id for a normalized name that has more than
+	// one (see variants.go); names with a single id aren't in it.
+	variantsOf map[string][]Variant
+	loadErr    error
 )
 
 // normalize collapses whitespace, lowercases, and treats a backtick the
@@ -53,16 +57,19 @@ func normalize(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// load parses the embedded id\tName\tdropLevel TSV into byNorm, resolving
+// load parses the embedded id\tName\tdropLevel\tzones\tNPCs TSV into byNorm, resolving
 // the ~900 names that map to more than one item ID: prefer the one dropped
 // by the highest-level NPC (dropLevel; 0 = never drops), so a real drop
 // beats a merchant-only or quest-reward duplicate and the raid-boss copy
 // beats an overland one (Terris Thule's NO DROP "Carved Bone Ring" 10127
 // over Crusader Kezzal's 6441), and fall back to the lowest ID as a stable
-// tiebreak. See scripts/gen-items.sh.
+// tiebreak. See scripts/gen-items.sh. byNorm's pick is only the default
+// with no other context; Resolve uses the zones/NPCs to do better.
 func load() {
 	byNorm = make(map[string]Item, 26000)
+	byID = make(map[int]Item, 27000)
 	levelOf := make(map[string]int, 26000)
+	all := make(map[string][]Variant, 26000)
 
 	gr, err := gzip.NewReader(bytes.NewReader(itemsGz))
 	if err != nil {
@@ -78,8 +85,8 @@ func load() {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 {
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
 			continue
 		}
 		id, err := strconv.Atoi(parts[0])
@@ -92,6 +99,15 @@ func load() {
 			continue
 		}
 		level, _ := strconv.Atoi(parts[2])
+		v := Variant{ID: id, Name: name, Level: level, Zones: []string{}, NPCs: []string{}}
+		if len(parts) > 3 && parts[3] != "" {
+			v.Zones = strings.Split(parts[3], "|")
+		}
+		if len(parts) > 4 && parts[4] != "" {
+			v.NPCs = strings.Split(parts[4], "|")
+		}
+		all[norm] = append(all[norm], v)
+		byID[id] = Item{ID: id, Name: name}
 
 		existing, seen := byNorm[norm]
 		if !seen || level > levelOf[norm] || (level == levelOf[norm] && id < existing.ID) {
@@ -101,6 +117,12 @@ func load() {
 	}
 	if err := sc.Err(); err != nil {
 		loadErr = fmt.Errorf("items: reading embedded data: %w", err)
+	}
+	variantsOf = make(map[string][]Variant, 1000)
+	for norm, vs := range all {
+		if len(vs) > 1 {
+			variantsOf[norm] = vs
+		}
 	}
 }
 

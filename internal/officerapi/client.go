@@ -370,9 +370,12 @@ type BidEntry struct {
 }
 
 type BidsRequest struct {
-	ItemName string     `json:"itemName"`
-	Entries  []BidEntry `json:"entries"`
-	Note     string     `json:"note,omitempty"`
+	ItemName string `json:"itemName"`
+	// Which copy of a duplicate-named item this round was for (app
+	// itemchoice.go). 0 = unknown; the site then looks the name up.
+	ItemID  int        `json:"itemId,omitempty"`
+	Entries []BidEntry `json:"entries"`
+	Note    string     `json:"note,omitempty"`
 	// Set true to record even when the site flags this item as a likely
 	// duplicate of an already-recorded round (see SubmitBidsChecked).
 	ConfirmDuplicate bool `json:"confirmDuplicate,omitempty"`
@@ -474,6 +477,7 @@ type LiveBidSnapshotEntry struct {
 
 type liveBidSnapshotRequest struct {
 	ItemName            string                 `json:"itemName"`
+	ItemID              int                    `json:"itemId,omitempty"`
 	Bids                []LiveBidSnapshotEntry `json:"bids"`
 	CapturedByCharacter string                 `json:"capturedByCharacter,omitempty"`
 }
@@ -488,12 +492,13 @@ type liveBidSnapshotRequest struct {
 // snapshot is idempotent: whatever the board has, one push makes it match
 // the officer's own table. Same endpoint; the site tells the two forms
 // apart by the `bids` array.
-func (c *Client) PushLiveBidSnapshot(ctx context.Context, itemName, capturedByCharacter string, bids []LiveBidSnapshotEntry) error {
+func (c *Client) PushLiveBidSnapshot(ctx context.Context, itemName string, itemID int, capturedByCharacter string, bids []LiveBidSnapshotEntry) error {
 	if bids == nil {
 		bids = []LiveBidSnapshotEntry{}
 	}
 	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/push", liveBidSnapshotRequest{
 		ItemName:            itemName,
+		ItemID:              itemID,
 		Bids:                bids,
 		CapturedByCharacter: capturedByCharacter,
 	}, nil)
@@ -545,6 +550,7 @@ type ResolveLiveBidEntry struct {
 
 type resolveLiveBidsRequest struct {
 	ItemName            string                `json:"itemName"`
+	ItemID              int                   `json:"itemId,omitempty"`
 	Bids                []ResolveLiveBidEntry `json:"bids"`
 	CapturedByCharacter string                `json:"capturedByCharacter,omitempty"`
 }
@@ -554,12 +560,13 @@ type resolveLiveBidsRequest struct {
 // winner(s) for a review window (PLAN.md Phase 16) instead of vanishing the
 // instant SubmitBids succeeds. Best-effort like every other live-bids call;
 // SubmitBids is the real record regardless.
-func (c *Client) ResolveLiveBids(ctx context.Context, itemName, capturedByCharacter string, bids []ResolveLiveBidEntry) error {
+func (c *Client) ResolveLiveBids(ctx context.Context, itemName string, itemID int, capturedByCharacter string, bids []ResolveLiveBidEntry) error {
 	if bids == nil {
 		bids = []ResolveLiveBidEntry{}
 	}
 	return c.do(ctx, http.MethodPost, "/api/officer/live-bids/resolve", resolveLiveBidsRequest{
 		ItemName:            itemName,
+		ItemID:              itemID,
 		Bids:                bids,
 		CapturedByCharacter: capturedByCharacter,
 	}, nil)

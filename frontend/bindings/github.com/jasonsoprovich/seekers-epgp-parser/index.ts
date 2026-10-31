@@ -25,6 +25,8 @@ export type {
     BidSwitchResult,
     GameDirInfo,
     GuildBankState,
+    ItemChoice,
+    ItemVariantView,
     LedgerPage,
     LiveBidPushStatus,
     LogFileInfoView,

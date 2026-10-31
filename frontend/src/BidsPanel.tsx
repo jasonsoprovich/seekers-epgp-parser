@@ -7,13 +7,16 @@ import {
   FetchKnownItems,
   GetLiveBidPushStatus,
   ItemLink,
+  ResolveItem,
   ResolveNoBidRound,
+  SetBidRoundItem,
   SetBidsUnsaved,
   SubmitBids,
   SwitchBidRound,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
-import type { BidRound, BidRow as CapturedBidRow, LiveBidPushStatus } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
+import type { BidRound, BidRow as CapturedBidRow, ItemChoice, LiveBidPushStatus } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ItemVariantPicker } from "./ItemVariantPicker";
 import { MainResolveCombobox } from "./MainResolveCombobox";
 import { useRoster } from "./useRoster";
 
@@ -150,6 +153,11 @@ export function BidsPanel() {
   // one for.
   const [capturedRoundId, setCapturedRoundId] = useState("");
   const [roundStartedAt, setRoundStartedAt] = useState<string>("");
+  // Which item id the round is for (itemchoice.go) — set from BidRound.item
+  // wherever a round arrives, changed by the variant picker, and sent with
+  // the grats link and the submission. Null for a manual round until its
+  // typed name resolves.
+  const [itemChoice, setItemChoice] = useState<ItemChoice | null>(null);
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [tieWarning, setTieWarning] = useState<string | null>(null);
@@ -224,6 +232,10 @@ export function BidsPanel() {
   useEffect(() => {
     roundStartedAtRef.current = roundStartedAt;
   }, [roundStartedAt]);
+  const itemChoiceRef = useRef<ItemChoice | null>(null);
+  useEffect(() => {
+    itemChoiceRef.current = itemChoice;
+  }, [itemChoice]);
 
   // Streamline (2026-09-09): entering review auto-runs Determine Winner so
   // the common case is End Round & Review -> glance -> Submit, with no
@@ -284,6 +296,7 @@ export function BidsPanel() {
           startedAt: roundStartedAtRef.current,
           rows: rowsRef.current.map(({ winner: _w, displayName: _d, manual: _m, rowKey: _k, ...r }) => r),
           live: false,
+          item: itemChoiceRef.current ?? { itemId: 0, reason: "", ambiguous: false, variants: [], zone: "", killed: [] },
         };
         setParkedRounds((prev) => [...prev, parked]);
         noteParked(parked);
@@ -328,6 +341,7 @@ export function BidsPanel() {
       setCapturedItem(result.current.itemName);
       setCapturedRoundId(result.current.roundId);
       setRoundStartedAt(result.current.startedAt);
+      setItemChoice(result.current.item);
       setPhase("live");
       setPendingAnnouncement(null);
     } catch (err) {
@@ -355,6 +369,7 @@ export function BidsPanel() {
     setCapturedItem(round.itemName);
     setCapturedRoundId(round.roundId);
     setRoundStartedAt(round.startedAt);
+    setItemChoice(round.item);
     setItemName(round.itemName);
     setPhase("review");
   }
@@ -404,8 +419,39 @@ export function BidsPanel() {
       setCapturedItem(round.itemName);
       setCapturedRoundId(round.roundId);
       setRoundStartedAt(round.startedAt);
+      setItemChoice(round.item);
     });
   }, []);
+
+  // A manual round's item is typed, so resolve its id as the officer types
+  // (debounced; the log context is "now").
+  useEffect(() => {
+    if (!manualRound) return;
+    const name = capturedItem.trim();
+    if (!name) {
+      setItemChoice(null);
+      return;
+    }
+    let cancelled = false;
+    const id = setTimeout(() => {
+      ResolveItem(name, "")
+        .then((c) => {
+          if (!cancelled) setItemChoice(c);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [manualRound, capturedItem]);
+
+  // The variant picker. A live round's choice lives in Go (the poller pushes
+  // it to the site's board and re-emits it every tick), so tell Go too.
+  function pickItemVariant(itemId: number) {
+    setItemChoice((c) => (c ? { ...c, itemId, reason: "picked", ambiguous: false } : c));
+    if (phase === "live") void SetBidRoundItem(capturedRoundId, itemId).catch((err) => setError(String(err)));
+  }
 
   async function captureFor(name: string, announcedAt = "") {
     const target = name.trim();
@@ -423,6 +469,7 @@ export function BidsPanel() {
       setCapturedItem(round.itemName);
       setCapturedRoundId(round.roundId);
       setRoundStartedAt(round.startedAt);
+      setItemChoice(round.item);
       setPhase("live");
     } catch (err) {
       setError(String(err));
@@ -453,6 +500,7 @@ export function BidsPanel() {
     setCapturedItem(itemName.trim());
     setCapturedRoundId(newClientRoundId());
     setRoundStartedAt("");
+    setItemChoice(null);
     setManualRound(true);
     setRows([{ ...newManualRow(), rawMessage: "(manual round)" }]);
     setPhase("review");
@@ -467,6 +515,7 @@ export function BidsPanel() {
       if (round.itemName) {
         setCapturedItem(round.itemName);
         setCapturedRoundId(round.roundId);
+        setItemChoice(round.item);
       }
       setPhase("review");
     } catch (err) {
@@ -485,6 +534,7 @@ export function BidsPanel() {
     setCapturedItem("");
     setCapturedRoundId("");
     setRoundStartedAt("");
+    setItemChoice(null);
     setItemName("");
     setTieWarning(null);
     setGratsCopied(false);
@@ -703,7 +753,7 @@ export function BidsPanel() {
   // does, instead of as plain text. Falls back to the plain name if the
   // item can't be matched.
   async function gratsMessageLinked(winners: BidRow[]): Promise<string> {
-    const linkedItem = await ItemLink(capturedItem).catch(() => capturedItem);
+    const linkedItem = await ItemLink(capturedItem, itemChoice?.itemId ?? 0).catch(() => capturedItem);
     return `Grats ${winners.map((r) => r.characterName).join(", ")} on ${linkedItem}, ${gratsDetail(winners)}.`;
   }
 
@@ -764,7 +814,7 @@ export function BidsPanel() {
     if (!confirmDuplicate) setDupPrompt(null);
     try {
       const entries = activeRows.map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt, isWinner: r.winner }));
-      const result = await SubmitBids(capturedItem, capturedRoundId, entries, confirmDuplicate);
+      const result = await SubmitBids(capturedItem, capturedRoundId, itemChoice?.itemId ?? 0, entries, confirmDuplicate);
       // Site rejected it as a likely double-click of a same-item finalize
       // within 12h. Not an error — offer "Record anyway" (a boss really can
       // drop the same item twice a night). Close the confirm dialog so the
@@ -973,6 +1023,7 @@ export function BidsPanel() {
             ) : (
               <strong style={{ fontSize: 15 }}>{capturedItem || "—"}</strong>
             )}
+            <ItemVariantPicker choice={itemChoice} onPick={pickItemVariant} />
             <span style={{ color: "#9ca3af", fontSize: 13 }}>
               {!manualRound && startedLabel && `started ${startedLabel} · `}
               {rows.length} bid{rows.length === 1 ? "" : "s"}

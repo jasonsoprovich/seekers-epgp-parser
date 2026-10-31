@@ -85,10 +85,13 @@ type App struct {
 	// as the SAME submission instead of a new one, so a response lost after
 	// the write actually succeeded can't double-charge GP or make an
 	// automatic retry look like a duplicate drop to the officer.
-	roundID        string
-	roundStart     time.Time
-	roundResolved  bool
-	pendingLogPath string
+	roundID    string
+	roundStart time.Time
+	// Which copy of a duplicate-named item the round is for (itemchoice.go)
+	// — resolved when the round opens, overridable via SetBidRoundItem.
+	roundItemChoice ItemChoice
+	roundResolved   bool
+	pendingLogPath  string
 	// A lower bound on where the next capture window may start — bumped to
 	// "now" whenever a round ends (Discard / Submit / End Round). Without it,
 	// re-announcing the SAME item within parse.announcementSessionGap
@@ -639,20 +642,6 @@ func (a *App) FetchKnownItems() ([]string, error) {
 		return nil, err
 	}
 	return client.FetchItems(a.ctx)
-}
-
-// ItemLink renders itemName as an in-game clickable item link (see
-// internal/items.Link) for the Bids tab's grats message, so it pastes into
-// guild/raid chat the same way a real linked item does instead of as plain
-// text. Falls back to the plain name unchanged when the item can't be
-// matched (items.Match — same typo-tolerant lookup the announcement
-// watcher uses) — the officer still gets a usable grats line, just without
-// the clickable link.
-func (a *App) ItemLink(itemName string) string {
-	if it, ok := items.Match(itemName); ok {
-		return items.Link(it)
-	}
-	return itemName
 }
 
 // FetchRoster backs the Main-character and Priority columns on both the
@@ -2029,6 +2018,8 @@ type BidRound struct {
 	StartedAt string   `json:"startedAt"`
 	Rows      []BidRow `json:"rows"`
 	Live      bool     `json:"live"`
+	// Which item id the round is for — see itemchoice.go.
+	Item ItemChoice `json:"item"`
 }
 
 // newRoundID mints a random v4-shaped UUID for a bid round. Hand-rolled
@@ -2178,11 +2169,13 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 	// members to review — Phase 16; the DO also sweeps this officer's
 	// resolved rounds when the new item's first bid pushes).
 	roundID := newRoundID()
+	choice := resolveItemChoice(raw, itemName, startAt)
 	a.liveBidsMu.Lock()
 	prevItem, prevResolved := a.roundItem, a.roundResolved
 	a.roundItem = itemName
 	a.roundID = roundID
 	a.roundStart = startAt
+	a.roundItemChoice = choice
 	a.roundResolved = false
 	a.liveBidsMu.Unlock()
 	if prevItem != "" && prevItem != itemName && !prevResolved {
@@ -2200,6 +2193,7 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 		StartedAt: startAt.Format(time.RFC3339),
 		Rows:      buildRows(raw, startAt, now),
 		Live:      true,
+		Item:      choice,
 	}, nil
 }
 
@@ -2212,18 +2206,18 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 // returns an empty, non-live BidRound.
 func (a *App) EndBidRound() (BidRound, error) {
 	a.liveBidsMu.Lock()
-	item, roundID, start := a.roundItem, a.roundID, a.roundStart
+	item, roundID, start, choice := a.roundItem, a.roundID, a.roundStart, a.roundItemChoice
 	a.roundFloor = time.Now() // this round is done collecting — a later re-announce is a new round
 	a.liveBidsMu.Unlock()
 
 	a.stopLiveBidPush()
 
 	if item == "" {
-		return BidRound{Rows: []BidRow{}}, nil
+		return BidRound{Rows: []BidRow{}, Item: emptyItemChoice()}, nil
 	}
 	raw, err := a.readLog()
 	if err != nil {
-		return BidRound{ItemName: item, RoundID: roundID, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}, err
+		return BidRound{ItemName: item, RoundID: roundID, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}, Item: choice}, err
 	}
 	return BidRound{
 		ItemName:  item,
@@ -2231,6 +2225,7 @@ func (a *App) EndBidRound() (BidRound, error) {
 		StartedAt: start.Format(time.RFC3339),
 		Rows:      buildRows(raw, start, time.Now()),
 		Live:      false,
+		Item:      choice,
 	}, nil
 }
 
@@ -2271,13 +2266,18 @@ func (a *App) DiscardBidRound() {
 // this app that predates the field; the site treats a missing id as "no
 // retry-idempotency for this submission" and falls back to its own
 // item/time heuristic, same as before this task.
-func (a *App) SubmitBids(itemName string, roundID string, entries []officerapi.BidEntry, confirmDuplicate bool) (officerapi.BidsResponse, error) {
+//
+// itemID is the round's chosen copy of the item (BidRound.Item.ItemID, or
+// the officer's pick) — 0 when unknown, in which case the site falls back to
+// looking the name up.
+func (a *App) SubmitBids(itemName string, roundID string, itemID int, entries []officerapi.BidEntry, confirmDuplicate bool) (officerapi.BidsResponse, error) {
 	client, err := a.officerClient()
 	if err != nil {
 		return officerapi.BidsResponse{}, err
 	}
 	resp, err := client.SubmitBidsChecked(a.ctx, officerapi.BidsRequest{
 		ItemName:         itemName,
+		ItemID:           itemID,
 		Entries:          entries,
 		ConfirmDuplicate: confirmDuplicate,
 		SubmissionID:     roundID,
@@ -2306,7 +2306,7 @@ func (a *App) SubmitBids(itemName string, roundID string, entries []officerapi.B
 			})
 		}
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = client.ResolveLiveBids(bg, itemName, eqlogs.CharacterFromPath(a.currentLogPath()), resolveBids)
+		_ = client.ResolveLiveBids(bg, itemName, itemID, eqlogs.CharacterFromPath(a.currentLogPath()), resolveBids)
 		cancel()
 		a.applyPendingLogSwap()
 	}
@@ -2325,7 +2325,7 @@ func (a *App) ResolveNoBidRound(itemName string, roundID string) error {
 		return err
 	}
 	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err = client.ResolveLiveBids(bg, itemName, eqlogs.CharacterFromPath(a.currentLogPath()), []officerapi.ResolveLiveBidEntry{})
+	err = client.ResolveLiveBids(bg, itemName, 0, eqlogs.CharacterFromPath(a.currentLogPath()), []officerapi.ResolveLiveBidEntry{})
 	cancel()
 	if err != nil {
 		return err
@@ -3019,12 +3019,23 @@ func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Tim
 			// own timer. Local-only and entirely independent of the mailbox
 			// below — the officer's own view updates even with no API key
 			// set, or while a push is stuck retrying.
+			// The item choice is read fresh each tick so an officer's pick
+			// from the variant picker (SetBidRoundItem) reaches both the
+			// local view and the site's board on the next tick.
+			a.liveBidsMu.Lock()
+			choice := a.roundItemChoice
+			if a.roundID != roundID {
+				choice = emptyItemChoice()
+			}
+			a.liveBidsMu.Unlock()
+
 			a.app.Event.Emit("bids:round", BidRound{
 				ItemName:  itemName,
 				RoundID:   roundID,
 				StartedAt: startAt.Format(time.RFC3339),
 				Rows:      buildRows(raw, startAt, now),
 				Live:      true,
+				Item:      choice,
 			})
 
 			// The site's snapshot: every tell in log order (the board keeps
@@ -3039,6 +3050,7 @@ func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Tim
 			cancelled := cancelledBidders(bidCands, latestCancel)
 			snapshot := make([]officerapi.LiveBidSnapshotEntry, 0, len(bidCands))
 			var sb strings.Builder
+			fmt.Fprintf(&sb, "item:%d\n", choice.ItemID)
 			for _, c := range bidCands {
 				if cancelled[strings.ToLower(c.CharacterName)] {
 					continue
@@ -3057,7 +3069,7 @@ func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Tim
 			if sig == lastSig {
 				idleTicks++
 				if idleTicks%resendEveryNIdleTicks == 0 {
-					mailbox.Put(livePushJob{itemName: itemName, capturedBy: capturedBy, entries: snapshot, sig: sig})
+					mailbox.Put(livePushJob{itemName: itemName, itemID: choice.ItemID, capturedBy: capturedBy, entries: snapshot, sig: sig})
 				} else if idleTicks%heartbeatEveryNIdleTicks == 1 {
 					mailbox.Put(livePushJob{itemName: itemName, sig: sig}) // entries == nil => heartbeat-only
 				}
@@ -3065,7 +3077,7 @@ func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Tim
 			}
 			idleTicks = 0
 			lastSig = sig
-			mailbox.Put(livePushJob{itemName: itemName, capturedBy: capturedBy, entries: snapshot, sig: sig})
+			mailbox.Put(livePushJob{itemName: itemName, itemID: choice.ItemID, capturedBy: capturedBy, entries: snapshot, sig: sig})
 		}
 	}()
 }
@@ -3101,7 +3113,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	}
 
 	a.liveBidsMu.Lock()
-	item, roundID, start := a.roundItem, a.roundID, a.roundStart
+	item, roundID, start, prevChoice := a.roundItem, a.roundID, a.roundStart, a.roundItemChoice
 	a.liveBidsMu.Unlock()
 	a.stopLiveBidPush()
 
@@ -3109,7 +3121,10 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	if err != nil {
 		return BidSwitchResult{}, err
 	}
-	parked := BidRound{ItemName: item, RoundID: roundID, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}}
+	if item == "" {
+		prevChoice = emptyItemChoice()
+	}
+	parked := BidRound{ItemName: item, RoundID: roundID, StartedAt: start.Format(time.RFC3339), Rows: []BidRow{}, Item: prevChoice}
 	if item != "" {
 		if at.Before(start) {
 			at = start
@@ -3123,6 +3138,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	// round, not whichever happened to be "current" in Go's state at that
 	// moment (which by then is neither — see SubmitBids's roundID param).
 	nextRoundID := newRoundID()
+	nextChoice := resolveItemChoice(raw, nextItem, at)
 
 	// The parked round is done collecting: the floor moves to the new
 	// announcement — NOT to "now" as EndBidRound does — so the new round
@@ -3132,6 +3148,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	a.roundItem = nextItem
 	a.roundID = nextRoundID
 	a.roundStart = at
+	a.roundItemChoice = nextChoice
 	a.roundResolved = false
 	a.liveBidsMu.Unlock()
 
@@ -3144,6 +3161,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 			StartedAt: at.Format(time.RFC3339),
 			Rows:      buildRows(raw, at, time.Now()),
 			Live:      true,
+			Item:      nextChoice,
 		},
 	}, nil
 }

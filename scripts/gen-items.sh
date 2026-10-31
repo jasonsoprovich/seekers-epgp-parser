@@ -33,25 +33,66 @@ echo "Reading items from $DB ..."
 count=$(sqlite3 "$DB" "SELECT count(*) FROM items;")
 echo "$count rows"
 
-# id, Name, drop level: the highest level of any NPC whose loot table holds
-# the item (1 for a loot-table row no NPC uses, which the old droppable flag
-# also counted), or 0 if nothing drops it. 897 names collide on several ids, and
-# the level breaks those ties: an item that drops beats a merchant-only or
-# quest-reward copy, and among copies that all drop, the one from the
-# higher-level NPC wins. That is the raid-boss version a guild bids on, e.g.
-# "Carved Bone Ring" from Terris Thule (10127, level 70) over Crusader
-# Kezzal's (6441, level 50).
-sqlite3 -separator $'\t' "$DB" "
+# id, Name, drop level, zones, NPCs.
+#
+# Drop level is the highest level of any NPC whose loot table holds the item
+# (1 for a loot-table row no NPC uses, which the old droppable flag also
+# counted), or 0 if nothing drops it. 897 names collide on several ids, and
+# the level is the last-resort tiebreak: an item that drops beats a
+# merchant-only or quest-reward copy, and among copies that all drop, the one
+# from the higher-level NPC wins (Terris Thule's "Carved Bone Ring" 10127,
+# level 70, over Crusader Kezzal's 6441, level 50).
+#
+# Zones and NPCs are filled only for ids whose name collides (every other row
+# leaves them empty, which keeps the file small): the long names of the zones
+# the dropping NPCs spawn in, and the NPC names, each "|"-joined. They let the
+# officer app pick the copy that actually dropped from the officer's recent
+# kills and current zone (internal/items.Resolve) before falling back to the
+# level.
+sqlite3 -separator $'\t' "$DB" <<'SQL' | gzip -9 >"$OUT"
 WITH drop_level AS (
   SELECT l.item_id AS id, max(max(coalesce(n.level, 1), 1)) AS lvl
   FROM lootdrop_entries l
   LEFT JOIN loottable_entries lt ON lt.lootdrop_id = l.lootdrop_id
   LEFT JOIN npc_types n ON n.loottable_id = lt.loottable_id
   GROUP BY l.item_id
+),
+norm AS (
+  SELECT id, lower(replace(trim(Name), '`', '''')) AS nm FROM items
+),
+dup AS (
+  SELECT id FROM norm WHERE nm IN (SELECT nm FROM norm GROUP BY nm HAVING count(*) > 1)
+),
+droppers AS (
+  SELECT DISTINCT l.item_id AS id, n.id AS npc_id, n.name AS npc
+  FROM dup d
+  JOIN lootdrop_entries l ON l.item_id = d.id
+  JOIN loottable_entries lt ON lt.lootdrop_id = l.lootdrop_id
+  JOIN npc_types n ON n.loottable_id = lt.loottable_id
+),
+npcs AS (
+  SELECT id, group_concat(npc, '|') AS names
+  FROM (SELECT DISTINCT id, npc FROM droppers ORDER BY id, npc)
+  GROUP BY id
+),
+zones AS (
+  SELECT id, group_concat(zone, '|') AS names
+  FROM (
+    SELECT DISTINCT dr.id, z.long_name AS zone
+    FROM droppers dr
+    JOIN spawnentry se ON se.npcID = dr.npc_id
+    JOIN spawn2 s2 ON s2.spawngroupID = se.spawngroupID
+    JOIN zone z ON z.short_name = s2.zone
+    ORDER BY dr.id, z.long_name
+  )
+  GROUP BY id
 )
-SELECT i.id, i.Name, coalesce(d.lvl, 0)
-FROM items i LEFT JOIN drop_level d ON d.id = i.id
+SELECT i.id, i.Name, coalesce(dl.lvl, 0), coalesce(z.names, ''), coalesce(n.names, '')
+FROM items i
+LEFT JOIN drop_level dl ON dl.id = i.id
+LEFT JOIN zones z ON z.id = i.id
+LEFT JOIN npcs n ON n.id = i.id
 ORDER BY i.id;
-" | gzip -9 >"$OUT"
+SQL
 
 echo "Wrote $OUT ($(wc -c <"$OUT") bytes gzipped)"
