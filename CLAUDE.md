@@ -202,6 +202,15 @@ or just use `wails3 build`, which does both.
   feature (`App.ItemLink`) has to look the item name up in
   `internal/items` rather than reusing a link byte sequence a bidder
   supposedly pasted — there's nothing to reuse.
+- **Item names aren't unique ids.** ~900 names map to several quarm.db ids and ~150 of
+  those have more than one copy that drops (two "Carved Bone Ring"s: Crusader Kezzal's
+  6441 in The Grey, Terris Thule's NO DROP 10127). `items.Lookup`/`Match` return only the
+  context-free default (highest dropping-NPC level, then lowest id). The bid flow uses
+  `items.Resolve` with `parse.FindLootContext` (kills in the last 45 min since the last
+  zone-in, then that zone) when a round opens (`itemchoice.go`), and the officer can
+  override it from the Bids tab picker (`SetBidRoundItem`). The chosen id goes into the
+  grats link and every site call (`itemId`). Zones/NPCs are only in `items.tsv.gz` for the
+  colliding names; regenerate with `scripts/gen-items.sh` after a quarm.db update.
 - **Announcement trigger has no word-boundary anchors** (`bids.go`
   `announceTriggerRe`). A real live-test miss (2026-09-21, "Denon's
   Drums of Declivity"): the officer pasted the item link with no space
