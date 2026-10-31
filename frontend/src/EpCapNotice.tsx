@@ -55,7 +55,10 @@ export function EpCapNotice({ lines, mode, cap }: { lines: CapLine[]; mode: "pre
         Each player can earn at most {capText} per cycle (main and alts combined). The site only adds the EP that still
         fits under the cap. Attendance is still recorded for everyone. This is expected, so there's nothing to fix.
       </div>
-      <ul style={{ margin: 0, paddingLeft: 18 }}>
+      {/* A long list (cycle's last raid: half the raid at cap) scrolls on its
+          own so whatever follows it — the submit dialog's Event Lead field,
+          the panel's next section — stays in view. */}
+      <ul style={{ margin: 0, paddingLeft: 18, maxHeight: n > 8 ? 220 : undefined, overflowY: n > 8 ? "auto" : undefined }}>
         {lines.map((l, i) => (
           <li key={`${l.name}-${l.context ?? ""}-${i}`}>
             <strong>{l.name}</strong>

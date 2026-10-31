@@ -76,12 +76,20 @@ export function ConfirmDialog({
           padding: 20,
           maxWidth: 460,
           width: "calc(100% - 48px)",
+          // Never taller than the window: the body scrolls and the title and
+          // buttons stay put. A last-day-of-cycle attendance submit listed ~30
+          // capped players and pushed the buttons off-screen (2026-10-30).
+          maxHeight: "calc(100vh - 48px)",
+          display: "flex",
+          flexDirection: "column",
           boxShadow: "0 12px 40px rgba(0, 0, 0, 0.5)",
         }}
       >
-        <h3 style={{ margin: "0 0 10px", fontSize: 16 }}>{title}</h3>
-        <div style={{ fontSize: 13, color: "#d1d5db", lineHeight: 1.5 }}>{body}</div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+        <h3 style={{ margin: "0 0 10px", fontSize: 16, flexShrink: 0 }}>{title}</h3>
+        <div style={{ fontSize: 13, color: "#d1d5db", lineHeight: 1.5, overflowY: "auto", minHeight: 0, paddingRight: 4 }}>
+          {body}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20, flexShrink: 0 }}>
           <button className="secondary" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </button>
