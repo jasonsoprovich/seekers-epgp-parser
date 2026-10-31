@@ -215,6 +215,11 @@ export interface BidRound {
     "startedAt": string;
     "rows": BidRow[] | null;
     "live": boolean;
+
+    /**
+     * Which item id the round is for — see itemchoice.go.
+     */
+    "item": ItemChoice;
 }
 
 /**
@@ -274,6 +279,44 @@ export interface GuildBankState {
      * without cluttering Exports with an entry that has nothing to toggle.
      */
     "unmatchedCharacters": string[] | null;
+}
+
+/**
+ * ItemChoice is the round's item id and how it was picked. ItemID is 0 when
+ * the name isn't a known item. Variants is empty unless the name has more
+ * than one id.
+ */
+export interface ItemChoice {
+    "itemId": number;
+
+    /**
+     * "only" | "kill" | "zone" | "level" (see internal/items), or "picked"
+     * once the officer chose one by hand. "" when the name didn't match.
+     */
+    "reason": string;
+
+    /**
+     * The log context couldn't separate the candidates; ItemID is only the
+     * default among them. The Bids tab highlights the picker then.
+     */
+    "ambiguous": boolean;
+    "variants": ItemVariantView[] | null;
+
+    /**
+     * The zone and kills the choice was based on, shown in the picker's hint.
+     */
+    "zone": string;
+    "killed": string[] | null;
+}
+
+/**
+ * ItemVariantView is one id of a name that has several, for the picker.
+ */
+export interface ItemVariantView {
+    "id": number;
+    "name": string;
+    "level": number;
+    "zones": string[] | null;
 }
 
 /**

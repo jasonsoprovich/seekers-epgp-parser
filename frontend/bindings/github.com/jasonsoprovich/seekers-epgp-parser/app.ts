@@ -322,13 +322,14 @@ export function InstallUpdate(): $CancellablePromise<void> {
  * ItemLink renders itemName as an in-game clickable item link (see
  * internal/items.Link) for the Bids tab's grats message, so it pastes into
  * guild/raid chat the same way a real linked item does instead of as plain
- * text. Falls back to the plain name unchanged when the item can't be
- * matched (items.Match — same typo-tolerant lookup the announcement
- * watcher uses) — the officer still gets a usable grats line, just without
- * the clickable link.
+ * text. itemID is the round's chosen copy (ItemChoice.ItemID); 0 falls back
+ * to the name lookup (items.Match — same typo-tolerant lookup the
+ * announcement watcher uses). The plain name comes back unchanged when
+ * neither finds the item — the officer still gets a usable grats line,
+ * just without the clickable link.
  */
-export function ItemLink(itemName: string): $CancellablePromise<string> {
-    return $Call.ByID(2451796390, itemName);
+export function ItemLink(itemName: string, itemID: number): $CancellablePromise<string> {
+    return $Call.ByID(2451796390, itemName, itemID);
 }
 
 /**
@@ -452,6 +453,15 @@ export function ResolveBankMove(input: $models.ResolveBankMoveInput): $Cancellab
 }
 
 /**
+ * ResolveItem is resolveItemChoice for the Bids tab's manual round, where
+ * the officer types the item name: at is the round's time (RFC3339), or
+ * empty for now.
+ */
+export function ResolveItem(itemName: string, at: string): $CancellablePromise<$models.ItemChoice> {
+    return $Call.ByID(912862076, itemName, at);
+}
+
+/**
  * ResolveNoBidRound closes a reviewed round with no bids as rot loot. It does
  * not create a ledger row or winner: officers record any rot-loot GP charge
  * separately as a linked manual entry on the site.
@@ -525,6 +535,16 @@ export function SetAttendanceUnsaved(v: boolean): $CancellablePromise<void> {
  */
 export function SetAutoDetectBids(enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(737290635, enabled);
+}
+
+/**
+ * SetBidRoundItem records the officer's pick from the variant picker. For
+ * the live round it updates what the poller pushes to the site (the next
+ * tick sends it); for a parked or reviewed round there's nothing to update
+ * here — the frontend holds that round and passes the id to SubmitBids.
+ */
+export function SetBidRoundItem(roundID: string, itemID: number): $CancellablePromise<void> {
+    return $Call.ByID(2223624429, roundID, itemID);
 }
 
 export function SetBidsUnsaved(v: boolean): $CancellablePromise<void> {
@@ -619,9 +639,13 @@ export function SubmitBankSync(): $CancellablePromise<$models.BankSyncResult> {
  * this app that predates the field; the site treats a missing id as "no
  * retry-idempotency for this submission" and falls back to its own
  * item/time heuristic, same as before this task.
+ * 
+ * itemID is the round's chosen copy of the item (BidRound.Item.ItemID, or
+ * the officer's pick) — 0 when unknown, in which case the site falls back to
+ * looking the name up.
  */
-export function SubmitBids(itemName: string, roundID: string, entries: officerapi$0.BidEntry[] | null, confirmDuplicate: boolean): $CancellablePromise<officerapi$0.BidsResponse> {
-    return $Call.ByID(3424067681, itemName, roundID, entries, confirmDuplicate);
+export function SubmitBids(itemName: string, roundID: string, itemID: number, entries: officerapi$0.BidEntry[] | null, confirmDuplicate: boolean): $CancellablePromise<officerapi$0.BidsResponse> {
+    return $Call.ByID(3424067681, itemName, roundID, itemID, entries, confirmDuplicate);
 }
 
 /**

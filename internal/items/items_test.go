@@ -123,7 +123,7 @@ func TestMatchIn_UnambiguousTypoStillResolves(t *testing.T) {
 
 func TestDuplicateName_PrefersDroppable(t *testing.T) {
 	// "A Broom" has two IDs in quarm.db (16544, 27172); Lookup must return
-	// exactly one of them consistently (droppable, else lowest ID) rather
+	// exactly one of them consistently (highest drop level, else lowest ID) rather
 	// than being sensitive to map-iteration order.
 	it, ok := Lookup("A Broom")
 	if !ok {
@@ -136,6 +136,17 @@ func TestDuplicateName_PrefersDroppable(t *testing.T) {
 	it2, _ := Lookup("A Broom")
 	if it2.ID != it.ID {
 		t.Errorf("Lookup was inconsistent across calls: %d vs %d", it.ID, it2.ID)
+	}
+}
+
+func TestDuplicateName_PrefersHigherLevelDrop(t *testing.T) {
+	// Both "Carved Bone Ring"s drop: 6441 from Crusader Kezzal (level 50)
+	// and the NO DROP mana-preservation one, 10127, from Terris Thule
+	// (level 70). The lowest-ID tiebreak used to pick 6441, so the grats
+	// link showed the wrong ring.
+	it, ok := Lookup("Carved Bone Ring")
+	if !ok || it.ID != 10127 {
+		t.Errorf("Lookup(Carved Bone Ring) = (%+v, %v), want id 10127", it, ok)
 	}
 }
 
