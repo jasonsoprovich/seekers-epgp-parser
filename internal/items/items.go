@@ -53,14 +53,16 @@ func normalize(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// load parses the embedded id\tName\tdroppable TSV into byNorm, resolving
-// the ~900 names that map to more than one item ID: prefer one that
-// actually drops from a loot table (droppable) over a merchant-only or
-// quest-reward duplicate with the same display name, and fall back to the
-// lowest ID as a stable tiebreak.
+// load parses the embedded id\tName\tdropLevel TSV into byNorm, resolving
+// the ~900 names that map to more than one item ID: prefer the one dropped
+// by the highest-level NPC (dropLevel; 0 = never drops), so a real drop
+// beats a merchant-only or quest-reward duplicate and the raid-boss copy
+// beats an overland one (Terris Thule's NO DROP "Carved Bone Ring" 10127
+// over Crusader Kezzal's 6441), and fall back to the lowest ID as a stable
+// tiebreak. See scripts/gen-items.sh.
 func load() {
 	byNorm = make(map[string]Item, 26000)
-	droppableOf := make(map[string]bool, 26000)
+	levelOf := make(map[string]int, 26000)
 
 	gr, err := gzip.NewReader(bytes.NewReader(itemsGz))
 	if err != nil {
@@ -89,18 +91,12 @@ func load() {
 		if norm == "" {
 			continue
 		}
-		droppable := parts[2] == "1"
+		level, _ := strconv.Atoi(parts[2])
 
 		existing, seen := byNorm[norm]
-		switch {
-		case !seen:
+		if !seen || level > levelOf[norm] || (level == levelOf[norm] && id < existing.ID) {
 			byNorm[norm] = Item{ID: id, Name: name}
-			droppableOf[norm] = droppable
-		case droppable && !droppableOf[norm]:
-			byNorm[norm] = Item{ID: id, Name: name}
-			droppableOf[norm] = true
-		case droppable == droppableOf[norm] && id < existing.ID:
-			byNorm[norm] = Item{ID: id, Name: name}
+			levelOf[norm] = level
 		}
 	}
 	if err := sc.Err(); err != nil {
