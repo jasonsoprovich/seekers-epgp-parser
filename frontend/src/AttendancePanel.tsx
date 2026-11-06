@@ -59,6 +59,13 @@ const ASSIGNMENT_LABELS: Partial<Record<Assignment, string>> = { "": "— ignore
 // LT-22 "do not allow multiple starts or mids or ends").
 const UNIQUE_ASSIGNMENTS = new Set<Assignment>(["Raid - Start", "Raid - Mid", "Raid - End"]);
 
+// Only raid events earn Event Lead EP (2026-11-05). An Event Attend, Guild
+// Meeting or New Target submit on its own raises a warning the officer has
+// to resolve (turn Event Lead off, or waive it for an Event Attend); one
+// submitted alongside a Raid - Start/Mid/End is fine — the award rides on
+// the raid capture.
+const RAID_ASSIGNMENTS: Assignment[] = ["Raid - Start", "Raid - Mid", "Raid - End"];
+
 // Mirrors seekers-tracker's ATTENDANCE_GATED_ACTIVITIES
 // (src/lib/epgp/attendance.ts) — the minimum applies only to these.
 // Server-side is authoritative; this just lets the officer catch a short
@@ -165,6 +172,9 @@ export function AttendancePanel() {
   // with a separate Manual Entry.
   const [eventLeadName, setEventLeadName] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Officer override for "no raid capture, award Event Lead anyway" — only
+  // lasts for the one confirm dialog it was ticked in.
+  const [eventLeadWaived, setEventLeadWaived] = useState(false);
   // Pre-submit "already in the ledger?" results, keyed by capture id.
   // "checking" while the probe is in flight; absent = not checked / probe
   // failed (no warning shown, submit still allowed).
@@ -348,14 +358,15 @@ export function AttendancePanel() {
   }
 
   const toSubmit = captures.filter((c) => c.assignment !== "" && !c.submitted);
-  const eventLeadCapture = awardEventLead
-    ? [...toSubmit]
-        .filter((c) => GATED.has(c.assignment))
-        .sort((a, b) => {
-          const rank = (c: Capture) => (c.assignment === "Raid - Start" ? 0 : c.assignment === "Event Attend" ? 1 : 2);
-          return rank(a) - rank(b) || a.occurredAt.localeCompare(b.occurredAt);
-        })[0]
-    : undefined;
+  const byTime = (a: Capture, b: Capture) => a.occurredAt.localeCompare(b.occurredAt);
+  const raidCapture = toSubmit
+    .filter((c) => RAID_ASSIGNMENTS.includes(c.assignment))
+    .sort((a, b) => RAID_ASSIGNMENTS.indexOf(a.assignment) - RAID_ASSIGNMENTS.indexOf(b.assignment) || byTime(a, b))[0];
+  // The site only attaches Event Lead to an attendance-gated capture, so the
+  // waiver can only ride on an Event Attend — not a Guild Meeting/New Target.
+  const waivableCapture = toSubmit.filter((c) => c.assignment === "Event Attend").sort(byTime)[0];
+  const eventLeadIneligible = awardEventLead && !raidCapture;
+  const eventLeadCapture = !awardEventLead ? undefined : (raidCapture ?? (eventLeadWaived ? waivableCapture : undefined));
   // Captures that would actually write something — not-yet-checked and
   // still-checking count as "new" so the button label isn't alarmist mid-probe.
   const dupNewCount = toSubmit.filter((c) => {
@@ -380,6 +391,7 @@ export function AttendancePanel() {
     // "already recorded — this would be a no-op" before the officer
     // commits. Best-effort: a failed probe just shows no warning.
     setDupChecks(Object.fromEntries(toSubmit.map((c) => [c.id, "checking" as const])));
+    setEventLeadWaived(false);
     setConfirmOpen(true);
     // Which awards the per-cycle EP cap will lower — previewed for all
     // captures together, in order, the way they'll actually land.
@@ -412,7 +424,7 @@ export function AttendancePanel() {
     if (toSubmit.length === 0) return;
 
     if (awardEventLead && !eventLeadCapture) {
-      setError("Event Lead requires an assigned Raid - Start, Raid - Mid, Raid - End, or Event Attend capture.");
+      setError("Event Lead is only for raid events — assign a Raid - Start, Mid or End capture, or turn Event Lead off.");
       setConfirmOpen(false);
       return;
     }
@@ -488,6 +500,7 @@ export function AttendancePanel() {
       setSubmitting(false);
       setConfirmOpen(false);
       setDupChecks({});
+      setEventLeadWaived(false);
     }
   }
 
@@ -753,9 +766,11 @@ export function AttendancePanel() {
             : `Submit ${dupNewCount || toSubmit.length} capture(s)`
         }
         busy={submitting}
+        confirmDisabled={eventLeadIneligible && !eventLeadCapture}
         onCancel={() => {
           setConfirmOpen(false);
           setDupChecks({});
+          setEventLeadWaived(false);
         }}
         onConfirm={() => void doSubmit()}
         body={
@@ -818,12 +833,32 @@ export function AttendancePanel() {
             ) : (
               <p style={{ margin: 0, color: "#9ca3af" }}>No raid name — you can name it on the site later.</p>
             )}
-            {awardEventLead && (
+            {eventLeadIneligible && (
+              <div className="warning" style={{ margin: "8px 0 0" }}>
+                <p style={{ margin: "0 0 6px" }}>
+                  ⚠ <strong>Not eligible for Event Lead EP.</strong> Only raid events (Raid - Start, Mid or End) earn
+                  Event Lead — this submit is {[...new Set(toSubmit.map(activityLabel))].join(", ")}.
+                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <button className="secondary" onClick={() => setAwardEventLead(false)}>
+                    Turn Event Lead off
+                  </button>
+                  {waivableCapture ? (
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                      <input type="checkbox" checked={eventLeadWaived} onChange={(e) => setEventLeadWaived(e.target.checked)} />
+                      Award it anyway (officer override)
+                    </label>
+                  ) : (
+                    <span style={{ fontSize: 12 }}>Event Lead can't attach to this capture type — turn it off to submit.</span>
+                  )}
+                </div>
+              </div>
+            )}
+            {awardEventLead && eventLeadCapture && (
               <div style={{ margin: "8px 0 0" }}>
-                <p style={{ margin: 0, color: eventLeadCapture ? "#fbbf24" : "#f87171" }}>
-                  {eventLeadCapture
-                    ? <>Event Lead will be awarded once with <strong>{eventLeadCapture.assignment}</strong> at {fmtTime(eventLeadCapture.occurredAt)}.</>
-                    : "Event Lead requires an assigned Raid Start/Mid/End or Event Attend capture."}
+                <p style={{ margin: 0, color: "#fbbf24" }}>
+                  Event Lead will be awarded once with <strong>{eventLeadCapture.assignment}</strong> at {fmtTime(eventLeadCapture.occurredAt)}
+                  {eventLeadWaived && !raidCapture ? " (override)" : ""}.
                 </p>
                 {eventLeadCapture && (
                   <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 13 }}>

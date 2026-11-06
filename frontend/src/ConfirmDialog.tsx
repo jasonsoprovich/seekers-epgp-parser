@@ -13,6 +13,9 @@ export type ConfirmDialogProps = {
   confirmLabel: string;
   cancelLabel?: string;
   busy?: boolean;
+  // Holds the confirm button off until the caller's body has been resolved
+  // (e.g. Attendance's "not eligible for Event Lead" choice).
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -24,6 +27,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel = "Cancel",
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -93,7 +97,7 @@ export function ConfirmDialog({
           <button className="secondary" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </button>
-          <button className="primary" ref={confirmRef} onClick={onConfirm} disabled={busy}>
+          <button className="primary" ref={confirmRef} onClick={onConfirm} disabled={busy || confirmDisabled}>
             {busy ? "Working…" : confirmLabel}
           </button>
         </div>
