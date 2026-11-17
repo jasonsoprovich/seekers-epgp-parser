@@ -426,6 +426,20 @@ export function PreviewEpCap(items: officerapi$0.EpCapPreviewRequest[] | null): 
 }
 
 /**
+ * RemoveLiveBid takes one bidder off the round while it is still LIVE
+ * (before End Round): e.g. a member sent their tell to the wrong officer
+ * for the wrong item. Their tells so far disappear from this app's table and,
+ * on the poller's next tick, from the site's /live-bids board (the snapshot
+ * is pushed whole, so a missing bidder is removed there too). A new tell
+ * from them after this brings them back. roundID guards against removing
+ * from a round that has since been switched/ended. Returns the updated round
+ * so the table refreshes without waiting for the next tick.
+ */
+export function RemoveLiveBid(roundID: string, characterName: string): $CancellablePromise<$models.BidRound> {
+    return $Call.ByID(2584735930, roundID, characterName);
+}
+
+/**
  * RemoveRollSession hides one session from the Rolls tab entirely (a test
  * /random, or a range that wasn't actually a loot roll) and, like Stop,
  * forces the next roll in the same range to start fresh rather than

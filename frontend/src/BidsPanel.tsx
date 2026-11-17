@@ -7,6 +7,7 @@ import {
   FetchKnownItems,
   GetLiveBidPushStatus,
   ItemLink,
+  RemoveLiveBid,
   ResolveItem,
   ResolveNoBidRound,
   SetBidRoundItem,
@@ -172,6 +173,9 @@ export function BidsPanel() {
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
   const [rotConfirmOpen, setRotConfirmOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  // Bidder awaiting "remove from live round" confirmation (null = closed).
+  const [liveRemoveName, setLiveRemoveName] = useState<string | null>(null);
+  const [liveRemoving, setLiveRemoving] = useState(false);
   // A "send tells" the watcher detected while a round is already under
   // way — shown as a switch/dismiss banner rather than clobbering the
   // in-progress round. Null when there's nothing pending.
@@ -593,6 +597,25 @@ export function BidsPanel() {
 
   function resolveIdentity(index: number, characterName: string) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, characterName } : r)));
+  }
+
+  // Remove a bidder while the round is still LIVE (e.g. a tell sent to the
+  // wrong officer for the wrong item). Go drops their tells from the round
+  // and the next push takes them off /live-bids too; a new tell from them
+  // brings them back. The review table's Remove (below) is unchanged.
+  async function confirmLiveRemove() {
+    if (!liveRemoveName) return;
+    setLiveRemoving(true);
+    try {
+      const round = await RemoveLiveBid(capturedRoundId, liveRemoveName);
+      if (phaseRef.current === "live" && round?.live) setRows(toReviewRows(round));
+      setLiveRemoveName(null);
+    } catch (err) {
+      setError(String(err));
+      setLiveRemoveName(null);
+    } finally {
+      setLiveRemoving(false);
+    }
   }
 
   function removeRow(index: number) {
@@ -1225,8 +1248,16 @@ export function BidsPanel() {
                         {r.winner ? "Unpick" : "Pick"}
                       </button>
                     )}
-                    {!live && (
+                    {!live ? (
                       <button className="danger" onClick={() => removeRow(i)}>
+                        Remove
+                      </button>
+                    ) : (
+                      <button
+                        className="danger"
+                        onClick={() => setLiveRemoveName(r.characterName)}
+                        title="Take this bidder off the live round and the site's live-bids board"
+                      >
                         Remove
                       </button>
                     )}
@@ -1278,6 +1309,26 @@ export function BidsPanel() {
         body="No bids or GP charges will be recorded. If someone loots the item, add their Rot (No-Drop) GP entry on the site and link it to this event."
       />
 
+      <ConfirmDialog
+        open={liveRemoveName !== null}
+        title={`Remove ${liveRemoveName ?? ""}'s bid?`}
+        confirmLabel="Remove bid"
+        busy={liveRemoving}
+        onCancel={() => setLiveRemoveName(null)}
+        onConfirm={() => void confirmLiveRemove()}
+        body={
+          <>
+            <p style={{ margin: "0 0 8px" }}>
+              This takes <strong>{liveRemoveName}</strong> off the live <strong>{capturedItem}</strong> round: every bid they&apos;ve sent so
+              far is dropped here and from the site&apos;s live-bids board within a few seconds.
+            </p>
+            <p style={{ margin: 0, color: "#9ca3af" }}>
+              If they send a new tell for this item afterwards, they&apos;ll show up again. Use this for a tell meant for a different item or
+              officer.
+            </p>
+          </>
+        }
+      />
       <ConfirmDialog
         open={clearConfirmOpen}
         title="Discard this round?"

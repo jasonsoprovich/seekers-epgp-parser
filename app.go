@@ -100,6 +100,12 @@ type App struct {
 	// re-running cmd/simlog against the same log, and it would also happen
 	// on a genuine same-item re-drop from the next boss).
 	roundFloor time.Time
+	// Bidders the officer removed from the LIVE round (RemoveLiveBid),
+	// lower-cased name -> cutoff. Every tell from them at or before the
+	// cutoff is dropped from the officer's table AND the site snapshot; a
+	// fresh tell after it brings them back (same as a re-bid after "cancel
+	// my bid"). Reset whenever a new round opens.
+	roundRemoved map[string]time.Time
 
 	// The active-character log watcher: when GameDir is set (not a
 	// hand-picked file), polls for which eqlog_<char>_<server>.txt is being
@@ -2080,13 +2086,99 @@ func cancelledBidders(bids []parse.BidCandidate, latestCancel map[string]time.Ti
 	return out
 }
 
+// dropRemovedBidders filters out every tell (bids and cancels alike) from a
+// bidder the officer removed mid-round, up to that bidder's cutoff.
+func dropRemovedBidders(candidates []parse.BidCandidate, removed map[string]time.Time) []parse.BidCandidate {
+	if len(removed) == 0 {
+		return candidates
+	}
+	out := make([]parse.BidCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if cut, ok := removed[strings.ToLower(c.CharacterName)]; ok && !c.OccurredAt.After(cut) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// removedSnapshotLocked copies the live round's removal set. Caller holds
+// liveBidsMu.
+func (a *App) removedSnapshotLocked() map[string]time.Time {
+	out := make(map[string]time.Time, len(a.roundRemoved))
+	for k, v := range a.roundRemoved {
+		out[k] = v
+	}
+	return out
+}
+
+// RemoveLiveBid takes one bidder off the round while it is still LIVE
+// (before End Round): e.g. a member sent their tell to the wrong officer
+// for the wrong item. Their tells so far disappear from this app's table and,
+// on the poller's next tick, from the site's /live-bids board (the snapshot
+// is pushed whole, so a missing bidder is removed there too). A new tell
+// from them after this brings them back. roundID guards against removing
+// from a round that has since been switched/ended. Returns the updated round
+// so the table refreshes without waiting for the next tick.
+func (a *App) RemoveLiveBid(roundID string, characterName string) (BidRound, error) {
+	name := strings.TrimSpace(characterName)
+	if name == "" {
+		return BidRound{}, errors.New("no bidder named")
+	}
+	a.liveBidsMu.Lock()
+	item, curID, start, choice := a.roundItem, a.roundID, a.roundStart, a.roundItemChoice
+	live := a.liveBidsCancel != nil
+	a.liveBidsMu.Unlock()
+	if item == "" || curID != roundID || !live {
+		return BidRound{}, errors.New("that round isn't live anymore — remove the bid from the review table instead")
+	}
+	raw, err := a.readLog()
+	if err != nil {
+		return BidRound{}, err
+	}
+	now := time.Now()
+	// Cut at the bidder's newest tell in the window (exact, independent of
+	// clock drift between the log and this process), or now if none found.
+	cut := time.Time{}
+	key := strings.ToLower(name)
+	for _, c := range parse.CaptureBids(raw, start, now) {
+		if strings.ToLower(c.CharacterName) == key && c.OccurredAt.After(cut) {
+			cut = c.OccurredAt
+		}
+	}
+	if cut.IsZero() {
+		cut = now
+	}
+
+	a.liveBidsMu.Lock()
+	if a.roundID != roundID {
+		a.liveBidsMu.Unlock()
+		return BidRound{}, errors.New("the round changed while removing — try again")
+	}
+	if a.roundRemoved == nil {
+		a.roundRemoved = map[string]time.Time{}
+	}
+	a.roundRemoved[key] = cut
+	removed := a.removedSnapshotLocked()
+	a.liveBidsMu.Unlock()
+
+	return BidRound{
+		ItemName:  item,
+		RoundID:   roundID,
+		StartedAt: start.Format(time.RFC3339),
+		Rows:      buildRows(raw, start, now, removed),
+		Live:      true,
+		Item:      choice,
+	}, nil
+}
+
 // buildRows turns a parse window into the review-table rows the frontend
 // wants: every candidate tell in log order, later-from-the-same-character
 // rows flagged Superseded (kept visible, not dropped, so the officer can
 // override which one wins). Shared by CaptureBids, the live poller, and
 // EndBidRound so all three produce byte-identical rows for the same log.
-func buildRows(raw string, startAt, stopAt time.Time) []BidRow {
-	candidates := parse.CaptureBids(raw, startAt, stopAt)
+func buildRows(raw string, startAt, stopAt time.Time, removed map[string]time.Time) []BidRow {
+	candidates := dropRemovedBidders(parse.CaptureBids(raw, startAt, stopAt), removed)
 
 	// "cancel my bid" tells don't get their own row — pull them out and use
 	// them to flag the bidder's most recent bid instead.
@@ -2177,6 +2269,7 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 	a.roundStart = startAt
 	a.roundItemChoice = choice
 	a.roundResolved = false
+	a.roundRemoved = nil
 	a.liveBidsMu.Unlock()
 	if prevItem != "" && prevItem != itemName && !prevResolved {
 		a.clearLiveBids(prevItem)
@@ -2191,7 +2284,7 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 		ItemName:  itemName,
 		RoundID:   roundID,
 		StartedAt: startAt.Format(time.RFC3339),
-		Rows:      buildRows(raw, startAt, now),
+		Rows:      buildRows(raw, startAt, now, nil),
 		Live:      true,
 		Item:      choice,
 	}, nil
@@ -2207,6 +2300,7 @@ func (a *App) CaptureBids(itemName string, announcedAt string) (BidRound, error)
 func (a *App) EndBidRound() (BidRound, error) {
 	a.liveBidsMu.Lock()
 	item, roundID, start, choice := a.roundItem, a.roundID, a.roundStart, a.roundItemChoice
+	removed := a.removedSnapshotLocked()
 	a.roundFloor = time.Now() // this round is done collecting — a later re-announce is a new round
 	a.liveBidsMu.Unlock()
 
@@ -2223,7 +2317,7 @@ func (a *App) EndBidRound() (BidRound, error) {
 		ItemName:  item,
 		RoundID:   roundID,
 		StartedAt: start.Format(time.RFC3339),
-		Rows:      buildRows(raw, start, time.Now()),
+		Rows:      buildRows(raw, start, time.Now(), removed),
 		Live:      false,
 		Item:      choice,
 	}, nil
@@ -3012,7 +3106,15 @@ func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Tim
 				continue
 			}
 			now := time.Now()
-			candidates := parse.CaptureBids(raw, startAt, now)
+			a.liveBidsMu.Lock()
+			var removed map[string]time.Time
+			if a.roundID == roundID {
+				removed = a.removedSnapshotLocked()
+			}
+			a.liveBidsMu.Unlock()
+			// Bidders the officer removed mid-round are gone from both the
+			// local table and the site snapshot below.
+			candidates := dropRemovedBidders(parse.CaptureBids(raw, startAt, now), removed)
 
 			// Re-emit the round to THIS app every tick (bids or not) so the
 			// Bids tab's live table and bid count track reality without its
@@ -3033,7 +3135,7 @@ func (a *App) startLiveBidPush(itemName string, roundID string, startAt time.Tim
 				ItemName:  itemName,
 				RoundID:   roundID,
 				StartedAt: startAt.Format(time.RFC3339),
-				Rows:      buildRows(raw, startAt, now),
+				Rows:      buildRows(raw, startAt, now, removed),
 				Live:      true,
 				Item:      choice,
 			})
@@ -3114,6 +3216,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 
 	a.liveBidsMu.Lock()
 	item, roundID, start, prevChoice := a.roundItem, a.roundID, a.roundStart, a.roundItemChoice
+	prevRemoved := a.removedSnapshotLocked()
 	a.liveBidsMu.Unlock()
 	a.stopLiveBidPush()
 
@@ -3129,7 +3232,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 		if at.Before(start) {
 			at = start
 		}
-		parked.Rows = buildRows(raw, start, at)
+		parked.Rows = buildRows(raw, start, at, prevRemoved)
 	}
 
 	// A genuinely new round gets its own id — the parked round keeps the
@@ -3150,6 +3253,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 	a.roundStart = at
 	a.roundItemChoice = nextChoice
 	a.roundResolved = false
+	a.roundRemoved = nil
 	a.liveBidsMu.Unlock()
 
 	a.startLiveBidPush(nextItem, nextRoundID, at)
@@ -3159,7 +3263,7 @@ func (a *App) SwitchBidRound(nextItem string, announcedAt string) (BidSwitchResu
 			ItemName:  nextItem,
 			RoundID:   nextRoundID,
 			StartedAt: at.Format(time.RFC3339),
-			Rows:      buildRows(raw, at, time.Now()),
+			Rows:      buildRows(raw, at, time.Now(), nil),
 			Live:      true,
 			Item:      nextChoice,
 		},
