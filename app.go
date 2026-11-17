@@ -2407,6 +2407,27 @@ func (a *App) SubmitBids(itemName string, roundID string, itemID int, entries []
 	return resp, err
 }
 
+// SyncReviewLiveBids pushes the review table's remaining bids to the site's
+// /live-bids card after the officer removes a row post-End Round. Without it
+// the card kept showing a removed bid until Submit (and forever on a rot
+// resolve). Best-effort: the live board is a convenience, the ledger write
+// on Submit is the record.
+func (a *App) SyncReviewLiveBids(itemName string, itemID int, entries []officerapi.LiveBidSnapshotEntry) error {
+	if strings.TrimSpace(itemName) == "" {
+		return nil
+	}
+	client, err := a.officerClient()
+	if err != nil {
+		return err
+	}
+	if entries == nil {
+		entries = []officerapi.LiveBidSnapshotEntry{}
+	}
+	bg, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	return client.PushLiveBidSnapshot(bg, itemName, itemID, eqlogs.CharacterFromPath(a.currentLogPath()), entries)
+}
+
 // ResolveNoBidRound closes a reviewed round with no bids as rot loot. It does
 // not create a ledger row or winner: officers record any rot-loot GP charge
 // separately as a linked manual entry on the site.
@@ -2419,7 +2440,13 @@ func (a *App) ResolveNoBidRound(itemName string, roundID string) error {
 		return err
 	}
 	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err = client.ResolveLiveBids(bg, itemName, 0, eqlogs.CharacterFromPath(a.currentLogPath()), []officerapi.ResolveLiveBidEntry{})
+	capturedBy := eqlogs.CharacterFromPath(a.currentLogPath())
+	// The site's /resolve only replaces the card's bids when the list is
+	// non-empty, so a rot resolve after the officer removed every bid in
+	// review would leave the removed bids on /live-bids. Push an empty
+	// snapshot first (a snapshot always replaces wholesale), then resolve.
+	_ = client.PushLiveBidSnapshot(bg, itemName, 0, capturedBy, []officerapi.LiveBidSnapshotEntry{})
+	err = client.ResolveLiveBids(bg, itemName, 0, capturedBy, []officerapi.ResolveLiveBidEntry{})
 	cancel()
 	if err != nil {
 		return err

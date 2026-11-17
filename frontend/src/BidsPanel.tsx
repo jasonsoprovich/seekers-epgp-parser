@@ -14,6 +14,7 @@ import {
   SetBidsUnsaved,
   SubmitBids,
   SwitchBidRound,
+  SyncReviewLiveBids,
 } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/app";
 import type { BidRound, BidRow as CapturedBidRow, ItemChoice, LiveBidPushStatus } from "../bindings/github.com/jasonsoprovich/seekers-epgp-parser/models";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -619,7 +620,17 @@ export function BidsPanel() {
   }
 
   function removeRow(index: number) {
-    setRows((prev) => prev.filter((_, i) => i !== index));
+    const next = rows.filter((_, i) => i !== index);
+    setRows(next);
+    // Keep the site's /live-bids card in step with the review table — before
+    // this, a bid removed here stayed on the board (for good, if the round
+    // was then resolved as rot). A manual round was never on the board.
+    if (phase === "review" && !manualRound && capturedItem.trim()) {
+      const entries = next
+        .filter((r) => r.characterName.trim() && TIERS.includes(r.tier))
+        .map((r) => ({ characterName: r.characterName, tier: r.tier, occurredAt: r.occurredAt }));
+      void SyncReviewLiveBids(capturedItem, itemChoice?.itemId ?? 0, entries).catch(() => {});
+    }
   }
 
   // Add a blank row for a bid the capture missed. Stamped with the current

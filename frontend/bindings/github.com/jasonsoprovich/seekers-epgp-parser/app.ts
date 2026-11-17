@@ -699,6 +699,17 @@ export function SwitchBidRound(nextItem: string, announcedAt: string): $Cancella
 }
 
 /**
+ * SyncReviewLiveBids pushes the review table's remaining bids to the site's
+ * /live-bids card after the officer removes a row post-End Round. Without it
+ * the card kept showing a removed bid until Submit (and forever on a rot
+ * resolve). Best-effort: the live board is a convenience, the ledger write
+ * on Submit is the record.
+ */
+export function SyncReviewLiveBids(itemName: string, itemID: number, entries: officerapi$0.LiveBidSnapshotEntry[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3442968888, itemName, itemID, entries);
+}
+
+/**
  * TestConnection confirms the saved API key actually works by pulling the
  * roster (the same call the Attendance/Bids submit buttons eventually
  * validate names against) — the Settings screen's "did I set this up

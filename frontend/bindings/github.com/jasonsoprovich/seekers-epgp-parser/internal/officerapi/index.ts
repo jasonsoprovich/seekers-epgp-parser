@@ -17,6 +17,7 @@ export type {
     EpCapPreviewRequest,
     EventLeadInfo,
     LedgerRow,
+    LiveBidSnapshotEntry,
     ManualEntryRequest,
     ManualEntryResponse,
     PointValue,

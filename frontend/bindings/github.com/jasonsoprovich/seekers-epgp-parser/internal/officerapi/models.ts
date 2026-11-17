@@ -206,6 +206,16 @@ export interface LedgerRow {
 }
 
 /**
+ * LiveBidSnapshotEntry is one tell in a snapshot push — see
+ * PushLiveBidSnapshot.
+ */
+export interface LiveBidSnapshotEntry {
+    "characterName": string;
+    "tier": string;
+    "occurredAt": string;
+}
+
+/**
  * ManualEntryRequest mirrors seekers-tracker's InsertLedgerEntryInput
  * exactly (src/lib/epgp/ledger-entry.ts) — ItemName is only meaningful
  * (and only sent) for Kind "gp"; Zone only for Kind "ep" (e.g. a raid-lead
